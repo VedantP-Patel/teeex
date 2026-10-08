@@ -13,7 +13,7 @@ import {
   Share2,
   Sparkles,
   Image as ImageIcon,
-  Database,
+  Shield,
   Cloud
 } from 'lucide-react';
 import type { CompileState, Collaborator } from '../types/latex';
@@ -146,15 +146,15 @@ export const Navbar: React.FC<Props> = ({
           <span>AI Copilot</span>
         </button>
 
-        {/* Supabase Cloud Connection Button */}
+        {/* Admin Security & Cloud Vault Button */}
         <button
           onClick={onOpenSupabase}
           className="btn-ghost"
           style={{ ...toolBtnStyle, color: isCloudConnected ? '#10b981' : 'var(--text-secondary)' }}
-          title={isCloudConnected ? "Supabase Cloud Connected" : "Connect Supabase Cloud"}
+          title={isCloudConnected ? "Admin Vault (Cloud Connected)" : "Admin Security & Cloud Vault"}
         >
-          {isCloudConnected ? <Cloud size={13} /> : <Database size={13} />}
-          <span>{isCloudConnected ? 'Cloud' : 'Supabase'}</span>
+          {isCloudConnected ? <Cloud size={13} /> : <Shield size={13} color="#f59e0b" />}
+          <span>{isCloudConnected ? 'Cloud Active' : 'Admin'}</span>
         </button>
 
         <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
