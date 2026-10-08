@@ -6,6 +6,7 @@ export interface ProjectFile {
   content: string;
   type: FileType;
   isEntry?: boolean;
+  dataUrl?: string; // For uploaded figure assets (PNG, JPG, SVG)
 }
 
 export type DiagnosticSeverity = 'error' | 'warning' | 'info';
@@ -39,6 +40,18 @@ export interface Collaborator {
   activeFile: string;
   status: 'active' | 'idle' | 'typing';
   isSelf?: boolean;
+}
+
+export interface ReviewComment {
+  id: string;
+  fileId: string;
+  line: number;
+  authorName: string;
+  authorAvatar: string;
+  authorColor: string;
+  text: string;
+  createdAt: string;
+  resolved: boolean;
 }
 
 export interface CompileState {

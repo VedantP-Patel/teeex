@@ -8,13 +8,17 @@ import { SymbolPaletteModal } from './components/modals/SymbolPaletteModal';
 import { TableBuilderModal } from './components/modals/TableBuilderModal';
 import { ShareModal } from './components/modals/ShareModal';
 import { TemplateModal } from './components/modals/TemplateModal';
+import { AICopilotModal } from './components/modals/AICopilotModal';
+import { ImageUploadModal } from './components/modals/ImageUploadModal';
+import { SupabaseModal } from './components/modals/SupabaseModal';
 
 import type {
   ProjectFile,
   CompileState,
   Collaborator,
   SuggestedFix,
-  Template
+  Template,
+  ReviewComment
 } from './types/latex';
 import { STARTER_TEMPLATES } from './services/templates';
 import {
@@ -26,6 +30,7 @@ import {
   CollaborationHub,
   DEFAULT_PEERS
 } from './services/collaboration';
+import { isSupabaseConnected } from './services/supabaseClient';
 
 export function App() {
   // Theme State
@@ -48,6 +53,24 @@ export function App() {
   });
   const [activeFileId, setActiveFileId] = useState<string>('main.tex');
   const [projectTitle, setProjectTitle] = useState('Neural Quantum State Tomography');
+
+  // Review Comments State (Google Docs style)
+  const [comments, setComments] = useState<ReviewComment[]>([
+    {
+      id: 'comment-1',
+      fileId: 'main.tex',
+      line: 14,
+      authorName: 'Dr. Elena Rostova',
+      authorAvatar: 'ER',
+      authorColor: '#10b981',
+      text: 'Should we cite the 2026 PhysRev quantum benchmark paper here?',
+      createdAt: '10 mins ago',
+      resolved: false,
+    }
+  ]);
+
+  // Cloud & Supabase State
+  const [isCloudConnected, setIsCloudConnected] = useState(() => isSupabaseConnected());
 
   // Room & Collaboration State
   const [roomId] = useState<string>(() => {
@@ -82,12 +105,15 @@ export function App() {
   const [isTableBuilderOpen, setIsTableBuilderOpen] = useState(false);
   const [isSymbolsOpen, setIsSymbolsOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const [isCopilotOpen, setIsCopilotOpen] = useState(false);
+  const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
+  const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
 
   // Split Pane Resizing
   const [splitPercent, setSplitPercent] = useState<number>(50);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
 
-  // Diagnostics & Parsed Document computation (memoized for maximum performance)
+  // Diagnostics & Parsed Document computation
   const diagnostics = useMemo(() => {
     if (!activeFile.name.endsWith('.tex')) return [];
     return diagnoseLatex(activeFile.content);
@@ -97,9 +123,10 @@ export function App() {
     return parseLatexDocument(activeFile.content);
   }, [activeFile.content]);
 
+  // Live Rendered HTML with Figure resolution
   const renderedHtml = useMemo(() => {
-    return renderLatexToHtml(activeFile.content);
-  }, [activeFile.content]);
+    return renderLatexToHtml(activeFile.content, files);
+  }, [activeFile.content, files]);
 
   // Document Stats
   const wordCount = useMemo(() => {
@@ -180,6 +207,18 @@ export function App() {
     return () => unsubscribe();
   }, [hub]);
 
+  // Keyboard shortcut Ctrl+K / Cmd+K for AI Copilot
+  useEffect(() => {
+    const handleGlobalKeys = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsCopilotOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeys);
+    return () => window.removeEventListener('keydown', handleGlobalKeys);
+  }, []);
+
   // Update file content & broadcast
   const handleCodeChange = (newCode: string) => {
     setFiles(prev => prev.map(f => f.id === activeFileId ? { ...f, content: newCode } : f));
@@ -208,6 +247,26 @@ export function App() {
     triggerCompile();
   };
 
+  // Comments Management
+  const handleAddComment = (line: number, text: string) => {
+    const newComment: ReviewComment = {
+      id: 'comment-' + Math.random().toString(36).substring(2, 8),
+      fileId: activeFileId,
+      line,
+      authorName: selfUser.name,
+      authorAvatar: selfUser.avatar,
+      authorColor: selfUser.color,
+      text,
+      createdAt: 'Just now',
+      resolved: false,
+    };
+    setComments(prev => [...prev, newComment]);
+  };
+
+  const handleResolveComment = (commentId: string) => {
+    setComments(prev => prev.map(c => c.id === commentId ? { ...c, resolved: true } : c));
+  };
+
   // File management
   const handleCreateFile = (name: string, type: 'tex' | 'bib') => {
     const newFile: ProjectFile = {
@@ -218,6 +277,10 @@ export function App() {
     };
     setFiles(prev => [...prev, newFile]);
     setActiveFileId(name);
+  };
+
+  const handleAddImageFile = (imageFile: ProjectFile) => {
+    setFiles(prev => [...prev, imageFile]);
   };
 
   const handleDeleteFile = (fileId: string) => {
@@ -244,7 +307,6 @@ export function App() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDraggingSplit) return;
-      // Calculate split percent relative to workspace center
       const sidebarWidth = 220;
       const availableWidth = window.innerWidth - sidebarWidth;
       const mouseRelativeX = e.clientX - sidebarWidth;
@@ -283,6 +345,10 @@ export function App() {
         onOpenTableBuilder={() => setIsTableBuilderOpen(true)}
         onOpenSymbols={() => setIsSymbolsOpen(true)}
         onOpenTemplates={() => setIsTemplatesOpen(true)}
+        onOpenCopilot={() => setIsCopilotOpen(true)}
+        onOpenImageUpload={() => setIsImageUploadOpen(true)}
+        onOpenSupabase={() => setIsSupabaseOpen(true)}
+        isCloudConnected={isCloudConnected}
         onExportPdf={() => window.print()}
       />
 
@@ -315,6 +381,9 @@ export function App() {
               onCompileShortcut={triggerCompile}
               targetLine={targetLine}
               onClearTargetLine={() => setTargetLine(null)}
+              comments={comments}
+              onAddComment={handleAddComment}
+              onResolveComment={handleResolveComment}
             />
           </div>
 
@@ -332,11 +401,12 @@ export function App() {
             title="Drag to resize Editor and Preview panels"
           />
 
-          {/* Right Split: Publication Preview Pane */}
+          {/* Right Split: Publication Preview Pane with SyncTeX */}
           <div style={{ width: `${100 - splitPercent}%`, height: '100%', display: 'flex', flexDirection: 'column' }}>
             <PreviewPane
               renderedHtml={renderedHtml}
               parsedDoc={parsedDoc}
+              onJumpToLine={setTargetLine}
             />
           </div>
         </div>
@@ -351,6 +421,29 @@ export function App() {
       />
 
       {/* Modals */}
+      <AICopilotModal
+        isOpen={isCopilotOpen}
+        onClose={() => setIsCopilotOpen(false)}
+        onInsertCode={handleInsertCode}
+        diagnostics={diagnostics}
+      />
+
+      <ImageUploadModal
+        isOpen={isImageUploadOpen}
+        onClose={() => setIsImageUploadOpen(false)}
+        onAddImageFile={handleAddImageFile}
+        onInsertLatex={handleInsertCode}
+      />
+
+      <SupabaseModal
+        isOpen={isSupabaseOpen}
+        onClose={() => {
+          setIsSupabaseOpen(false);
+          setIsCloudConnected(isSupabaseConnected());
+        }}
+        onSyncWithCloud={() => setIsCloudConnected(true)}
+      />
+
       <SymbolPaletteModal
         isOpen={isSymbolsOpen}
         onClose={() => setIsSymbolsOpen(false)}

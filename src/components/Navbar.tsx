@@ -10,7 +10,11 @@ import {
   AlertTriangle,
   XCircle,
   Loader2,
-  Share2
+  Share2,
+  Sparkles,
+  Image as ImageIcon,
+  Database,
+  Cloud
 } from 'lucide-react';
 import type { CompileState, Collaborator } from '../types/latex';
 
@@ -27,6 +31,10 @@ interface Props {
   onOpenTableBuilder: () => void;
   onOpenSymbols: () => void;
   onOpenTemplates: () => void;
+  onOpenCopilot: () => void;
+  onOpenImageUpload: () => void;
+  onOpenSupabase: () => void;
+  isCloudConnected: boolean;
   onExportPdf: () => void;
 }
 
@@ -43,6 +51,10 @@ export const Navbar: React.FC<Props> = ({
   onOpenTableBuilder,
   onOpenSymbols,
   onOpenTemplates,
+  onOpenCopilot,
+  onOpenImageUpload,
+  onOpenSupabase,
+  isCloudConnected,
   onExportPdf,
 }) => {
   return (
@@ -122,7 +134,55 @@ export const Navbar: React.FC<Props> = ({
       </div>
 
       {/* Right Side: Tools, Collaboration, Theme */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {/* AI Copilot Button */}
+        <button
+          onClick={onOpenCopilot}
+          className="btn-ghost"
+          style={{ ...toolBtnStyle, color: '#c084fc', backgroundColor: 'rgba(192, 132, 252, 0.1)' }}
+          title="AI LaTeX Copilot (Math, TikZ & Doctor)"
+        >
+          <Sparkles size={13} />
+          <span>AI Copilot</span>
+        </button>
+
+        {/* Supabase Cloud Connection Button */}
+        <button
+          onClick={onOpenSupabase}
+          className="btn-ghost"
+          style={{ ...toolBtnStyle, color: isCloudConnected ? '#10b981' : 'var(--text-secondary)' }}
+          title={isCloudConnected ? "Supabase Cloud Connected" : "Connect Supabase Cloud"}
+        >
+          {isCloudConnected ? <Cloud size={13} /> : <Database size={13} />}
+          <span>{isCloudConnected ? 'Cloud' : 'Supabase'}</span>
+        </button>
+
+        <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+
+        {/* Upload Figure Button */}
+        <button onClick={onOpenImageUpload} className="btn-ghost" title="Upload Figure & Insert \includegraphics" style={toolBtnStyle}>
+          <ImageIcon size={13} />
+          <span>Figure</span>
+        </button>
+
+        {/* Table Builder */}
+        <button onClick={onOpenTableBuilder} className="btn-ghost" title="Visual Table Builder" style={toolBtnStyle}>
+          <Table size={13} />
+          <span>Table</span>
+        </button>
+
+        {/* Math Symbols */}
+        <button onClick={onOpenSymbols} className="btn-ghost" title="LaTeX Symbol Palette" style={toolBtnStyle}>
+          <Hash size={13} />
+          <span>Symbols</span>
+        </button>
+
+        {/* Starter Templates */}
+        <button onClick={onOpenTemplates} className="btn-ghost" title="Starter Templates" style={toolBtnStyle}>
+          <BookOpen size={13} />
+          <span>Templates</span>
+        </button>
+
         {/* Collaborative Presence Pill */}
         <button
           onClick={onOpenShare}
@@ -130,12 +190,10 @@ export const Navbar: React.FC<Props> = ({
           title="Manage real-time collaboration room"
         >
           <div style={{ display: 'flex', alignItems: 'center', marginLeft: -4 }}>
-            {/* Self Avatar */}
             <div style={{ ...avatarMiniStyle, backgroundColor: selfUser.color, zIndex: 10 }}>
               {selfUser.avatar}
             </div>
-            {/* Peer Avatars */}
-            {peers.slice(0, 3).map((p, idx) => (
+            {peers.slice(0, 2).map((p, idx) => (
               <div
                 key={p.id}
                 style={{
@@ -150,31 +208,14 @@ export const Navbar: React.FC<Props> = ({
             ))}
           </div>
           <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
-            {peers.length + 1} Live
+            {peers.length + 1}
           </span>
           <Share2 size={12} color="var(--text-secondary)" />
         </button>
 
-        <div style={{ width: 1, height: 18, backgroundColor: 'var(--border-subtle)', margin: '0 4px' }} />
-
-        {/* Quick Tools */}
-        <button onClick={onOpenTableBuilder} className="btn-ghost" title="Visual Table Builder" style={{ fontSize: 12 }}>
-          <Table size={14} />
-          <span>Table</span>
-        </button>
-
-        <button onClick={onOpenSymbols} className="btn-ghost" title="LaTeX Symbol Palette" style={{ fontSize: 12 }}>
-          <Hash size={14} />
-          <span>Symbols</span>
-        </button>
-
-        <button onClick={onOpenTemplates} className="btn-ghost" title="Starter Templates" style={{ fontSize: 12 }}>
-          <BookOpen size={14} />
-          <span>Templates</span>
-        </button>
-
-        <button onClick={onExportPdf} className="btn-secondary" title="Export Ready PDF Document" style={{ fontSize: 12 }}>
-          <Download size={13} />
+        {/* Export PDF */}
+        <button onClick={onExportPdf} className="btn-secondary" title="Export Ready PDF Document" style={{ padding: '4px 10px', fontSize: 11.5 }}>
+          <Download size={12} />
           <span>Export</span>
         </button>
 
@@ -182,10 +223,10 @@ export const Navbar: React.FC<Props> = ({
         <button
           onClick={onToggleTheme}
           className="btn-ghost"
-          style={{ padding: 6, borderRadius: 'var(--radius-sm)' }}
+          style={{ padding: 5, borderRadius: 'var(--radius-sm)' }}
           title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
         >
-          {theme === 'dark' ? <Sun size={15} color="#f59e0b" /> : <Moon size={15} color="#38bdf8" />}
+          {theme === 'dark' ? <Sun size={14} color="#f59e0b" /> : <Moon size={14} color="#38bdf8" />}
         </button>
       </div>
     </header>
@@ -199,7 +240,7 @@ const navStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  padding: '0 16px',
+  padding: '0 14px',
   zIndex: 40,
   userSelect: 'none',
   flexShrink: 0,
@@ -224,7 +265,7 @@ const titleInputStyle: React.CSSProperties = {
   fontWeight: 600,
   padding: '3px 8px',
   borderRadius: 'var(--radius-xs)',
-  width: 280,
+  width: 240,
   textOverflow: 'ellipsis',
 };
 
@@ -260,8 +301,8 @@ const liveRadarDotStyle: React.CSSProperties = {
 const presenceButtonStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
-  padding: '3px 10px',
+  gap: 6,
+  padding: '3px 8px',
   backgroundColor: 'var(--bg-surface-1)',
   border: '1px solid var(--border-subtle)',
   borderRadius: 9999,
@@ -269,14 +310,22 @@ const presenceButtonStyle: React.CSSProperties = {
 };
 
 const avatarMiniStyle: React.CSSProperties = {
-  width: 20,
-  height: 20,
+  width: 18,
+  height: 18,
   borderRadius: '50%',
   color: '#ffffff',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   fontWeight: 700,
-  fontSize: 9,
+  fontSize: 8.5,
   border: '1.5px solid var(--bg-surface-0)',
+};
+
+const toolBtnStyle: React.CSSProperties = {
+  padding: '4px 8px',
+  fontSize: 11.5,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
 };

@@ -1,12 +1,16 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
   Bold,
   Italic,
   Sigma,
   Quote,
-  List
+  List,
+  MessageSquarePlus,
+  Check,
+  X,
+  MessageSquare
 } from 'lucide-react';
-import type { Collaborator, Diagnostic } from '../types/latex';
+import type { Collaborator, Diagnostic, ReviewComment } from '../types/latex';
 
 interface Props {
   code: string;
@@ -18,6 +22,9 @@ interface Props {
   onCompileShortcut: () => void;
   targetLine: number | null;
   onClearTargetLine: () => void;
+  comments: ReviewComment[];
+  onAddComment: (line: number, text: string) => void;
+  onResolveComment: (commentId: string) => void;
 }
 
 export const Editor: React.FC<Props> = ({
@@ -30,8 +37,15 @@ export const Editor: React.FC<Props> = ({
   onCompileShortcut,
   targetLine,
   onClearTargetLine,
+  comments,
+  onAddComment,
+  onResolveComment,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [activeCommentLine, setActiveCommentLine] = useState<number | null>(null);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [currentCursorLine, setCurrentCursorLine] = useState(1);
+
   const lines = code.split('\n');
 
   // Gutter diagnostics map: line -> Diagnostic
@@ -40,7 +54,15 @@ export const Editor: React.FC<Props> = ({
     if (!diagMap.has(d.line)) diagMap.set(d.line, d);
   });
 
-  // Scroll to target line if triggered externally
+  // Comments map: line -> ReviewComment[]
+  const commentMap = new Map<number, ReviewComment[]>();
+  comments.filter(c => !c.resolved).forEach(c => {
+    const arr = commentMap.get(c.line) || [];
+    arr.push(c);
+    commentMap.set(c.line, arr);
+  });
+
+  // Scroll to target line if triggered externally (SyncTeX)
   useEffect(() => {
     if (targetLine && textareaRef.current) {
       const textarea = textareaRef.current;
@@ -85,6 +107,7 @@ export const Editor: React.FC<Props> = ({
     const textBefore = code.substring(0, pos);
     const line = textBefore.split('\n').length;
     const col = pos - textBefore.lastIndexOf('\n');
+    setCurrentCursorLine(line);
     onCursorChange(line, col);
   };
 
@@ -107,6 +130,13 @@ export const Editor: React.FC<Props> = ({
     }, 0);
   };
 
+  const submitComment = () => {
+    if (!commentDraft.trim() || activeCommentLine === null) return;
+    onAddComment(activeCommentLine, commentDraft.trim());
+    setCommentDraft('');
+    setActiveCommentLine(null);
+  };
+
   return (
     <div style={editorContainerStyle}>
       {/* Editor Sub-Header Toolbar */}
@@ -118,7 +148,7 @@ export const Editor: React.FC<Props> = ({
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>&bull; {lines.length} lines</span>
         </div>
 
-        {/* Quick Formatting Snippets */}
+        {/* Quick Formatting Snippets & Comment action */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <button
             onClick={() => insertSnippet('\\textbf{', '}')}
@@ -173,6 +203,18 @@ export const Editor: React.FC<Props> = ({
           >
             <List size={13} />
           </button>
+
+          <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+
+          <button
+            onClick={() => setActiveCommentLine(currentCursorLine)}
+            className="btn-ghost"
+            style={{ ...toolBtnStyle, color: '#f59e0b' }}
+            title="Add inline review comment at cursor"
+          >
+            <MessageSquarePlus size={13} />
+            <span style={{ fontSize: 10 }}>Comment</span>
+          </button>
         </div>
       </div>
 
@@ -183,13 +225,14 @@ export const Editor: React.FC<Props> = ({
           {lines.map((_, idx) => {
             const lineNum = idx + 1;
             const diag = diagMap.get(lineNum);
+            const lineComments = commentMap.get(lineNum);
             const peerHere = peers.find(p => p.activeFile === fileName && p.cursorLine === lineNum);
 
             return (
               <div key={lineNum} style={gutterRowStyle}>
-                {/* Diagnostic Marker */}
+                {/* Diagnostic Marker or Comment Icon */}
                 <div style={markerAreaStyle}>
-                  {diag && (
+                  {diag ? (
                     <span
                       style={{
                         width: 7,
@@ -200,7 +243,15 @@ export const Editor: React.FC<Props> = ({
                       }}
                       title={`Line ${lineNum}: ${diag.message}`}
                     />
-                  )}
+                  ) : lineComments && lineComments.length > 0 ? (
+                    <span
+                      onClick={() => setActiveCommentLine(lineNum)}
+                      style={{ cursor: 'pointer', display: 'flex' }}
+                      title={`${lineComments.length} comment(s) on line ${lineNum}`}
+                    >
+                      <MessageSquare size={10} color="#f59e0b" />
+                    </span>
+                  ) : null}
                 </div>
 
                 {/* Line Number */}
@@ -250,7 +301,6 @@ export const Editor: React.FC<Props> = ({
                     gap: 3,
                   }}
                 >
-                  {/* Animated Caret */}
                   <div
                     style={{
                       width: 2,
@@ -259,7 +309,6 @@ export const Editor: React.FC<Props> = ({
                       boxShadow: `0 0 8px ${p.color}`,
                     }}
                   />
-                  {/* Name Tag */}
                   <div
                     style={{
                       backgroundColor: p.color,
@@ -277,6 +326,72 @@ export const Editor: React.FC<Props> = ({
                 </div>
               );
             })}
+
+          {/* Active Comment Bubble Overlay */}
+          {activeCommentLine !== null && (
+            <div style={{
+              position: 'absolute',
+              top: Math.max(10, (activeCommentLine - 1) * 21 - 10),
+              right: 20,
+              zIndex: 30,
+              backgroundColor: 'var(--bg-surface-1)',
+              border: '1px solid var(--border-medium)',
+              borderRadius: 'var(--radius-md)',
+              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+              padding: 10,
+              width: 260,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>
+                  Comment on Line {activeCommentLine}
+                </span>
+                <button onClick={() => setActiveCommentLine(null)} className="btn-ghost" style={{ padding: 2 }}>
+                  <X size={12} />
+                </button>
+              </div>
+
+              {/* Existing Comments on this line */}
+              {(commentMap.get(activeCommentLine) || []).map(c => (
+                <div key={c.id} style={{
+                  padding: '6px 8px',
+                  backgroundColor: 'var(--bg-surface-0)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 4,
+                  marginBottom: 6,
+                  fontSize: 11,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                    <span style={{ fontWeight: 600, color: c.authorColor }}>{c.authorName}</span>
+                    <button
+                      onClick={() => onResolveComment(c.id)}
+                      className="btn-ghost"
+                      style={{ padding: '1px 4px', fontSize: 10, color: 'var(--text-muted)' }}
+                      title="Mark as resolved"
+                    >
+                      <Check size={11} color="#10b981" /> Resolve
+                    </button>
+                  </div>
+                  <div style={{ color: 'var(--text-primary)' }}>{c.text}</div>
+                </div>
+              ))}
+
+              {/* New Comment Input */}
+              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                <input
+                  type="text"
+                  placeholder="Leave comment..."
+                  value={commentDraft}
+                  onChange={e => setCommentDraft(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && submitComment()}
+                  style={{ flex: 1, padding: '4px 8px', fontSize: 11 }}
+                  autoFocus
+                />
+                <button onClick={submitComment} className="btn-primary" style={{ padding: '4px 8px', fontSize: 11 }}>
+                  Post
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Core Textarea */}
           <textarea

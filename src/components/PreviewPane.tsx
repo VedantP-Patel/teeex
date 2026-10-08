@@ -6,7 +6,8 @@ import {
   FileCheck,
   Columns,
   Square,
-  Printer
+  Printer,
+  MousePointerClick
 } from 'lucide-react';
 import type { ParsedDocument } from '../types/latex';
 
@@ -19,6 +20,7 @@ interface Props {
 export const PreviewPane: React.FC<Props> = ({
   renderedHtml,
   parsedDoc,
+  onJumpToLine,
 }) => {
   const [zoom, setZoom] = useState(100);
   const [forceTwoColumn, setForceTwoColumn] = useState<boolean | null>(null);
@@ -33,6 +35,26 @@ export const PreviewPane: React.FC<Props> = ({
     window.print();
   };
 
+  // SyncTeX Click Handler: clicks on preview headings/equations jump to source line
+  const handlePreviewClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onJumpToLine) return;
+    const target = e.target as HTMLElement;
+    const heading = target.closest('h2, h3, h4');
+    if (heading) {
+      const headingText = heading.textContent?.trim().toLowerCase();
+      const matched = parsedDoc.sections.find(s => s.title.toLowerCase() === headingText);
+      if (matched) {
+        onJumpToLine(matched.line);
+        return;
+      }
+    }
+
+    const mathBlock = target.closest('.latex-math-display');
+    if (mathBlock && parsedDoc.mathBlocks.length > 0) {
+      onJumpToLine(parsedDoc.mathBlocks[0].line);
+    }
+  };
+
   return (
     <div style={previewContainerStyle}>
       {/* Top Toolbar */}
@@ -44,6 +66,9 @@ export const PreviewPane: React.FC<Props> = ({
           </span>
           <span className="badge badge-emerald" style={{ fontSize: 9 }}>
             Live Rendered
+          </span>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3, marginLeft: 4 }}>
+            <MousePointerClick size={10} color="#38bdf8" /> SyncTeX Active
           </span>
         </div>
 
@@ -87,6 +112,7 @@ export const PreviewPane: React.FC<Props> = ({
       {/* Paper Sheet View Container */}
       <div style={sheetViewportStyle}>
         <div
+          onClick={handlePreviewClick}
           style={{
             ...paperSheetStyle,
             transform: `scale(${zoom / 100})`,
@@ -177,6 +203,7 @@ const paperSheetStyle: React.CSSProperties = {
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',
+  cursor: 'default',
 };
 
 const academicHeaderStyle: React.CSSProperties = {

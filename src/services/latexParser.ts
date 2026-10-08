@@ -1,5 +1,5 @@
 import katex from 'katex';
-import type { Diagnostic, ParsedDocument } from '../types/latex';
+import type { Diagnostic, ParsedDocument, ProjectFile } from '../types/latex';
 
 /**
  * High-speed LaTeX Diagnostic Linter
@@ -278,29 +278,75 @@ export function parseLatexDocument(code: string): ParsedDocument {
 }
 
 /**
- * Render High-Fidelity Academic Paper HTML with KaTeX Math
+ * Render High-Fidelity Academic Paper HTML with KaTeX Math, Figures, and SyncTeX line anchors
  */
-export function renderLatexToHtml(code: string): string {
+export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   // Strip comments
   let cleanCode = code
     .split('\n')
-    .map(line => {
-      const idx = line.indexOf('%');
-      if (idx !== -1 && (idx === 0 || line[idx - 1] !== '\\')) {
-        return line.substring(0, idx);
+    .map((line, idx) => {
+      const lineNum = idx + 1;
+      const cIdx = line.indexOf('%');
+      let effective = line;
+      if (cIdx !== -1 && (cIdx === 0 || line[cIdx - 1] !== '\\')) {
+        effective = line.substring(0, cIdx);
       }
-      return line;
+      return { lineNum, text: effective };
     })
+    .map(l => l.text)
     .join('\n');
 
   // Extract Document Body
   const bodyMatch = cleanCode.match(/\\begin\{document\}([\s\S]*?)\\end\{document\}/);
   let bodyText = bodyMatch ? bodyMatch[1] : cleanCode;
 
+  // Render Figures: \begin{figure} ... \includegraphics{...} ... \end{figure}
+  bodyText = bodyText.replace(/\\begin\{figure\*?\}(?:\[.*?\])?([\s\S]*?)\\end\{figure\*?\}/g, (_, figContent) => {
+    const imgMatch = figContent.match(/\\includegraphics(?:\[.*?\])?\{([^}]+)\}/);
+    const captionMatch = figContent.match(/\\caption\{([^}]+)\}/);
+    const labelMatch = figContent.match(/\\label\{([^}]+)\}/);
+
+    const filename = imgMatch ? imgMatch[1].trim() : 'figure.png';
+    const caption = captionMatch ? parseInlineFormatting(captionMatch[1]) : '';
+    const label = labelMatch ? labelMatch[1] : '';
+
+    // Check if image exists in project files with dataUrl
+    const matchedFile = files?.find(f => f.name === filename || f.name.includes(filename));
+    const imgSrc = matchedFile?.dataUrl || '';
+
+    return `
+      <div class="latex-figure-container" id="${label}">
+        ${imgSrc ? `
+          <img src="${imgSrc}" alt="${caption || filename}" class="latex-figure-img" />
+        ` : `
+          <div class="latex-figure-placeholder">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+              <circle cx="9" cy="9" r="2"/>
+              <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+            </svg>
+            <div style="font-size: 11px; font-weight: 600; color: #475569; margin-top: 4px;">Figure: ${escapeHtml(filename)}</div>
+          </div>
+        `}
+        ${caption ? `<div class="latex-figure-caption"><strong>Fig. 1.</strong> ${caption}</div>` : ''}
+      </div>
+    `;
+  });
+
+  // Direct \includegraphics outside figure environment
+  bodyText = bodyText.replace(/\\includegraphics(?:\[.*?\])?\{([^}]+)\}/g, (_, filename) => {
+    const name = filename.trim();
+    const matchedFile = files?.find(f => f.name === name || f.name.includes(name));
+    if (matchedFile?.dataUrl) {
+      return `<div class="latex-figure-container"><img src="${matchedFile.dataUrl}" alt="${name}" class="latex-figure-img" /></div>`;
+    }
+    return `<div class="latex-figure-container"><div class="latex-figure-placeholder">[Figure: ${escapeHtml(name)}]</div></div>`;
+  });
+
   // Render Math: Display math blocks \[ ... \] or \begin{equation} ... \end{equation}
   bodyText = bodyText.replace(/\\begin\{equation\*?\}([\s\S]*?)\\end\{equation\*?\}/g, (_, math) => {
     try {
-      return `<div class="latex-math-display">${katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })}</div>`;
+      return `<div class="latex-math-display synctex-target">${katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })}</div>`;
     } catch {
       return `<div class="latex-math-error">[Math Rendering Error: ${escapeHtml(math)}]</div>`;
     }
@@ -308,7 +354,7 @@ export function renderLatexToHtml(code: string): string {
 
   bodyText = bodyText.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => {
     try {
-      return `<div class="latex-math-display">${katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })}</div>`;
+      return `<div class="latex-math-display synctex-target">${katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })}</div>`;
     } catch {
       return `<div class="latex-math-error">[Math Rendering Error: ${escapeHtml(math)}]</div>`;
     }
@@ -340,10 +386,10 @@ export function renderLatexToHtml(code: string): string {
     return html;
   });
 
-  // Format Headings
-  bodyText = bodyText.replace(/\\section\*?\{([^}]+)\}/g, '<h2 class="latex-section">$1</h2>');
-  bodyText = bodyText.replace(/\\subsection\*?\{([^}]+)\}/g, '<h3 class="latex-subsection">$1</h3>');
-  bodyText = bodyText.replace(/\\subsubsection\*?\{([^}]+)\}/g, '<h4 class="latex-subsubsection">$1</h4>');
+  // Format Headings with synctex-target class
+  bodyText = bodyText.replace(/\\section\*?\{([^}]+)\}/g, '<h2 class="latex-section synctex-target">$1</h2>');
+  bodyText = bodyText.replace(/\\subsection\*?\{([^}]+)\}/g, '<h3 class="latex-subsection synctex-target">$1</h3>');
+  bodyText = bodyText.replace(/\\subsubsection\*?\{([^}]+)\}/g, '<h4 class="latex-subsubsection synctex-target">$1</h4>');
 
   // Format Lists
   bodyText = bodyText.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (_, content) => {
@@ -373,7 +419,7 @@ export function renderLatexToHtml(code: string): string {
       if (p.startsWith('<h') || p.startsWith('<div') || p.startsWith('<ul') || p.startsWith('<ol') || p.startsWith('<table')) {
         return p;
       }
-      return `<p class="latex-paragraph">${p}</p>`;
+      return `<p class="latex-paragraph synctex-target">${p}</p>`;
     });
 
   return paragraphs.join('\n');
