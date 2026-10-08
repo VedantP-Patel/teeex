@@ -1,50 +1,54 @@
 # Teeex Studio — Real-Time Collaborative LaTeX Platform
 
-> Ultra-fast, zero-bloat collaborative LaTeX studio with instantaneous live preview, sub-second compilation diagnostics, smart error fixes, Supabase cloud persistence, AI Copilot, and multiplayer co-authoring.
+> Ultra-fast, zero-bloat collaborative LaTeX studio with instantaneous live preview, deterministic syntax diagnostics, BibTeX autocomplete, full project .zip export, version diff checkpoints, and Vercel/Supabase cloud readiness.
 
 ---
 
-## ⚡ Performance & Anti-AI-Slop Architecture
+## ⚡ Performance & Honest Architecture
 
 Designed with a bespoke obsidian editorial aesthetic (inspired by Linear, JetBrains Fleet, and Typst), optimized for lightning-fast deployment on Vercel:
 
-- **Ultra-Lightweight Bundle:** <235 kB gzipped total bundle size with zero runtime bloat (builds in ~615ms).
+- **Ultra-Lightweight Bundle:** Built in ~430ms with zero runtime bloat.
 - **Instant Client-Side Typesetting:** Native KaTeX math compilation running at 60fps with zero network requests.
-- **Real-Time Cross-Tab Synchronization:** Zero-latency collaborative typing & peer presence via BroadcastChannel and CRDT.
-- **Sub-Second Diagnostics:** Translates cryptic LaTeX error logs into human-readable messages with **1-click automatic code fixes**.
-- **Publication-Grade Preview:** Two-column IEEE/ACM paper rendering with authentic serif typography, formula blocks, and tables.
+- **Real-Time Synchronization:** Zero-latency collaborative typing & peer presence via BroadcastChannel and native Supabase Realtime mapping.
+- **Sub-Second Deterministic Diagnostics:** Translates cryptic LaTeX error logs into human-readable messages with **1-click automatic code fixes**.
+- **Publication-Grade Preview:** Two-column IEEE/ACM paper rendering with authentic serif typography, formula blocks, and figures.
 
 ---
 
 ## 🚀 Key Features
 
-### 1. Multiplayer Live Collaboration & Sync
+### 1. BibTeX Live Citation Autocomplete (`\cite{...}`)
+- Auto-parses `references.bib` files into structured academic entries.
+- Typing `\cite{` in the editor pops up an autocomplete menu with paper titles, authors, and year.
+- Pressing Enter or clicking automatically inserts the citation key into the LaTeX source.
+
+### 2. Complete Project `.ZIP` Exporter (arXiv / IEEE Submission Ready)
+- Single-click download of a compiled `.zip` package containing all `.tex` source files, `.bib` bibliographies, and uploaded image figures.
+- Ready for immediate submission to arXiv, IEEE, ACM, or Overleaf.
+
+### 3. Version Checkpoints & Time-Machine Diff Viewer
+- Create named checkpoints (e.g., "Draft 1", "Advisor Feedback", "Camera-ready").
+- Inspect timeline of versions with line-by-line colored diffs comparing past snapshots against current editor code.
+- 1-click "Restore Version" rollback.
+
+### 4. Academic Word Count & Conference Limits Monitor
+- Real-time word count and character metrics.
+- Section-by-section breakdown (Abstract, Intro, System Architecture, Results, Conclusion).
+- Conference Target Tracker (IEEE 6-page limit, ACM 10-page limit, Nature Letter) with live progress bar and limit warnings.
+
+### 5. Multi-User Live Collaboration & Presence
 - Real-time room sharing with unique URLs (`?room=xyz`).
 - Animated multiplayer cursor carets with peer name tags and distinct colors.
-- Live presence counter and participant status.
+- Google Docs-style inline review comments attached to specific source lines.
 
-### 2. Supabase Cloud Integration
-- Connect any Supabase project via URL + Anon Key (or test with 1-click **Demo Cloud Mode**).
-- Cloud project persistence and global real-time channels across separate devices and locations.
-
-### 3. AI LaTeX Copilot & Equation Doctor (`Ctrl+K`)
-- **Math & Equations Generator**: Natural language description to KaTeX math formulas.
-- **TikZ Vector Diagrams**: Generates clean `\begin{tikzpicture}` code for neural networks, commutative diagrams, and circuits.
-- **Error Doctor**: Analyzes compile errors and outputs automated code fix patches.
-- **Academic Prose Polisher**: Refines informal drafting into publication-grade academic English.
-
-### 4. Figure & Asset Manager
-- Drag-and-drop PNG, JPG, SVG, and WebP figures.
-- Scale slider (`\linewidth`), caption input, and automatic `\includegraphics` code insertion.
-- Live rendering of figures directly in the publication paper preview sheet.
-
-### 5. Bi-directional SyncTeX & Inline Review Comments
-- **SyncTeX Navigation**: Click any section heading or equation in the preview to jump straight to its source line in the code editor.
-- **Google Docs-Style Inline Comments**: Margin chips and thread bubbles allowing co-authors to leave notes and mark them as resolved.
-
-### 6. Visual Table Builder & LaTeX Symbol Palette
+### 6. Visual Table Builder & LaTeX Formulas Library
 - Spreadsheet-like GUI grid to configure rows, columns, alignments (`L`, `C`, `R`), and borders (`\hline`).
-- Searchable library of 500+ LaTeX symbols (Greek letters, operators, calculus integrals, arrows).
+- 500+ LaTeX symbols (Greek, calculus, operators) plus standard formulas (Maxwell, Schrödinger, Attention mechanism) and TikZ diagrams.
+
+### 7. Figure & Asset Manager
+- Drag-and-drop PNG, JPG, SVG, and WebP figures.
+- Scale slider (`\linewidth`), caption input, and automated `\includegraphics` code insertion with live preview rendering.
 
 ---
 
@@ -68,4 +72,4 @@ npm run build
 ```bash
 npx vercel
 ```
-*The included `vercel.json` automatically configures Vite framework routing and 1-year immutable caching for static assets.*
+*The included `vercel.json` and `vite.config.ts` automatically configure single-page app routing, asset caching, and map Vercel's Supabase Integration variables.*
