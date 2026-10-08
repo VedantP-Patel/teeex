@@ -91,3 +91,39 @@ export interface Template {
   badge: string;
   files: ProjectFile[];
 }
+
+export type ProjectRole = 'owner' | 'editor' | 'viewer';
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  fullName: string;
+  avatarUrl?: string;
+  avatarColor?: string;
+  role?: ProjectRole;
+  isAnonymous?: boolean;
+}
+
+export interface ProjectMember {
+  id: string;
+  email: string;
+  name: string;
+  avatar: string;
+  avatarColor: string;
+  role: ProjectRole;
+  joinedAt: string;
+}
+
+export interface Project {
+  id: string;
+  title: string;
+  ownerId: string;
+  ownerEmail: string;
+  role: ProjectRole;
+  createdAt: string;
+  updatedAt: string;
+  files: ProjectFile[];
+  tags: string[];
+  members: ProjectMember[];
+  isArchived?: boolean;
+}

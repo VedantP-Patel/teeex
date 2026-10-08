@@ -9,7 +9,7 @@ import {
   BarChart2,
   History
 } from 'lucide-react';
-import type { ProjectFile, ParsedDocument } from '../types/latex';
+import type { ProjectFile, ParsedDocument, ProjectRole } from '../types/latex';
 
 interface Props {
   files: ProjectFile[];
@@ -23,6 +23,7 @@ interface Props {
   equationCount: number;
   onOpenWordCount?: () => void;
   onOpenHistory?: () => void;
+  role?: ProjectRole;
 }
 
 export const Sidebar: React.FC<Props> = ({
@@ -37,6 +38,7 @@ export const Sidebar: React.FC<Props> = ({
   equationCount,
   onOpenWordCount,
   onOpenHistory,
+  role = 'owner',
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [newFileName, setNewFileName] = useState('');
@@ -85,17 +87,19 @@ export const Sidebar: React.FC<Props> = ({
             <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
               PROJECT FILES
             </span>
-            <button
-              onClick={() => setIsCreating(true)}
-              className="btn-ghost"
-              style={{ padding: 2 }}
-              title="Add new file"
-            >
-              <Plus size={14} />
-            </button>
+            {role !== 'viewer' && (
+              <button
+                onClick={() => setIsCreating(true)}
+                className="btn-ghost"
+                style={{ padding: 2 }}
+                title="Add new file"
+              >
+                <Plus size={14} />
+              </button>
+            )}
           </div>
 
-          {isCreating && (
+          {isCreating && role !== 'viewer' && (
             <form onSubmit={handleCreateSubmit} style={{ padding: '4px 6px', marginBottom: 6 }}>
               <input
                 type="text"
@@ -139,7 +143,7 @@ export const Sidebar: React.FC<Props> = ({
                     </span>
                   </div>
 
-                  {files.length > 1 && !f.isEntry && (
+                  {files.length > 1 && !f.isEntry && role !== 'viewer' && (
                     <button
                       onClick={e => {
                         e.stopPropagation();

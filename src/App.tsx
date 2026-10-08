@@ -12,6 +12,8 @@ import { ImageUploadModal } from './components/modals/ImageUploadModal';
 import { SupabaseModal } from './components/modals/SupabaseModal';
 import { VersionHistoryModal, type Checkpoint } from './components/modals/VersionHistoryModal';
 import { WordCountModal } from './components/modals/WordCountModal';
+import { AuthModal } from './components/modals/AuthModal';
+import { ProjectsDashboardModal } from './components/modals/ProjectsDashboardModal';
 
 import type {
   ProjectFile,
@@ -19,21 +21,36 @@ import type {
   Collaborator,
   SuggestedFix,
   Template,
-  ReviewComment
+  ReviewComment,
+  Project,
+  ProjectRole,
+  UserProfile,
+  ProjectMember
 } from './types/latex';
-import { STARTER_TEMPLATES } from './services/templates';
 import {
   diagnoseLatex,
   parseLatexDocument,
   renderLatexToHtml
 } from './services/latexParser';
 import { parseBibtex } from './services/bibtexParser';
+import { STARTER_TEMPLATES } from './services/templates';
 import { exportProjectAsZip } from './services/zipExporter';
 import {
   CollaborationHub,
   DEFAULT_PEERS
 } from './services/collaboration';
 import { isSupabaseConnected } from './services/supabaseClient';
+import { getStoredSession, signOutUser } from './services/authService';
+import {
+  loadProjects,
+  getActiveProjectId,
+  setActiveProjectId,
+  createProject,
+  duplicateProject,
+  toggleArchiveProject,
+  deleteProject,
+  updateProject
+} from './services/projectsService';
 
 export function App() {
   // Theme State
@@ -50,12 +67,37 @@ export function App() {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  // Project & Files State
-  const [files, setFiles] = useState<ProjectFile[]>(() => {
-    return STARTER_TEMPLATES[0].files;
+  // Auth & Session State
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    return getStoredSession().user;
   });
-  const [activeFileId, setActiveFileId] = useState<string>('main.tex');
-  const [projectTitle, setProjectTitle] = useState('Neural Quantum State Tomography');
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+
+  // Multi-Project State
+  const [projects, setProjects] = useState<Project[]>(() => loadProjects());
+  const [activeProjectId, setActiveProjectIdState] = useState<string>(() => {
+    return getActiveProjectId(loadProjects());
+  });
+  const [isProjectsHubOpen, setIsProjectsHubOpen] = useState(false);
+
+  const activeProject = useMemo(() => {
+    return projects.find(p => p.id === activeProjectId) || projects[0];
+  }, [projects, activeProjectId]);
+
+  // Project & Files State (Bound to active project)
+  const [files, setFiles] = useState<ProjectFile[]>(() => activeProject?.files || STARTER_TEMPLATES[0].files);
+  const [activeFileId, setActiveFileId] = useState<string>(() => activeProject?.files?.[0]?.id || 'main.tex');
+  const [projectTitle, setProjectTitle] = useState<string>(() => activeProject?.title || 'Neural Quantum State Tomography');
+
+  // Active Role Resolution (URL query parameter ?role=viewer overrides, or activeProject.role)
+  const currentRole = useMemo<ProjectRole>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlRole = params.get('role') as ProjectRole | null;
+    if (urlRole === 'viewer' || urlRole === 'editor' || urlRole === 'owner') {
+      return urlRole;
+    }
+    return activeProject?.role || 'owner';
+  }, [activeProject]);
 
   // Checkpoints State (Time Machine)
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([
@@ -63,8 +105,8 @@ export function App() {
       id: 'checkpoint-init',
       name: 'Initial IEEE Draft',
       timestamp: 'Today, 00:15',
-      author: 'Dr. Elena Rostova',
-      files: STARTER_TEMPLATES[0].files,
+      author: currentUser?.fullName || 'Dr. Elena Rostova',
+      files: activeProject.files,
     }
   ]);
 
@@ -93,7 +135,18 @@ export function App() {
   });
 
   const [hub] = useState<CollaborationHub>(() => new CollaborationHub(roomId));
-  const [selfUser, setSelfUser] = useState<Collaborator>(hub.selfUser);
+  const [selfUser, setSelfUser] = useState<Collaborator>(() => {
+    const initial = hub.selfUser;
+    if (currentUser) {
+      return {
+        ...initial,
+        name: currentUser.fullName,
+        avatar: currentUser.fullName.substring(0, 2).toUpperCase(),
+        color: currentUser.avatarColor || '#38bdf8',
+      };
+    }
+    return initial;
+  });
   const [peers, setPeers] = useState<Collaborator[]>(DEFAULT_PEERS);
 
   // Active File reference
@@ -228,10 +281,13 @@ export function App() {
     return () => unsubscribe();
   }, [hub]);
 
-  // Update file content & broadcast
+  // Update file content & broadcast & sync project
   const handleCodeChange = (newCode: string) => {
-    setFiles(prev => prev.map(f => f.id === activeFileId ? { ...f, content: newCode } : f));
+    const updated = files.map(f => f.id === activeFileId ? { ...f, content: newCode } : f);
+    setFiles(updated);
     hub.broadcastFileUpdate(activeFileId, newCode);
+    const updatedProjects = updateProject(activeProjectId, { files: updated });
+    setProjects(updatedProjects);
   };
 
   // Cursor change & broadcast
@@ -249,18 +305,18 @@ export function App() {
     setTimeout(() => triggerCompile(), 50);
   };
 
-  // Insert code snippet at end or position
-  const handleInsertCode = (snippet: string) => {
-    const newContent = activeFile.content + '\n' + snippet;
-    handleCodeChange(newContent);
-    triggerCompile();
+  // Insert code snippet helper
+  const handleInsertCode = (latexSnippet: string) => {
+    const updated = activeFile.content + '\n' + latexSnippet + '\n';
+    handleCodeChange(updated);
+    setTimeout(() => triggerCompile(), 50);
   };
 
-  // Comments Management
+  // Review Comment Handlers
   const handleAddComment = (line: number, text: string) => {
     const newComment: ReviewComment = {
-      id: 'comment-' + Math.random().toString(36).substring(2, 8),
-      fileId: activeFileId,
+      id: 'comment-' + Date.now(),
+      fileId: activeFile.id,
       line,
       authorName: selfUser.name,
       authorAvatar: selfUser.avatar,
@@ -290,6 +346,8 @@ export function App() {
 
   const handleRestoreCheckpoint = (cp: Checkpoint) => {
     setFiles(JSON.parse(JSON.stringify(cp.files)));
+    const updatedProjects = updateProject(activeProjectId, { files: cp.files });
+    setProjects(updatedProjects);
     setTimeout(() => triggerCompile(), 50);
   };
 
@@ -306,20 +364,29 @@ export function App() {
       type,
       content: type === 'bib' ? `% Bibliography File\n` : `\\section{New Section}\nContent goes here...\n`,
     };
-    setFiles(prev => [...prev, newFile]);
+    const updated = [...files, newFile];
+    setFiles(updated);
     setActiveFileId(name);
+    const updatedProjects = updateProject(activeProjectId, { files: updated });
+    setProjects(updatedProjects);
   };
 
   const handleAddImageFile = (imageFile: ProjectFile) => {
-    setFiles(prev => [...prev, imageFile]);
+    const updated = [...files, imageFile];
+    setFiles(updated);
+    const updatedProjects = updateProject(activeProjectId, { files: updated });
+    setProjects(updatedProjects);
   };
 
   const handleDeleteFile = (fileId: string) => {
     if (files.length <= 1) return;
-    setFiles(prev => prev.filter(f => f.id !== fileId));
+    const updated = files.filter(f => f.id !== fileId);
+    setFiles(updated);
     if (activeFileId === fileId) {
-      setActiveFileId(files[0].id);
+      setActiveFileId(updated[0].id);
     }
+    const updatedProjects = updateProject(activeProjectId, { files: updated });
+    setProjects(updatedProjects);
   };
 
   // Template Selection
@@ -327,7 +394,109 @@ export function App() {
     setFiles(template.files);
     setActiveFileId(template.files[0].id);
     setProjectTitle(template.name);
+    const updatedProjects = updateProject(activeProjectId, {
+      title: template.name,
+      files: template.files
+    });
+    setProjects(updatedProjects);
     setTimeout(() => triggerCompile(), 50);
+  };
+
+  // Title changes
+  const handleTitleChange = (newTitle: string) => {
+    setProjectTitle(newTitle);
+    const updatedProjects = updateProject(activeProjectId, { title: newTitle });
+    setProjects(updatedProjects);
+  };
+
+  // Multi-Project Switching & Management
+  const handleSelectProject = (projId: string) => {
+    const proj = projects.find(p => p.id === projId);
+    if (!proj) return;
+    setActiveProjectId(projId);
+    setActiveProjectIdState(projId);
+    setFiles(proj.files);
+    setActiveFileId(proj.files[0]?.id || 'main.tex');
+    setProjectTitle(proj.title);
+    setTimeout(() => triggerCompile(), 60);
+  };
+
+  const handleCreateProject = (title: string, templateId?: string) => {
+    const newProj = createProject(
+      title,
+      currentUser?.email || 'elena.rostova@teeex.io',
+      currentUser?.fullName || 'Dr. Elena Rostova',
+      templateId
+    );
+    setProjects(loadProjects());
+    handleSelectProject(newProj.id);
+  };
+
+  const handleDuplicateProject = (projId: string) => {
+    const cloned = duplicateProject(projId);
+    if (cloned) {
+      setProjects(loadProjects());
+      handleSelectProject(cloned.id);
+    }
+  };
+
+  const handleToggleArchiveProject = (projId: string) => {
+    const updated = toggleArchiveProject(projId);
+    setProjects(updated);
+  };
+
+  const handleDeleteProject = (projId: string) => {
+    const updated = deleteProject(projId);
+    setProjects(updated);
+    if (activeProjectId === projId && updated.length > 0) {
+      handleSelectProject(updated[0].id);
+    }
+  };
+
+  // Collaborator Invitations & Role Updates
+  const handleInviteMember = (email: string, role: ProjectRole) => {
+    const newMember: ProjectMember = {
+      id: `usr-${Date.now().toString(36)}`,
+      email,
+      name: email.split('@')[0].replace(/[\._]/g, ' '),
+      avatar: email.substring(0, 2).toUpperCase(),
+      avatarColor: role === 'owner' ? '#38bdf8' : role === 'editor' ? '#10b981' : '#f59e0b',
+      role,
+      joinedAt: new Date().toISOString().split('T')[0],
+    };
+    const members = [...(activeProject.members || []), newMember];
+    const updated = updateProject(activeProjectId, { members });
+    setProjects(updated);
+  };
+
+  const handleUpdateMemberRole = (memberId: string, newRole: ProjectRole) => {
+    const members = (activeProject.members || []).map(m =>
+      m.id === memberId ? { ...m, role: newRole } : m
+    );
+    const updated = updateProject(activeProjectId, { members });
+    setProjects(updated);
+  };
+
+  const handleRemoveMember = (memberId: string) => {
+    const members = (activeProject.members || []).filter(m => m.id !== memberId);
+    const updated = updateProject(activeProjectId, { members });
+    setProjects(updated);
+  };
+
+  // Auth Handlers
+  const handleAuthSuccess = (user: UserProfile) => {
+    setCurrentUser(user);
+    setSelfUser(prev => ({
+      ...prev,
+      name: user.fullName,
+      avatar: user.fullName.substring(0, 2).toUpperCase(),
+      color: user.avatarColor || '#38bdf8',
+    }));
+  };
+
+  const handleSignOut = async () => {
+    await signOutUser();
+    setCurrentUser(null);
   };
 
   // Draggable Split Divider Handlers
@@ -365,7 +534,7 @@ export function App() {
       {/* Top Navigation */}
       <Navbar
         projectTitle={projectTitle}
-        onTitleChange={setProjectTitle}
+        onTitleChange={handleTitleChange}
         compileState={compileState}
         onCompile={triggerCompile}
         peers={peers}
@@ -381,6 +550,14 @@ export function App() {
         isCloudConnected={isCloudConnected}
         onExportPdf={() => window.print()}
         onExportZip={handleExportZip}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSelectProject={handleSelectProject}
+        onOpenProjectsHub={() => setIsProjectsHubOpen(true)}
+        currentUser={currentUser}
+        onOpenAuth={() => setIsAuthOpen(true)}
+        onSignOut={handleSignOut}
+        currentRole={currentRole}
       />
 
       {/* Main Workspace Body */}
@@ -398,6 +575,7 @@ export function App() {
           equationCount={equationCount}
           onOpenWordCount={() => setIsWordCountOpen(true)}
           onOpenHistory={() => setIsHistoryOpen(true)}
+          role={currentRole}
         />
 
         {/* Center & Right Split Pane */}
@@ -418,6 +596,7 @@ export function App() {
               onAddComment={handleAddComment}
               onResolveComment={handleResolveComment}
               bibEntries={bibEntries}
+              role={currentRole}
             />
           </div>
 
@@ -507,6 +686,11 @@ export function App() {
         roomId={roomId}
         peers={peers}
         selfUser={selfUser}
+        projectMembers={activeProject?.members || []}
+        onInviteMember={handleInviteMember}
+        onUpdateMemberRole={handleUpdateMemberRole}
+        onRemoveMember={handleRemoveMember}
+        currentRole={currentRole}
       />
 
       <TemplateModal
@@ -514,7 +698,30 @@ export function App() {
         onClose={() => setIsTemplatesOpen(false)}
         onSelectTemplate={handleSelectTemplate}
       />
+
+      {/* Authentication Modal */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        currentUser={currentUser}
+        onAuthSuccess={handleAuthSuccess}
+      />
+
+      {/* Multi-Project Hub Dashboard */}
+      <ProjectsDashboardModal
+        isOpen={isProjectsHubOpen}
+        onClose={() => setIsProjectsHubOpen(false)}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSelectProject={handleSelectProject}
+        onCreateProject={handleCreateProject}
+        onDuplicateProject={handleDuplicateProject}
+        onToggleArchiveProject={handleToggleArchiveProject}
+        onDeleteProject={handleDeleteProject}
+        currentUser={currentUser}
+      />
     </div>
   );
 }
+
 export default App;

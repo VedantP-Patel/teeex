@@ -9,9 +9,10 @@ import {
   Check,
   X,
   MessageSquare,
-  BookMarked
+  BookMarked,
+  Eye
 } from 'lucide-react';
-import type { Collaborator, Diagnostic, ReviewComment } from '../types/latex';
+import type { Collaborator, Diagnostic, ReviewComment, ProjectRole } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
 
 interface Props {
@@ -28,6 +29,7 @@ interface Props {
   onAddComment: (line: number, text: string) => void;
   onResolveComment: (commentId: string) => void;
   bibEntries?: BibEntry[];
+  role?: ProjectRole;
 }
 
 export const Editor: React.FC<Props> = ({
@@ -44,6 +46,7 @@ export const Editor: React.FC<Props> = ({
   onAddComment,
   onResolveComment,
   bibEntries = [],
+  role = 'owner',
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [activeCommentLine, setActiveCommentLine] = useState<number | null>(null);
@@ -180,6 +183,16 @@ export const Editor: React.FC<Props> = ({
 
   return (
     <div style={editorContainerStyle}>
+      {/* Viewer Notice Ribbon */}
+      {role === 'viewer' && (
+        <div style={viewerNoticeStyle}>
+          <Eye size={13} color="#f59e0b" style={{ flexShrink: 0 }} />
+          <span>
+            <strong>Viewer Mode (Read-Only):</strong> You can review LaTeX code and leave inline review comments. Editing and compilation are locked.
+          </span>
+        </div>
+      )}
+
       {/* Editor Sub-Header Toolbar */}
       <div style={editorToolbarStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -187,65 +200,74 @@ export const Editor: React.FC<Props> = ({
             {fileName}
           </span>
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>&bull; {lines.length} lines</span>
+          {role === 'viewer' && (
+            <span className="badge" style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', fontSize: 10 }}>
+              Read-Only
+            </span>
+          )}
         </div>
 
         {/* Quick Formatting Snippets & Comment action */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button
-            onClick={() => insertSnippet('\\textbf{', '}')}
-            className="btn-ghost"
-            style={toolBtnStyle}
-            title="Bold (\textbf{})"
-          >
-            <Bold size={13} />
-          </button>
+          {role !== 'viewer' && (
+            <>
+              <button
+                onClick={() => insertSnippet('\\textbf{', '}')}
+                className="btn-ghost"
+                style={toolBtnStyle}
+                title="Bold (\textbf{})"
+              >
+                <Bold size={13} />
+              </button>
 
-          <button
-            onClick={() => insertSnippet('\\textit{', '}')}
-            className="btn-ghost"
-            style={toolBtnStyle}
-            title="Italic (\textit{})"
-          >
-            <Italic size={13} />
-          </button>
+              <button
+                onClick={() => insertSnippet('\\textit{', '}')}
+                className="btn-ghost"
+                style={toolBtnStyle}
+                title="Italic (\textit{})"
+              >
+                <Italic size={13} />
+              </button>
 
-          <button
-            onClick={() => insertSnippet('\\begin{equation}\n  ', '\n\\end{equation}')}
-            className="btn-ghost"
-            style={toolBtnStyle}
-            title="Display Equation"
-          >
-            <Sigma size={13} />
-          </button>
+              <button
+                onClick={() => insertSnippet('\\begin{equation}\n  ', '\n\\end{equation}')}
+                className="btn-ghost"
+                style={toolBtnStyle}
+                title="Display Equation"
+              >
+                <Sigma size={13} />
+              </button>
 
-          <button
-            onClick={() => insertSnippet('\\frac{', '}{}')}
-            className="btn-ghost"
-            style={toolBtnStyle}
-            title="Fraction (\frac{}{})"
-          >
-            <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>a/b</span>
-          </button>
+              <button
+                onClick={() => insertSnippet('\\frac{', '}{}')}
+                className="btn-ghost"
+                style={toolBtnStyle}
+                title="Fraction (\frac{}{})"
+              >
+                <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>a/b</span>
+              </button>
 
-          <button
-            onClick={() => insertSnippet('\\cite{', '}')}
-            className="btn-ghost"
-            style={toolBtnStyle}
-            title="Citation (\cite{})"
-          >
-            <Quote size={13} />
-          </button>
+              <button
+                onClick={() => insertSnippet('\\cite{', '}')}
+                className="btn-ghost"
+                style={toolBtnStyle}
+                title="Citation (\cite{})"
+              >
+                <Quote size={13} />
+              </button>
 
-          <button
-            onClick={() => insertSnippet('\\begin{itemize}\n  \\item ', '\n\\end{itemize}')}
-            className="btn-ghost"
-            style={toolBtnStyle}
-            title="Itemize List"
-          >
-            <List size={13} />
-          </button>
+              <button
+                onClick={() => insertSnippet('\\begin{itemize}\n  \\item ', '\n\\end{itemize}')}
+                className="btn-ghost"
+                style={toolBtnStyle}
+                title="Itemize List"
+              >
+                <List size={13} />
+              </button>
 
-          <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+              <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+            </>
+          )}
 
           <button
             onClick={() => setActiveCommentLine(currentCursorLine)}
@@ -483,18 +505,35 @@ export const Editor: React.FC<Props> = ({
           <textarea
             ref={textareaRef}
             value={code}
+            readOnly={role === 'viewer'}
             onChange={e => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
             onSelect={handleSelect}
             onClick={handleSelect}
             onKeyUp={handleSelect}
             spellCheck={false}
-            style={textareaStyle}
+            style={{
+              ...textareaStyle,
+              cursor: role === 'viewer' ? 'default' : 'text',
+              opacity: role === 'viewer' ? 0.9 : 1,
+            }}
           />
         </div>
       </div>
     </div>
   );
+};
+
+const viewerNoticeStyle: React.CSSProperties = {
+  backgroundColor: 'rgba(245, 158, 11, 0.1)',
+  borderBottom: '1px solid rgba(245, 158, 11, 0.25)',
+  padding: '6px 14px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  fontSize: 11.5,
+  color: '#f59e0b',
+  flexShrink: 0,
 };
 
 const editorContainerStyle: React.CSSProperties = {
