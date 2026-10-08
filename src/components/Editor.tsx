@@ -8,9 +8,11 @@ import {
   MessageSquarePlus,
   Check,
   X,
-  MessageSquare
+  MessageSquare,
+  BookMarked
 } from 'lucide-react';
 import type { Collaborator, Diagnostic, ReviewComment } from '../types/latex';
+import type { BibEntry } from '../services/bibtexParser';
 
 interface Props {
   code: string;
@@ -25,6 +27,7 @@ interface Props {
   comments: ReviewComment[];
   onAddComment: (line: number, text: string) => void;
   onResolveComment: (commentId: string) => void;
+  bibEntries?: BibEntry[];
 }
 
 export const Editor: React.FC<Props> = ({
@@ -40,11 +43,16 @@ export const Editor: React.FC<Props> = ({
   comments,
   onAddComment,
   onResolveComment,
+  bibEntries = [],
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [activeCommentLine, setActiveCommentLine] = useState<number | null>(null);
   const [commentDraft, setCommentDraft] = useState('');
   const [currentCursorLine, setCurrentCursorLine] = useState(1);
+
+  // Citation Autocomplete state
+  const [citeQuery, setCiteQuery] = useState<string | null>(null);
+  const [citeStartPos, setCiteStartPos] = useState<number>(0);
 
   const lines = code.split('\n');
 
@@ -100,7 +108,7 @@ export const Editor: React.FC<Props> = ({
     }
   };
 
-  // Track cursor position
+  // Track cursor position and check for \cite{
   const handleSelect = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
     const ta = e.currentTarget;
     const pos = ta.selectionStart;
@@ -109,6 +117,31 @@ export const Editor: React.FC<Props> = ({
     const col = pos - textBefore.lastIndexOf('\n');
     setCurrentCursorLine(line);
     onCursorChange(line, col);
+
+    // Check if cursor is right after \cite{...
+    const citeMatch = textBefore.match(/\\cite\{([a-zA-Z0-9_-]*)$/);
+    if (citeMatch) {
+      setCiteQuery(citeMatch[1].toLowerCase());
+      setCiteStartPos(pos - citeMatch[1].length);
+    } else {
+      setCiteQuery(null);
+    }
+  };
+
+  // Insert citation autocomplete key
+  const handleSelectCiteKey = (key: string) => {
+    if (!textareaRef.current || citeStartPos === null) return;
+    const ta = textareaRef.current;
+    const pos = ta.selectionStart;
+    const newCode = code.substring(0, citeStartPos) + key + '}' + code.substring(pos);
+    onChange(newCode);
+    setCiteQuery(null);
+
+    setTimeout(() => {
+      ta.focus();
+      const nextPos = citeStartPos + key.length + 1;
+      ta.selectionStart = ta.selectionEnd = nextPos;
+    }, 0);
   };
 
   // Quick insertion helpers
@@ -136,6 +169,14 @@ export const Editor: React.FC<Props> = ({
     setCommentDraft('');
     setActiveCommentLine(null);
   };
+
+  // Filtered BibTeX citations
+  const filteredCitations = bibEntries.filter(b => {
+    if (!citeQuery) return true;
+    return b.key.toLowerCase().includes(citeQuery) ||
+           b.title.toLowerCase().includes(citeQuery) ||
+           b.author.toLowerCase().includes(citeQuery);
+  });
 
   return (
     <div style={editorContainerStyle}>
@@ -326,6 +367,51 @@ export const Editor: React.FC<Props> = ({
                 </div>
               );
             })}
+
+          {/* BibTeX Citation Autocomplete Dropdown */}
+          {citeQuery !== null && filteredCitations.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: Math.max(10, (currentCursorLine - 1) * 21 + 24),
+              left: 40,
+              zIndex: 35,
+              backgroundColor: 'var(--bg-surface-1)',
+              border: '1px solid var(--border-medium)',
+              borderRadius: 'var(--radius-sm)',
+              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+              maxHeight: 180,
+              width: 320,
+              overflowY: 'auto',
+            }}>
+              <div style={{ padding: '4px 8px', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <BookMarked size={12} color="#38bdf8" />
+                <span>BIBTEX CITATION AUTOCOMPLETE</span>
+              </div>
+              {filteredCitations.map(b => (
+                <div
+                  key={b.key}
+                  onClick={() => handleSelectCiteKey(b.key)}
+                  style={{
+                    padding: '6px 8px',
+                    borderBottom: '1px solid var(--border-subtle)',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                  }}
+                  className="hover:bg-active"
+                >
+                  <div style={{ fontWeight: 600, color: '#38bdf8', fontFamily: 'var(--font-mono)' }}>
+                    \\cite{`{${b.key}}`}
+                  </div>
+                  <div style={{ color: 'var(--text-primary)', fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {b.title}
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 9.5 }}>
+                    {b.author} ({b.year})
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Active Comment Bubble Overlay */}
           {activeCommentLine !== null && (

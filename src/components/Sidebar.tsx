@@ -6,7 +6,8 @@ import {
   Trash2,
   ListTree,
   FileSpreadsheet,
-  BarChart2
+  BarChart2,
+  History
 } from 'lucide-react';
 import type { ProjectFile, ParsedDocument } from '../types/latex';
 
@@ -20,6 +21,8 @@ interface Props {
   onJumpToLine: (line: number) => void;
   wordCount: number;
   equationCount: number;
+  onOpenWordCount?: () => void;
+  onOpenHistory?: () => void;
 }
 
 export const Sidebar: React.FC<Props> = ({
@@ -32,6 +35,8 @@ export const Sidebar: React.FC<Props> = ({
   onJumpToLine,
   wordCount,
   equationCount,
+  onOpenWordCount,
+  onOpenHistory,
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [newFileName, setNewFileName] = useState('');
@@ -192,13 +197,31 @@ export const Sidebar: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Statistics Footer */}
+      {/* Statistics & History Footer */}
       <div style={footerStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)' }}>
-          <BarChart2 size={12} color="#38bdf8" />
-          <span><b>{wordCount}</b> words</span>
-          <span>&bull;</span>
-          <span><b>{equationCount}</b> math blocks</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <button
+            onClick={onOpenWordCount}
+            className="btn-ghost"
+            style={{ padding: '2px 4px', fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}
+            title="Inspect Word Count & Conference Limits"
+          >
+            <BarChart2 size={12} color="#38bdf8" />
+            <span><b>{wordCount}</b> words</span>
+          </button>
+
+          <button
+            onClick={onOpenHistory}
+            className="btn-ghost"
+            style={{ padding: '2px 4px', fontSize: 11, color: 'var(--text-muted)' }}
+            title="View Checkpoint History & Diff"
+          >
+            <History size={12} />
+            <span>History</span>
+          </button>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', paddingLeft: 4 }}>
+          {equationCount} equations &bull; Auto-saved
         </div>
       </div>
     </aside>

@@ -10,6 +10,8 @@ import { ShareModal } from './components/modals/ShareModal';
 import { TemplateModal } from './components/modals/TemplateModal';
 import { ImageUploadModal } from './components/modals/ImageUploadModal';
 import { SupabaseModal } from './components/modals/SupabaseModal';
+import { VersionHistoryModal, type Checkpoint } from './components/modals/VersionHistoryModal';
+import { WordCountModal } from './components/modals/WordCountModal';
 
 import type {
   ProjectFile,
@@ -25,6 +27,8 @@ import {
   parseLatexDocument,
   renderLatexToHtml
 } from './services/latexParser';
+import { parseBibtex } from './services/bibtexParser';
+import { exportProjectAsZip } from './services/zipExporter';
 import {
   CollaborationHub,
   DEFAULT_PEERS
@@ -52,6 +56,17 @@ export function App() {
   });
   const [activeFileId, setActiveFileId] = useState<string>('main.tex');
   const [projectTitle, setProjectTitle] = useState('Neural Quantum State Tomography');
+
+  // Checkpoints State (Time Machine)
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([
+    {
+      id: 'checkpoint-init',
+      name: 'Initial IEEE Draft',
+      timestamp: 'Today, 00:15',
+      author: 'Dr. Elena Rostova',
+      files: STARTER_TEMPLATES[0].files,
+    }
+  ]);
 
   // Review Comments State (Google Docs style)
   const [comments, setComments] = useState<ReviewComment[]>([
@@ -86,6 +101,12 @@ export function App() {
     return files.find(f => f.id === activeFileId) || files[0];
   }, [files, activeFileId]);
 
+  // Extract structured BibTeX entries for live citation autocomplete
+  const bibEntries = useMemo(() => {
+    const bibFile = files.find(f => f.name.endsWith('.bib'));
+    return bibFile ? parseBibtex(bibFile.content) : [];
+  }, [files]);
+
   // Target line for SyncTeX jumps
   const [targetLine, setTargetLine] = useState<number | null>(null);
 
@@ -106,6 +127,8 @@ export function App() {
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
   const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isWordCountOpen, setIsWordCountOpen] = useState(false);
 
   // Split Pane Resizing
   const [splitPercent, setSplitPercent] = useState<number>(50);
@@ -253,6 +276,28 @@ export function App() {
     setComments(prev => prev.map(c => c.id === commentId ? { ...c, resolved: true } : c));
   };
 
+  // Checkpoints Management (Time Machine)
+  const handleCreateCheckpoint = (name: string) => {
+    const newCp: Checkpoint = {
+      id: 'cp-' + Date.now(),
+      name,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      author: selfUser.name,
+      files: JSON.parse(JSON.stringify(files)),
+    };
+    setCheckpoints(prev => [newCp, ...prev]);
+  };
+
+  const handleRestoreCheckpoint = (cp: Checkpoint) => {
+    setFiles(JSON.parse(JSON.stringify(cp.files)));
+    setTimeout(() => triggerCompile(), 50);
+  };
+
+  // Export full project as .zip package
+  const handleExportZip = () => {
+    exportProjectAsZip(projectTitle, files);
+  };
+
   // File management
   const handleCreateFile = (name: string, type: 'tex' | 'bib') => {
     const newFile: ProjectFile = {
@@ -335,6 +380,7 @@ export function App() {
         onOpenSupabase={() => setIsSupabaseOpen(true)}
         isCloudConnected={isCloudConnected}
         onExportPdf={() => window.print()}
+        onExportZip={handleExportZip}
       />
 
       {/* Main Workspace Body */}
@@ -350,6 +396,8 @@ export function App() {
           onJumpToLine={setTargetLine}
           wordCount={wordCount}
           equationCount={equationCount}
+          onOpenWordCount={() => setIsWordCountOpen(true)}
+          onOpenHistory={() => setIsHistoryOpen(true)}
         />
 
         {/* Center & Right Split Pane */}
@@ -369,6 +417,7 @@ export function App() {
               comments={comments}
               onAddComment={handleAddComment}
               onResolveComment={handleResolveComment}
+              bibEntries={bibEntries}
             />
           </div>
 
@@ -432,6 +481,24 @@ export function App() {
         isOpen={isTableBuilderOpen}
         onClose={() => setIsTableBuilderOpen(false)}
         onInsert={handleInsertCode}
+      />
+
+      <VersionHistoryModal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        checkpoints={checkpoints}
+        currentFiles={files}
+        onCreateCheckpoint={handleCreateCheckpoint}
+        onRestoreCheckpoint={handleRestoreCheckpoint}
+      />
+
+      <WordCountModal
+        isOpen={isWordCountOpen}
+        onClose={() => setIsWordCountOpen(false)}
+        wordCount={wordCount}
+        equationCount={equationCount}
+        parsedDoc={parsedDoc}
+        activeCode={activeFile.content}
       />
 
       <ShareModal

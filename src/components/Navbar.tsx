@@ -13,7 +13,8 @@ import {
   Share2,
   Image as ImageIcon,
   Cloud,
-  ShieldCheck
+  ShieldCheck,
+  FolderArchive
 } from 'lucide-react';
 import type { CompileState, Collaborator } from '../types/latex';
 
@@ -34,6 +35,7 @@ interface Props {
   onOpenSupabase: () => void;
   isCloudConnected: boolean;
   onExportPdf: () => void;
+  onExportZip: () => void;
 }
 
 export const Navbar: React.FC<Props> = ({
@@ -53,6 +55,7 @@ export const Navbar: React.FC<Props> = ({
   onOpenSupabase,
   isCloudConnected,
   onExportPdf,
+  onExportZip,
 }) => {
   return (
     <header style={navStyle}>
@@ -204,9 +207,15 @@ export const Navbar: React.FC<Props> = ({
         </button>
 
         {/* Export PDF */}
-        <button onClick={onExportPdf} className="btn-secondary" title="Export Ready PDF Document" style={{ padding: '4px 10px', fontSize: 11.5 }}>
+        <button onClick={onExportPdf} className="btn-secondary" title="Export Ready PDF Document" style={{ padding: '4px 9px', fontSize: 11.5 }}>
           <Download size={12} />
-          <span>Export</span>
+          <span>PDF</span>
+        </button>
+
+        {/* Export ZIP Package */}
+        <button onClick={onExportZip} className="btn-secondary" title="Download Complete .ZIP Project for arXiv / Overleaf" style={{ padding: '4px 9px', fontSize: 11.5 }}>
+          <FolderArchive size={12} color="#38bdf8" />
+          <span>ZIP</span>
         </button>
 
         {/* Theme Toggle */}
