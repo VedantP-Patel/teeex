@@ -8,7 +8,6 @@ import { SymbolPaletteModal } from './components/modals/SymbolPaletteModal';
 import { TableBuilderModal } from './components/modals/TableBuilderModal';
 import { ShareModal } from './components/modals/ShareModal';
 import { TemplateModal } from './components/modals/TemplateModal';
-import { AICopilotModal } from './components/modals/AICopilotModal';
 import { ImageUploadModal } from './components/modals/ImageUploadModal';
 import { SupabaseModal } from './components/modals/SupabaseModal';
 
@@ -69,7 +68,7 @@ export function App() {
     }
   ]);
 
-  // Cloud & Supabase State
+  // Cloud & Supabase State (automatically detected from Vercel)
   const [isCloudConnected, setIsCloudConnected] = useState(() => isSupabaseConnected());
 
   // Room & Collaboration State
@@ -105,7 +104,6 @@ export function App() {
   const [isTableBuilderOpen, setIsTableBuilderOpen] = useState(false);
   const [isSymbolsOpen, setIsSymbolsOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
-  const [isCopilotOpen, setIsCopilotOpen] = useState(false);
   const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
   const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
 
@@ -206,18 +204,6 @@ export function App() {
 
     return () => unsubscribe();
   }, [hub]);
-
-  // Keyboard shortcut Ctrl+K / Cmd+K for AI Copilot
-  useEffect(() => {
-    const handleGlobalKeys = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        setIsCopilotOpen(prev => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeys);
-    return () => window.removeEventListener('keydown', handleGlobalKeys);
-  }, []);
 
   // Update file content & broadcast
   const handleCodeChange = (newCode: string) => {
@@ -345,7 +331,6 @@ export function App() {
         onOpenTableBuilder={() => setIsTableBuilderOpen(true)}
         onOpenSymbols={() => setIsSymbolsOpen(true)}
         onOpenTemplates={() => setIsTemplatesOpen(true)}
-        onOpenCopilot={() => setIsCopilotOpen(true)}
         onOpenImageUpload={() => setIsImageUploadOpen(true)}
         onOpenSupabase={() => setIsSupabaseOpen(true)}
         isCloudConnected={isCloudConnected}
@@ -421,13 +406,6 @@ export function App() {
       />
 
       {/* Modals */}
-      <AICopilotModal
-        isOpen={isCopilotOpen}
-        onClose={() => setIsCopilotOpen(false)}
-        onInsertCode={handleInsertCode}
-        diagnostics={diagnostics}
-      />
-
       <ImageUploadModal
         isOpen={isImageUploadOpen}
         onClose={() => setIsImageUploadOpen(false)}

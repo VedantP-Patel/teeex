@@ -11,10 +11,9 @@ import {
   XCircle,
   Loader2,
   Share2,
-  Sparkles,
   Image as ImageIcon,
-  Shield,
-  Cloud
+  Cloud,
+  ShieldCheck
 } from 'lucide-react';
 import type { CompileState, Collaborator } from '../types/latex';
 
@@ -31,7 +30,6 @@ interface Props {
   onOpenTableBuilder: () => void;
   onOpenSymbols: () => void;
   onOpenTemplates: () => void;
-  onOpenCopilot: () => void;
   onOpenImageUpload: () => void;
   onOpenSupabase: () => void;
   isCloudConnected: boolean;
@@ -51,7 +49,6 @@ export const Navbar: React.FC<Props> = ({
   onOpenTableBuilder,
   onOpenSymbols,
   onOpenTemplates,
-  onOpenCopilot,
   onOpenImageUpload,
   onOpenSupabase,
   isCloudConnected,
@@ -135,29 +132,28 @@ export const Navbar: React.FC<Props> = ({
 
       {/* Right Side: Tools, Collaboration, Theme */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        {/* AI Copilot Button */}
-        <button
-          onClick={onOpenCopilot}
-          className="btn-ghost"
-          style={{ ...toolBtnStyle, color: '#c084fc', backgroundColor: 'rgba(192, 132, 252, 0.1)' }}
-          title="AI LaTeX Copilot (Math, TikZ & Doctor)"
-        >
-          <Sparkles size={13} />
-          <span>AI Copilot</span>
-        </button>
-
-        {/* Admin Security & Cloud Vault Button */}
+        {/* Cloud Status / Admin Vault */}
         <button
           onClick={onOpenSupabase}
           className="btn-ghost"
-          style={{ ...toolBtnStyle, color: isCloudConnected ? '#10b981' : 'var(--text-secondary)' }}
-          title={isCloudConnected ? "Admin Vault (Cloud Connected)" : "Admin Security & Cloud Vault"}
+          style={{
+            ...toolBtnStyle,
+            color: isCloudConnected ? '#10b981' : 'var(--text-secondary)',
+            backgroundColor: isCloudConnected ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+          }}
+          title={isCloudConnected ? "Supabase Cloud Integrated" : "Cloud & Security Vault"}
         >
-          {isCloudConnected ? <Cloud size={13} /> : <Shield size={13} color="#f59e0b" />}
-          <span>{isCloudConnected ? 'Cloud Active' : 'Admin'}</span>
+          {isCloudConnected ? <Cloud size={13} /> : <ShieldCheck size={13} />}
+          <span>{isCloudConnected ? 'Cloud Synced' : 'Cloud Setup'}</span>
         </button>
 
         <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+
+        {/* Math & TikZ Library */}
+        <button onClick={onOpenSymbols} className="btn-ghost" title="LaTeX Symbols & Formulas Library" style={toolBtnStyle}>
+          <Hash size={13} color="#38bdf8" />
+          <span>Formulas</span>
+        </button>
 
         {/* Upload Figure Button */}
         <button onClick={onOpenImageUpload} className="btn-ghost" title="Upload Figure & Insert \includegraphics" style={toolBtnStyle}>
@@ -169,12 +165,6 @@ export const Navbar: React.FC<Props> = ({
         <button onClick={onOpenTableBuilder} className="btn-ghost" title="Visual Table Builder" style={toolBtnStyle}>
           <Table size={13} />
           <span>Table</span>
-        </button>
-
-        {/* Math Symbols */}
-        <button onClick={onOpenSymbols} className="btn-ghost" title="LaTeX Symbol Palette" style={toolBtnStyle}>
-          <Hash size={13} />
-          <span>Symbols</span>
         </button>
 
         {/* Starter Templates */}
