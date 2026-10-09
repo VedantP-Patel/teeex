@@ -15,12 +15,14 @@ interface Props {
   renderedHtml: string;
   parsedDoc: ParsedDocument;
   onJumpToLine?: (line: number) => void;
+  rawCode?: string;
 }
 
 export const PreviewPane: React.FC<Props> = ({
   renderedHtml,
   parsedDoc,
   onJumpToLine,
+  rawCode,
 }) => {
   const [zoom, setZoom] = useState(100);
   const [forceTwoColumn, setForceTwoColumn] = useState<boolean | null>(null);
@@ -35,23 +37,61 @@ export const PreviewPane: React.FC<Props> = ({
     window.print();
   };
 
-  // SyncTeX Click Handler: clicks on preview headings/equations jump to source line
+  // SyncTeX Click Handler: clicks on ANY preview element (title, authors, abstract, section, paragraph, equation, figure, table, list) jump to source line
   const handlePreviewClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!onJumpToLine) return;
     const target = e.target as HTMLElement;
+
+    // 1. Direct data-line attribute on the target or any parent element
+    const lineEl = target.closest('[data-line]') as HTMLElement | null;
+    if (lineEl && lineEl.dataset.line) {
+      const line = parseInt(lineEl.dataset.line, 10);
+      if (!isNaN(line) && line > 0) {
+        onJumpToLine(line);
+        return;
+      }
+    }
+
+    // 2. Heading fallback: match text against parsed sections
     const heading = target.closest('h2, h3, h4');
     if (heading) {
-      const headingText = heading.textContent?.trim().toLowerCase();
-      const matched = parsedDoc.sections.find(s => s.title.toLowerCase() === headingText);
+      const headingText = heading.textContent?.trim().toLowerCase() || '';
+      const matched = parsedDoc.sections.find(s =>
+        headingText.includes(s.title.toLowerCase()) ||
+        s.title.toLowerCase().includes(headingText)
+      );
       if (matched) {
         onJumpToLine(matched.line);
         return;
       }
     }
 
+    // 3. Math equation fallback
     const mathBlock = target.closest('.latex-math-display');
-    if (mathBlock && parsedDoc.mathBlocks.length > 0) {
-      onJumpToLine(parsedDoc.mathBlocks[0].line);
+    if (mathBlock) {
+      const mathText = mathBlock.textContent?.trim() || '';
+      const matchedMath = parsedDoc.mathBlocks.find(m =>
+        mathText.includes(m.latex.slice(0, 10))
+      );
+      if (matchedMath) {
+        onJumpToLine(matchedMath.line);
+        return;
+      } else if (parsedDoc.mathBlocks.length > 0) {
+        onJumpToLine(parsedDoc.mathBlocks[0].line);
+        return;
+      }
+    }
+
+    // 4. Text fallback: search snippet in raw code
+    if (rawCode) {
+      const rawText = target.textContent?.trim().slice(0, 25);
+      if (rawText && rawText.length > 4) {
+        const lines = rawCode.split('\n');
+        const foundIdx = lines.findIndex(l => l.includes(rawText.slice(0, 15)));
+        if (foundIdx !== -1) {
+          onJumpToLine(foundIdx + 1);
+        }
+      }
     }
   };
 
@@ -121,9 +161,22 @@ export const PreviewPane: React.FC<Props> = ({
           className="latex-paper-sheet"
         >
           {/* Academic Header (Title & Authors) */}
+          {/* Academic Header (Title & Authors) with SyncTeX Line Anchors */}
           <div style={academicHeaderStyle}>
-            <h1 style={paperTitleStyle}>{parsedDoc.title}</h1>
-            <div style={paperAuthorBlockStyle}>
+            <h1
+              style={{ ...paperTitleStyle, cursor: 'pointer' }}
+              className="synctex-target"
+              data-line={parsedDoc.titleLine || 1}
+              title={`Click to jump to line ${parsedDoc.titleLine || 1} in code`}
+            >
+              {parsedDoc.title}
+            </h1>
+            <div
+              style={{ ...paperAuthorBlockStyle, cursor: 'pointer' }}
+              className="synctex-target"
+              data-line={parsedDoc.authorLine || 1}
+              title={`Click to jump to line ${parsedDoc.authorLine || 1} in code`}
+            >
               {parsedDoc.authors.map((auth, idx) => (
                 <span key={idx} style={paperAuthorNameStyle}>
                   {auth}
@@ -131,7 +184,14 @@ export const PreviewPane: React.FC<Props> = ({
               ))}
             </div>
             {parsedDoc.date && (
-              <div style={paperDateStyle}>{parsedDoc.date}</div>
+              <div
+                style={{ ...paperDateStyle, cursor: 'pointer' }}
+                className="synctex-target"
+                data-line={parsedDoc.dateLine || 1}
+                title={`Click to jump to line ${parsedDoc.dateLine || 1} in code`}
+              >
+                {parsedDoc.date}
+              </div>
             )}
           </div>
 

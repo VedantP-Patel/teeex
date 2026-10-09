@@ -288,3 +288,27 @@ input:focus, textarea:focus, select:focus {
   background: var(--bg-surface-elevated);
   border-color: var(--border-medium);
 }
+
+/* ==========================================================================
+   SyncTeX Universal Reverse-Search Navigation Styles
+   ========================================================================== */
+.synctex-target {
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.15s ease, outline-color 0.15s ease, box-shadow 0.15s ease;
+  border-radius: 2px;
+}
+
+.synctex-target:hover {
+  background-color: rgba(56, 189, 248, 0.08);
+  outline: 1px dashed rgba(56, 189, 248, 0.35);
+  outline-offset: 2px;
+}
+
+.latex-figure-container.synctex-target:hover,
+.table-container.synctex-target:hover,
+.latex-math-display.synctex-target:hover {
+  background-color: rgba(56, 189, 248, 0.05);
+  outline: 1px solid rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.1);
+}

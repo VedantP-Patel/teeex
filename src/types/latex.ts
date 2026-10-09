@@ -69,6 +69,10 @@ export interface ParsedDocument {
   authors: string[];
   date: string;
   abstract: string;
+  titleLine?: number;
+  authorLine?: number;
+  dateLine?: number;
+  abstractLine?: number;
   sections: Array<{
     title: string;
     level: number;

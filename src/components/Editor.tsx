@@ -56,6 +56,9 @@ export const Editor: React.FC<Props> = ({
     return (localStorage.getItem('teeex_editor_mode') as 'code' | 'visual') || 'code';
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const gutterRef = useRef<HTMLDivElement>(null);
+  const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
   const [activeCommentLine, setActiveCommentLine] = useState<number | null>(null);
   const [commentDraft, setCommentDraft] = useState('');
   const [currentCursorLine, setCurrentCursorLine] = useState(1);
@@ -80,6 +83,15 @@ export const Editor: React.FC<Props> = ({
     commentMap.set(c.line, arr);
   });
 
+  // Sync gutter scroll and overlay position
+  const handleScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
+    const st = e.currentTarget.scrollTop;
+    setScrollTop(st);
+    if (gutterRef.current) {
+      gutterRef.current.scrollTop = st;
+    }
+  };
+
   // Scroll to target line if triggered externally (SyncTeX)
   useEffect(() => {
     if (targetLine && textareaRef.current) {
@@ -88,10 +100,23 @@ export const Editor: React.FC<Props> = ({
       textarea.focus();
       textarea.setSelectionRange(targetCharPos, targetCharPos);
 
-      // Approximate scroll
+      // Accurate scroll calculation
       const lineHeight = 21;
-      textarea.scrollTop = Math.max(0, (targetLine - 5) * lineHeight);
+      const newScrollTop = Math.max(0, (targetLine - 5) * lineHeight);
+      textarea.scrollTop = newScrollTop;
+      setScrollTop(newScrollTop);
+      if (gutterRef.current) {
+        gutterRef.current.scrollTop = newScrollTop;
+      }
+
+      // Flash highlight line for 3 seconds
+      setHighlightedLine(targetLine);
+      const timer = setTimeout(() => {
+        setHighlightedLine(null);
+      }, 3000);
+
       onClearTargetLine();
+      return () => clearTimeout(timer);
     }
   }, [targetLine, lines, onClearTargetLine]);
 
@@ -343,15 +368,24 @@ export const Editor: React.FC<Props> = ({
         /* Editor Body: Line Gutters + Code Area */
         <div style={editorBodyStyle}>
         {/* Line Numbers & Diagnostic Gutters */}
-        <div style={gutterStyle}>
+        <div ref={gutterRef} style={gutterStyle}>
           {lines.map((_, idx) => {
             const lineNum = idx + 1;
             const diag = diagMap.get(lineNum);
             const lineComments = commentMap.get(lineNum);
             const peerHere = peers.find(p => p.activeFile === fileName && p.cursorLine === lineNum);
+            const isHighlighted = highlightedLine === lineNum;
 
             return (
-              <div key={lineNum} style={gutterRowStyle}>
+              <div
+                key={lineNum}
+                style={{
+                  ...gutterRowStyle,
+                  backgroundColor: isHighlighted ? 'rgba(56, 189, 248, 0.28)' : 'transparent',
+                  boxShadow: isHighlighted ? 'inset 3px 0 0 #38bdf8' : 'none',
+                  transition: 'background-color 0.2s ease, box-shadow 0.2s ease',
+                }}
+              >
                 {/* Diagnostic Marker or Comment Icon */}
                 <div style={markerAreaStyle}>
                   {diag ? (
@@ -378,8 +412,12 @@ export const Editor: React.FC<Props> = ({
 
                 {/* Line Number */}
                 <span style={{
-                  color: diag ? (diag.severity === 'error' ? '#f43f5e' : '#f59e0b') : 'var(--text-faint)',
-                  fontWeight: diag ? 700 : 400
+                  color: isHighlighted
+                    ? '#38bdf8'
+                    : diag
+                    ? (diag.severity === 'error' ? '#f43f5e' : '#f59e0b')
+                    : 'var(--text-faint)',
+                  fontWeight: isHighlighted || diag ? 700 : 400
                 }}>
                   {lineNum}
                 </span>
@@ -402,12 +440,31 @@ export const Editor: React.FC<Props> = ({
         </div>
 
         {/* Textarea Input & Multiplayer Floating Overlay */}
-        <div style={{ position: 'relative', flex: 1, height: '100%' }}>
+        <div style={{ position: 'relative', flex: 1, height: '100%', overflow: 'hidden' }}>
+          {/* External Highlight Line Banner (SyncTeX Jump Flash) */}
+          {highlightedLine !== null && (
+            <div
+              style={{
+                position: 'absolute',
+                top: (highlightedLine - 1) * 21 + 10 - scrollTop,
+                left: 0,
+                right: 0,
+                height: 21,
+                backgroundColor: 'rgba(56, 189, 248, 0.16)',
+                borderLeft: '3px solid #38bdf8',
+                boxShadow: '0 0 12px rgba(56, 189, 248, 0.25)',
+                pointerEvents: 'none',
+                zIndex: 15,
+                transition: 'opacity 0.3s ease',
+              }}
+            />
+          )}
+
           {/* Peer Cursors Overlay */}
           {peers
             .filter(p => p.activeFile === fileName)
             .map(p => {
-              const topOffset = (p.cursorLine - 1) * 21;
+              const topOffset = (p.cursorLine - 1) * 21 + 10 - scrollTop;
               return (
                 <div
                   key={p.id}
@@ -570,6 +627,7 @@ export const Editor: React.FC<Props> = ({
             onSelect={handleSelect}
             onClick={handleSelect}
             onKeyUp={handleSelect}
+            onScroll={handleScroll}
             spellCheck={false}
             style={{
               ...textareaStyle,

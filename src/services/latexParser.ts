@@ -250,6 +250,20 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
     abstract = abstractMatch[1].trim();
   }
 
+  // Extract Line anchors for SyncTeX
+  let titleLine = 1;
+  let authorLine = 1;
+  let dateLine = 1;
+  let abstractLine = 1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.includes('\\title{') && titleLine === 1) titleLine = i + 1;
+    if (l.includes('\\author{') && authorLine === 1) authorLine = i + 1;
+    if (l.includes('\\date{') && dateLine === 1) dateLine = i + 1;
+    if (l.includes('\\begin{abstract}') && abstractLine === 1) abstractLine = i + 1;
+  }
+
   // Extract Sections with line numbers for SyncTeX jump
   const sections: ParsedDocument['sections'] = [];
   const mathBlocks: ParsedDocument['mathBlocks'] = [];
@@ -285,6 +299,10 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
     authors: authors.length ? authors : ['Author Name'],
     date: date || new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
     abstract,
+    titleLine,
+    authorLine,
+    dateLine,
+    abstractLine,
     sections,
     mathBlocks,
     isTwoColumn,
@@ -293,9 +311,50 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
 }
 
 /**
+ * Helper to locate source line number for SyncTeX jump
+ */
+function findSourceLine(needle: string, rawLines: string[], hintPrefix?: string): number {
+  const clean = needle.trim();
+  if (!clean) return 1;
+
+  // 1. If a hintPrefix is given (e.g. '\\section', '\\begin{equation', '\\begin{tabular'), try matching both
+  if (hintPrefix) {
+    const idx = rawLines.findIndex(l => l.includes(hintPrefix) && l.toLowerCase().includes(clean.slice(0, 15).toLowerCase()));
+    if (idx !== -1) return idx + 1;
+  }
+
+  // 2. Exact substring match of snippet
+  const snippet = clean.slice(0, 25);
+  const idx = rawLines.findIndex(l => l.includes(snippet));
+  if (idx !== -1) return idx + 1;
+
+  // 3. Case-insensitive substring match
+  const lowerSnippet = snippet.toLowerCase();
+  const lowerIdx = rawLines.findIndex(l => l.toLowerCase().includes(lowerSnippet));
+  if (lowerIdx !== -1) return lowerIdx + 1;
+
+  // 4. Token-based match (first 2-3 words)
+  const words = clean.split(/\s+/).filter(w => w.length > 2).slice(0, 3);
+  if (words.length > 0) {
+    const wordIdx = rawLines.findIndex(l => words.every(w => l.toLowerCase().includes(w.toLowerCase())));
+    if (wordIdx !== -1) return wordIdx + 1;
+  }
+
+  // 5. Hint prefix alone fallback
+  if (hintPrefix) {
+    const prefixIdx = rawLines.findIndex(l => l.includes(hintPrefix));
+    if (prefixIdx !== -1) return prefixIdx + 1;
+  }
+
+  return 1;
+}
+
+/**
  * Render High-Fidelity Academic Paper HTML with KaTeX Math, Figures, and SyncTeX line anchors
  */
 export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
+  const rawLines = code.split('\n');
+
   // Strip comments
   let cleanCode = code
     .split('\n')
@@ -338,13 +397,14 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     const filename = imgMatch ? imgMatch[1].trim() : 'figure.png';
     const caption = captionMatch ? parseInlineFormatting(captionMatch[1]) : '';
     const label = labelMatch ? labelMatch[1] : '';
+    const figLine = findSourceLine(filename, rawLines, '\\includegraphics');
 
     // Check if image exists in project files with dataUrl
     const matchedFile = files?.find(f => f.name === filename || f.name.includes(filename));
     const imgSrc = matchedFile?.dataUrl || '';
 
     return `
-      <div class="latex-figure-container" id="${label}">
+      <div class="latex-figure-container synctex-target" data-line="${figLine}" id="${label}" title="Click to jump to line ${figLine} in code">
         ${imgSrc ? `
           <img src="${imgSrc}" alt="${caption || filename}" class="latex-figure-img" />
         ` : `
@@ -365,27 +425,30 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   // Direct \includegraphics outside figure environment
   bodyText = bodyText.replace(/\\includegraphics(?:\[.*?\])?\{([^}]+)\}/g, (_, filename) => {
     const name = filename.trim();
+    const figLine = findSourceLine(name, rawLines, '\\includegraphics');
     const matchedFile = files?.find(f => f.name === name || f.name.includes(name));
     if (matchedFile?.dataUrl) {
-      return `<div class="latex-figure-container"><img src="${matchedFile.dataUrl}" alt="${name}" class="latex-figure-img" /></div>`;
+      return `<div class="latex-figure-container synctex-target" data-line="${figLine}" title="Click to jump to line ${figLine} in code"><img src="${matchedFile.dataUrl}" alt="${name}" class="latex-figure-img" /></div>`;
     }
-    return `<div class="latex-figure-container"><div class="latex-figure-placeholder">[Figure: ${escapeHtml(name)}]</div></div>`;
+    return `<div class="latex-figure-container synctex-target" data-line="${figLine}" title="Click to jump to line ${figLine} in code"><div class="latex-figure-placeholder">[Figure: ${escapeHtml(name)}]</div></div>`;
   });
 
   // Render Math: Display math blocks \[ ... \] or \begin{equation} ... \end{equation}
   bodyText = bodyText.replace(/\\begin\{equation\*?\}([\s\S]*?)\\end\{equation\*?\}/g, (_, math) => {
+    const eqLine = findSourceLine(math.trim().slice(0, 20), rawLines, '\\begin{equation');
     try {
-      return `<div class="latex-math-display synctex-target">${katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })}</div>`;
+      return `<div class="latex-math-display synctex-target" data-line="${eqLine}" title="Click to jump to line ${eqLine} in code">${katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })}</div>`;
     } catch {
-      return `<div class="latex-math-error">[Math Rendering Error: ${escapeHtml(math)}]</div>`;
+      return `<div class="latex-math-error synctex-target" data-line="${eqLine}">[Math Rendering Error: ${escapeHtml(math)}]</div>`;
     }
   });
 
   bodyText = bodyText.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => {
+    const eqLine = findSourceLine(math.trim().slice(0, 20), rawLines, '\\[');
     try {
-      return `<div class="latex-math-display synctex-target">${katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })}</div>`;
+      return `<div class="latex-math-display synctex-target" data-line="${eqLine}" title="Click to jump to line ${eqLine} in code">${katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })}</div>`;
     } catch {
-      return `<div class="latex-math-error">[Math Rendering Error: ${escapeHtml(math)}]</div>`;
+      return `<div class="latex-math-error synctex-target" data-line="${eqLine}">[Math Rendering Error: ${escapeHtml(math)}]</div>`;
     }
   });
 
@@ -406,7 +469,10 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
       .map((r: string) => r.trim())
       .filter((r: string) => r && !r.startsWith('\\hline'));
 
-    let html = '<div class="table-container"><table class="latex-table"><tbody>';
+    const firstCell = rows[0]?.split('&')[0]?.replace(/\\hline/g, '').trim() || '';
+    const tabLine = findSourceLine(firstCell || 'tabular', rawLines, '\\begin{tabular');
+
+    let html = `<div class="table-container synctex-target" data-line="${tabLine}" title="Click to jump to line ${tabLine} in code"><table class="latex-table"><tbody>`;
     for (const row of rows) {
       const cells = row.split('&').map((c: string) => c.replace(/\\hline/g, '').trim());
       html += '<tr>' + cells.map((c: string) => `<td>${parseInlineFormatting(c)}</td>`).join('') + '</tr>';
@@ -415,31 +481,44 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     return html;
   });
 
-  // Format Headings with synctex-target class
-  bodyText = bodyText.replace(/\\section\*?\{([^}]+)\}/g, '<h2 class="latex-section synctex-target">$1</h2>');
-  bodyText = bodyText.replace(/\\subsection\*?\{([^}]+)\}/g, '<h3 class="latex-subsection synctex-target">$1</h3>');
-  bodyText = bodyText.replace(/\\subsubsection\*?\{([^}]+)\}/g, '<h4 class="latex-subsubsection synctex-target">$1</h4>');
+  // Format Headings with synctex-target class & data-line
+  bodyText = bodyText.replace(/\\(section|subsection|subsubsection)\*?\{([^}]+)\}/g, (_, level, headingText) => {
+    const cleanHeading = cleanLatexInline(headingText).trim();
+    const secLine = findSourceLine(cleanHeading, rawLines, `\\${level}`);
+    const tag = level === 'section' ? 'h2' : level === 'subsection' ? 'h3' : 'h4';
+    const cls = level === 'section' ? 'latex-section' : level === 'subsection' ? 'latex-subsection' : 'latex-subsubsection';
+    return `<${tag} class="${cls} synctex-target" data-line="${secLine}" title="Click to jump to line ${secLine} in code">${headingText}</${tag}>`;
+  });
 
   // Format Lists
   bodyText = bodyText.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (_, content) => {
+    const listLine = findSourceLine('\\begin{itemize', rawLines);
     const items = content.split('\\item').slice(1);
-    return '<ul class="latex-list">' + items.map((it: string) => `<li>${parseInlineFormatting(it.trim())}</li>`).join('') + '</ul>';
+    return `<ul class="latex-list synctex-target" data-line="${listLine}" title="Click to jump to line ${listLine} in code">` + items.map((it: string) => {
+      const itLine = findSourceLine(it.trim().slice(0, 20), rawLines, '\\item');
+      return `<li class="synctex-target" data-line="${itLine}" title="Click to jump to line ${itLine} in code">${parseInlineFormatting(it.trim())}</li>`;
+    }).join('') + '</ul>';
   });
 
   bodyText = bodyText.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (_, content) => {
+    const listLine = findSourceLine('\\begin{enumerate', rawLines);
     const items = content.split('\\item').slice(1);
-    return '<ol class="latex-list">' + items.map((it: string) => `<li>${parseInlineFormatting(it.trim())}</li>`).join('') + '</ol>';
+    return `<ol class="latex-list synctex-target" data-line="${listLine}" title="Click to jump to line ${listLine} in code">` + items.map((it: string) => {
+      const itLine = findSourceLine(it.trim().slice(0, 20), rawLines, '\\item');
+      return `<li class="synctex-target" data-line="${itLine}" title="Click to jump to line ${itLine} in code">${parseInlineFormatting(it.trim())}</li>`;
+    }).join('') + '</ol>';
   });
 
   // Format Abstract
   bodyText = bodyText.replace(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/g, (_, abs) => {
-    return `<div class="latex-abstract"><div class="latex-abstract-title">ABSTRACT</div><p>${parseInlineFormatting(abs.trim())}</p></div>`;
+    const absLine = findSourceLine('\\begin{abstract}', rawLines);
+    return `<div class="latex-abstract synctex-target" data-line="${absLine}" title="Click to jump to line ${absLine} in code"><div class="latex-abstract-title">ABSTRACT</div><p class="synctex-target" data-line="${absLine}">${parseInlineFormatting(abs.trim())}</p></div>`;
   });
 
   // Inline Formatting
   bodyText = parseInlineFormatting(bodyText);
 
-  // Paragraph wrapping
+  // Paragraph wrapping with accurate data-line anchors
   const paragraphs = bodyText
     .split(/\n\s*\n/)
     .map(p => p.trim())
@@ -448,7 +527,9 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
       if (p.startsWith('<h') || p.startsWith('<div') || p.startsWith('<ul') || p.startsWith('<ol') || p.startsWith('<table')) {
         return p;
       }
-      return `<p class="latex-paragraph synctex-target">${p}</p>`;
+      const cleanSnippet = p.replace(/<[^>]+>/g, '').trim().slice(0, 25);
+      const pLine = cleanSnippet ? findSourceLine(cleanSnippet.slice(0, 15), rawLines) : 1;
+      return `<p class="latex-paragraph synctex-target" data-line="${pLine}" title="Click to jump to line ${pLine} in code">${p}</p>`;
     });
 
   return paragraphs.join('\n');

@@ -715,6 +715,7 @@ export function App() {
               renderedHtml={renderedHtml}
               parsedDoc={parsedDoc}
               onJumpToLine={setTargetLine}
+              rawCode={activeFile.content}
             />
           </div>
         </div>
