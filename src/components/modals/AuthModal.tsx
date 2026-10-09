@@ -168,7 +168,7 @@ export const AuthModal: React.FC<Props> = ({
   };
 
   return (
-    <div style={backdropStyle} onClick={onClose}>
+    <div style={backdropStyle} onClick={_currentUser ? onClose : undefined}>
       <div style={modalStyle} onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div style={headerStyle}>
@@ -187,9 +187,11 @@ export const AuthModal: React.FC<Props> = ({
               </p>
             </div>
           </div>
-          <button onClick={onClose} style={closeBtnStyle} title="Close">
-            <X size={18} />
-          </button>
+          {_currentUser && (
+            <button onClick={onClose} style={closeBtnStyle} title="Close">
+              <X size={18} />
+            </button>
+          )}
         </div>
 
         {/* Tab Switcher */}

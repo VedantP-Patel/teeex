@@ -193,7 +193,27 @@ export function loadProjects(userEmail?: string): Project[] {
     return filtered;
   }
 
-  return allProjects;
+  // If no userEmail provided (guest), return an empty placeholder project
+  // so they don't see the admin's demo projects.
+  return [{
+    id: 'proj-guest',
+    title: 'Sign In Required',
+    ownerId: 'usr-guest',
+    ownerEmail: 'guest@teeex.io',
+    role: 'owner',
+    createdAt: new Date().toISOString(),
+    updatedAt: 'Just now',
+    files: [{
+      id: 'main.tex',
+      name: 'main.tex',
+      type: 'tex',
+      content: '\\documentclass{article}\n\\begin{document}\nWelcome to Teeex Studio. Please sign in to view your projects.\n\\end{document}',
+      isEntry: true
+    }],
+    tags: [],
+    members: [],
+    isArchived: false,
+  }];
 }
 
 export function saveProjects(projects: Project[]): void {

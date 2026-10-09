@@ -90,11 +90,12 @@ export function App() {
     setTheme(next);
   };
 
-  // Auth & Session State
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     return getStoredSession().user;
   });
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(() => {
+    return getStoredSession().user === null;
+  });
 
   // Multi-Project State
   const [projects, setProjects] = useState<Project[]>(() => loadProjects(getStoredSession().user?.email));
@@ -827,6 +828,9 @@ export function App() {
     const loadedProjects = loadProjects(undefined);
     setProjects(loadedProjects);
     setActiveProjectIdState(getActiveProjectId(loadedProjects));
+    
+    // Force auth modal to reopen
+    setIsAuthOpen(true);
   };
 
   // Draggable Split Divider Handlers
