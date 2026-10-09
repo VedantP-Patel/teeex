@@ -20,7 +20,8 @@ import {
   Edit3,
   Palette,
   FileText,
-  ChevronDown
+  ChevronDown,
+  Zap
 } from 'lucide-react';
 import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile, TrackedChange } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
@@ -125,6 +126,24 @@ export const Editor: React.FC<Props> = ({
     arr.push(c);
     commentMap.set(c.line, arr);
   });
+
+  const [autoSyncPreview, setAutoSyncPreview] = useState<boolean>(() => {
+    return localStorage.getItem('teeex_auto_sync_preview') === 'true';
+  });
+  const lastAutoSyncedLineRef = useRef<number>(1);
+
+  // Auto Sync: Debounced tracking when cursor line changes
+  useEffect(() => {
+    if (!autoSyncPreview || !onForwardSync) return;
+    if (currentCursorLine === lastAutoSyncedLineRef.current) return;
+
+    const timer = setTimeout(() => {
+      lastAutoSyncedLineRef.current = currentCursorLine;
+      onForwardSync(currentCursorLine);
+    }, 260);
+
+    return () => clearTimeout(timer);
+  }, [autoSyncPreview, currentCursorLine, onForwardSync]);
 
   const [syntaxTheme, setSyntaxTheme] = useState<SyntaxTheme>(() => {
     const saved = localStorage.getItem('teeex_syntax_theme') as SyntaxTheme;
@@ -662,33 +681,80 @@ export const Editor: React.FC<Props> = ({
               )}
             </button>
 
-            {/* Forward SyncTeX Button */}
+            {/* Forward SyncTeX Control: Manual Sync Button + Auto Sync Toggle */}
             {onForwardSync && (
-              <button
-                type="button"
-                onClick={() => onForwardSync(currentCursorLine)}
+              <div
                 style={{
-                  height: 24,
-                  padding: '0 8px',
-                  fontSize: 10.5,
-                  fontWeight: 500,
-                  color: '#38bdf8',
-                  backgroundColor: 'rgba(56, 189, 248, 0.1)',
-                  border: '1px solid rgba(56, 189, 248, 0.25)',
-                  borderRadius: 5,
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 4,
-                  whiteSpace: 'nowrap',
+                  height: 24,
+                  borderRadius: 5,
+                  backgroundColor: 'var(--bg-surface-1)',
+                  border: '1px solid var(--border-medium)',
+                  overflow: 'hidden',
                   flexShrink: 0,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
                 }}
-                title="Forward Sync: Center and pulse preview on current cursor line"
               >
-                <ArrowRight size={11} />
-                <span style={{ whiteSpace: 'nowrap' }}>Sync Preview</span>
-              </button>
+                {/* Manual Click Sync */}
+                <button
+                  type="button"
+                  onClick={() => onForwardSync(currentCursorLine)}
+                  style={{
+                    height: '100%',
+                    padding: '0 8px',
+                    fontSize: 10.5,
+                    fontWeight: 500,
+                    color: '#38bdf8',
+                    backgroundColor: 'transparent',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    whiteSpace: 'nowrap',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    borderRight: '1px solid var(--border-subtle)',
+                  }}
+                  title="Manual Sync: Click to immediately scroll & pulse preview to current cursor line"
+                >
+                  <ArrowRight size={11} />
+                  <span style={{ whiteSpace: 'nowrap' }}>Sync Preview</span>
+                </button>
+
+                {/* Auto Sync Toggle */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !autoSyncPreview;
+                    setAutoSyncPreview(next);
+                    localStorage.setItem('teeex_auto_sync_preview', String(next));
+                    if (next) onForwardSync(currentCursorLine);
+                  }}
+                  style={{
+                    height: '100%',
+                    padding: '0 7px',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    color: autoSyncPreview ? '#10b981' : 'var(--text-muted)',
+                    backgroundColor: autoSyncPreview ? 'rgba(16, 185, 129, 0.14)' : 'transparent',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3.5,
+                    whiteSpace: 'nowrap',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title={
+                    autoSyncPreview
+                      ? 'Auto Sync is ON (Preview automatically tracks cursor position). Click to switch to manual.'
+                      : 'Auto Sync is OFF (Manual click). Click to enable Auto Sync preview.'
+                  }
+                >
+                  <Zap size={10} color={autoSyncPreview ? '#10b981' : 'var(--text-muted)'} />
+                  <span style={{ whiteSpace: 'nowrap' }}>
+                    {autoSyncPreview ? 'Auto: ON' : 'Auto: OFF'}
+                  </span>
+                </button>
+              </div>
             )}
 
             {/* Syntax Theme Switcher */}
