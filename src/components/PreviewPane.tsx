@@ -6,7 +6,6 @@ import {
   FileCheck,
   Columns,
   Square,
-  Printer,
   MousePointerClick,
   BookOpen,
   ChevronDown,
@@ -14,7 +13,6 @@ import {
 } from 'lucide-react';
 import type { ParsedDocument } from '../types/latex';
 import { PAPER_FORMATS, type PaperFormatId } from '../services/paperFormats';
-import { exportDocumentAsPdf } from '../services/pdfExporter';
 
 interface Props {
   renderedHtml: string;
@@ -25,6 +23,8 @@ interface Props {
   onClearForwardTargetLine?: () => void;
   paperFormat?: PaperFormatId;
   onFormatChange?: (format: PaperFormatId) => void;
+  isTwoColumn?: boolean;
+  onToggleTwoColumn?: () => void;
 }
 
 export const PreviewPane: React.FC<Props> = ({
@@ -36,9 +36,11 @@ export const PreviewPane: React.FC<Props> = ({
   onClearForwardTargetLine,
   paperFormat,
   onFormatChange,
+  isTwoColumn: isTwoColumnProp,
+  onToggleTwoColumn,
 }) => {
   const [zoom, setZoom] = useState(78);
-  const [forceTwoColumn, setForceTwoColumn] = useState<boolean | null>(null);
+  const [localColumnOverride, setLocalColumnOverride] = useState<boolean | null>(null);
   const [localFormat, setLocalFormat] = useState<PaperFormatId>(() => {
     return (localStorage.getItem('teeex_paper_format') as PaperFormatId) || 'ieee';
   });
@@ -46,7 +48,9 @@ export const PreviewPane: React.FC<Props> = ({
 
   const activeFormat = paperFormat || localFormat;
   const currentFormatConfig = PAPER_FORMATS[activeFormat] || PAPER_FORMATS.ieee;
-  const isTwoCol = forceTwoColumn !== null ? forceTwoColumn : (currentFormatConfig.defaultColumns === 2);
+  const isTwoCol = isTwoColumnProp !== undefined
+    ? isTwoColumnProp
+    : (localColumnOverride !== null ? localColumnOverride : (currentFormatConfig.defaultColumns === 2));
 
   const sheetRef = useRef<HTMLDivElement>(null);
   const formatMenuRef = useRef<HTMLDivElement>(null);
@@ -69,21 +73,10 @@ export const PreviewPane: React.FC<Props> = ({
     localStorage.setItem('teeex_paper_format', fmt);
     onFormatChange?.(fmt);
     setIsFormatMenuOpen(false);
-    // Reset manual column override so it uses the format's default standard
-    setForceTwoColumn(null);
   };
 
   const handleZoom = (delta: number) => {
     setZoom(prev => Math.min(160, Math.max(60, prev + delta)));
-  };
-
-  const handlePrint = () => {
-    exportDocumentAsPdf({
-      title: parsedDoc.title || 'LaTeX Document',
-      element: sheetRef.current,
-      format: activeFormat,
-      isTwoColumn: isTwoCol,
-    });
   };
 
   // Forward SyncTeX: Code -> Preview
@@ -399,7 +392,7 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
           {/* Column Toggle Button */}
           <button
             type="button"
-            onClick={() => setForceTwoColumn(!isTwoCol)}
+            onClick={onToggleTwoColumn || (() => setLocalColumnOverride(!isTwoCol))}
             style={{
               padding: '2px 7px',
               fontSize: 10.5,
@@ -466,31 +459,6 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
               <Maximize2 size={10} />
             </button>
           </div>
-
-          <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', flexShrink: 0 }} />
-
-          {/* Print / Save as PDF Button */}
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="btn-secondary"
-            style={{
-              padding: '2px 8px',
-              fontSize: 10.5,
-              fontWeight: 600,
-              height: 24,
-              borderRadius: 5,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              whiteSpace: 'nowrap',
-              cursor: 'pointer',
-            }}
-            title="Print / Save as PDF"
-          >
-            <Printer size={11} />
-            <span>Print</span>
-          </button>
         </div>
       </div>
 

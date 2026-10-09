@@ -81,7 +81,11 @@ export function App() {
   }, [theme]);
 
   const toggleTheme = () => {
+    document.documentElement.classList.add('theme-transitioning');
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+    setTimeout(() => {
+      document.documentElement.classList.remove('theme-transitioning');
+    }, 450);
   };
 
   // Auth & Session State
@@ -110,6 +114,19 @@ export function App() {
   const [paperFormat, setPaperFormat] = useState<PaperFormatId>(() => {
     return (localStorage.getItem('teeex_paper_format') as PaperFormatId) || 'ieee';
   });
+  const [isTwoColumn, setIsTwoColumn] = useState<boolean>(() => {
+    const saved = localStorage.getItem('teeex_column_mode');
+    if (saved !== null) return saved === '2';
+    return true; // Default standard format is 2-column (IEEE Transactions)
+  });
+
+  const handleToggleTwoColumn = useCallback(() => {
+    setIsTwoColumn(prev => {
+      const next = !prev;
+      localStorage.setItem('teeex_column_mode', next ? '2' : '1');
+      return next;
+    });
+  }, []);
 
   // Active Role Resolution (URL query parameter ?role=viewer overrides, or activeProject.role)
   const currentRole = useMemo<ProjectRole>(() => {
@@ -585,9 +602,9 @@ export function App() {
       title: projectTitle || parsedDoc.title || 'LaTeX Document',
       element: sheet,
       format: paperFormat,
-      isTwoColumn: paperFormat === 'ieee' || paperFormat === 'acm' || parsedDoc.isTwoColumn,
+      isTwoColumn: isTwoColumn,
     });
-  }, [projectTitle, parsedDoc.title, paperFormat, parsedDoc.isTwoColumn]);
+  }, [projectTitle, parsedDoc.title, paperFormat, isTwoColumn]);
 
   // Export full project as .zip package
   const handleExportZip = () => {
@@ -958,6 +975,8 @@ export function App() {
               onClearForwardTargetLine={() => setForwardTargetLine(null)}
               paperFormat={paperFormat}
               onFormatChange={setPaperFormat}
+              isTwoColumn={isTwoColumn}
+              onToggleTwoColumn={handleToggleTwoColumn}
             />
           </div>
         </div>
