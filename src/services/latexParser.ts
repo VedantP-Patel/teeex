@@ -1,5 +1,5 @@
 import katex from 'katex';
-import type { Diagnostic, ParsedDocument, ProjectFile } from '../types/latex';
+import type { Diagnostic, ParsedDocument, ProjectFile, LatexLabel } from '../types/latex';
 
 /**
  * High-speed LaTeX Diagnostic Linter
@@ -571,4 +571,74 @@ function escapeHtml(str: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+export interface BeamerSlide {
+  title: string;
+  content: string;
+  slideNumber: number;
+}
+
+export function extractBeamerSlides(code: string): BeamerSlide[] {
+  const slides: BeamerSlide[] = [];
+  const frameRegex = /\\begin\{frame\}(?:\[.*?\])?(?:\{([^}]+)\})?([\s\S]*?)\\end\{frame\}/g;
+  let match: RegExpExecArray | null;
+  let num = 1;
+
+  while ((match = frameRegex.exec(code)) !== null) {
+    const rawTitle = match[1] || '';
+    const body = match[2] || '';
+    const frameTitleMatch = body.match(/\\frametitle\{([^}]+)\}/);
+    const title = cleanLatexInline(frameTitleMatch ? frameTitleMatch[1] : rawTitle) || `Slide ${num}`;
+    slides.push({
+      title,
+      content: body.replace(/\\frametitle\{[^}]+\}/g, '').trim(),
+      slideNumber: num++,
+    });
+  }
+
+  return slides;
+}
+
+export function extractLatexLabels(files: ProjectFile[]): LatexLabel[] {
+  const labels: LatexLabel[] = [];
+
+  for (const file of files) {
+    if (!file.content) continue;
+    const lines = file.content.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+      const lineText = lines[i];
+      const match = lineText.match(/\\label\{([^}]+)\}/);
+      if (match) {
+        const key = match[1].trim();
+        let type: LatexLabel['type'] = 'other';
+        if (key.startsWith('sec:') || key.startsWith('subsec:')) type = 'section';
+        else if (key.startsWith('fig:')) type = 'figure';
+        else if (key.startsWith('tab:')) type = 'table';
+        else if (key.startsWith('eq:')) type = 'equation';
+
+        let caption = '';
+        const start = Math.max(0, i - 3);
+        const end = Math.min(lines.length - 1, i + 3);
+        for (let j = start; j <= end; j++) {
+          const capMatch = lines[j].match(/\\caption\{([^}]+)\}/) || lines[j].match(/\\(?:section|subsection)\*?\{([^}]+)\}/);
+          if (capMatch) {
+            caption = cleanLatexInline(capMatch[1]);
+            break;
+          }
+        }
+
+        labels.push({
+          key,
+          type,
+          caption: caption || undefined,
+          line: i + 1,
+          fileName: file.name,
+        });
+      }
+    }
+  }
+
+  return labels;
 }

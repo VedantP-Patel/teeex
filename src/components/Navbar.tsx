@@ -24,7 +24,11 @@ import {
   Eye,
   Plus,
   Code,
-  Lock
+  Lock,
+  BookMarked,
+  Presentation,
+  Clock,
+  WifiOff
 } from 'lucide-react';
 import type { CompileState, Collaborator, Project, ProjectRole, UserProfile } from '../types/latex';
 
@@ -62,6 +66,13 @@ interface Props {
   onLockPlatformDev: () => void;
   isDevDemoActive: boolean;
   onToggleDevDemoMode: () => void;
+  // Upgrades & Features props
+  onOpenDoiModal?: () => void;
+  onOpenPresentationModal?: () => void;
+  onOpenEncryptionModal?: () => void;
+  onOpenAuditModal?: () => void;
+  isEncrypted?: boolean;
+  isOffline?: boolean;
 }
 
 export const Navbar: React.FC<Props> = ({
@@ -95,6 +106,12 @@ export const Navbar: React.FC<Props> = ({
   onLockPlatformDev,
   isDevDemoActive,
   onToggleDevDemoMode,
+  onOpenDoiModal,
+  onOpenPresentationModal,
+  onOpenEncryptionModal,
+  onOpenAuditModal,
+  isEncrypted,
+  isOffline,
 }) => {
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
@@ -374,6 +391,69 @@ export const Navbar: React.FC<Props> = ({
           <BookOpen size={13} />
           <span>Templates</span>
         </button>
+
+        {/* DOI BibTeX Citation Importer */}
+        {onOpenDoiModal && currentRole !== 'viewer' && (
+          <button onClick={onOpenDoiModal} className="btn-ghost" title="Import BibTeX citation via DOI lookup" style={toolBtnStyle}>
+            <BookMarked size={13} color="#38bdf8" />
+            <span>DOI Cite</span>
+          </button>
+        )}
+
+        {/* Beamer Slide Presentation Mode */}
+        {onOpenPresentationModal && (
+          <button onClick={onOpenPresentationModal} className="btn-ghost" title="Beamer Slide Deck Presentation Mode" style={toolBtnStyle}>
+            <Presentation size={13} color="#a855f7" />
+            <span>Slides</span>
+          </button>
+        )}
+
+        {/* Client-Side E2EE Document Vault */}
+        {onOpenEncryptionModal && (
+          <button
+            onClick={onOpenEncryptionModal}
+            className="btn-ghost"
+            title={isEncrypted ? "Document Vault: AES-256-GCM Encrypted" : "Client-Side Document Vault Encryption"}
+            style={{
+              ...toolBtnStyle,
+              color: isEncrypted ? '#10b981' : undefined,
+              backgroundColor: isEncrypted ? 'rgba(16, 185, 129, 0.08)' : undefined,
+              border: isEncrypted ? '1px solid rgba(16, 185, 129, 0.25)' : undefined,
+            }}
+          >
+            <Lock size={13} color={isEncrypted ? '#10b981' : undefined} />
+            <span>{isEncrypted ? 'Vault: E2EE' : 'Vault'}</span>
+          </button>
+        )}
+
+        {/* Audit Log */}
+        {onOpenAuditModal && (
+          <button onClick={onOpenAuditModal} className="btn-ghost" title="Project Activity & Security Audit Trail" style={toolBtnStyle}>
+            <Clock size={13} />
+            <span>Audit</span>
+          </button>
+        )}
+
+        {/* Offline Status Badge */}
+        {isOffline && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '3px 8px',
+              fontSize: 11,
+              color: '#f59e0b',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+              border: '1px solid rgba(245, 158, 11, 0.25)',
+            }}
+            title="Airplane / Offline Mode active. Edits are auto-cached locally in IndexedDB."
+          >
+            <WifiOff size={12} />
+            <span>Offline</span>
+          </div>
+        )}
 
         {/* Collaborative Presence Pill */}
         <button

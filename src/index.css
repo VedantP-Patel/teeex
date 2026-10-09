@@ -312,3 +312,44 @@ input:focus, textarea:focus, select:focus {
   outline: 1px solid rgba(56, 189, 248, 0.4);
   box-shadow: 0 0 10px rgba(56, 189, 248, 0.1);
 }
+
+/* Forward SyncTeX Pulse Halo */
+@keyframes synctexForwardPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7);
+    outline: 2px solid #38bdf8;
+    background-color: rgba(56, 189, 248, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 18px 4px rgba(56, 189, 248, 0.45);
+    outline: 2px solid #38bdf8;
+    background-color: rgba(56, 189, 248, 0.12);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    outline: 2px solid transparent;
+    background-color: transparent;
+  }
+}
+
+.synctex-forward-pulse {
+  animation: synctexForwardPulse 2.2s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  border-radius: 4px;
+}
+
+/* Track Changes Suggestion Styles */
+.suggestion-insertion {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  text-decoration: underline;
+  padding: 1px 3px;
+  border-radius: 2px;
+}
+
+.suggestion-deletion {
+  background-color: rgba(244, 63, 94, 0.2);
+  color: #f43f5e;
+  text-decoration: line-through;
+  padding: 1px 3px;
+  border-radius: 2px;
+}

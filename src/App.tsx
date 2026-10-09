@@ -15,6 +15,10 @@ import { WordCountModal } from './components/modals/WordCountModal';
 import { AuthModal } from './components/modals/AuthModal';
 import { ProjectsDashboardModal } from './components/modals/ProjectsDashboardModal';
 import { DeveloperUnlockModal } from './components/modals/DeveloperUnlockModal';
+import { DoiImportModal } from './components/modals/DoiImportModal';
+import { AuditLogModal } from './components/modals/AuditLogModal';
+import { PresentationModal } from './components/modals/PresentationModal';
+import { EncryptionModal } from './components/modals/EncryptionModal';
 import {
   isPlatformDeveloper,
   lockPlatformDeveloper,
@@ -22,6 +26,9 @@ import {
   setDemoModeEnabled,
   areSimulatedPeersEnabled,
 } from './services/developerService';
+import { logAuditAction } from './services/auditService';
+import { saveProjectOffline } from './services/offlineStorageService';
+import { encryptText, decryptText } from './services/encryptionService';
 
 import type {
   ProjectFile,
@@ -33,7 +40,8 @@ import type {
   Project,
   ProjectRole,
   UserProfile,
-  ProjectMember
+  ProjectMember,
+  TrackedChange
 } from './types/latex';
 import {
   diagnoseLatex,
@@ -96,6 +104,7 @@ export function App() {
   const [files, setFiles] = useState<ProjectFile[]>(() => activeProject?.files || STARTER_TEMPLATES[0].files);
   const [folders, setFolders] = useState<string[]>(() => activeProject?.folders || ['sections', 'figures']);
   const [activeFileId, setActiveFileId] = useState<string>(() => activeProject?.files?.[0]?.id || 'main.tex');
+  const [openFileIds, setOpenFileIds] = useState<string[]>(() => [activeProject?.files?.[0]?.id || 'main.tex']);
   const [projectTitle, setProjectTitle] = useState<string>(() => activeProject?.title || 'Neural Quantum State Tomography');
 
   // Active Role Resolution (URL query parameter ?role=viewer overrides, or activeProject.role)
@@ -194,8 +203,9 @@ export function App() {
     return bibFile ? parseBibtex(bibFile.content) : [];
   }, [files]);
 
-  // Target line for SyncTeX jumps
+  // Target line for SyncTeX jumps (Reverse: Preview -> Code, Forward: Code -> Preview)
   const [targetLine, setTargetLine] = useState<number | null>(null);
+  const [forwardTargetLine, setForwardTargetLine] = useState<number | null>(null);
 
   // Compilation State
   const [compileState, setCompileState] = useState<CompileState>({
@@ -216,6 +226,16 @@ export function App() {
   const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isWordCountOpen, setIsWordCountOpen] = useState(false);
+  const [isDoiModalOpen, setIsDoiModalOpen] = useState(false);
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [isPresentationModalOpen, setIsPresentationModalOpen] = useState(false);
+  const [isEncryptionModalOpen, setIsEncryptionModalOpen] = useState(false);
+
+  // Offline PWA & Airplane mode state
+  const [isOffline, setIsOffline] = useState<boolean>(() => !navigator.onLine);
+
+  // Track Changes & Reviewer Suggestions
+  const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
 
   // Split Pane & Sidebar Layout
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -316,6 +336,170 @@ export function App() {
     return () => unsubscribe();
   }, [hub]);
 
+  // Offline network listener
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // IndexedDB Auto-Caching for Airplane/Offline mode resilience
+  useEffect(() => {
+    if (activeProject) {
+      saveProjectOffline({
+        ...activeProject,
+        files,
+        folders,
+        title: projectTitle,
+        updatedAt: new Date().toISOString(),
+      }).catch(console.error);
+    }
+  }, [activeProject, files, folders, projectTitle]);
+
+  // Multi-File Tabs Management
+  const handleSelectFile = useCallback((fileId: string) => {
+    setActiveFileId(fileId);
+    setOpenFileIds(prev => prev.includes(fileId) ? prev : [...prev, fileId]);
+  }, []);
+
+  const handleCloseTab = useCallback((fileId: string) => {
+    setOpenFileIds(prev => {
+      const next = prev.filter(id => id !== fileId);
+      if (next.length === 0) {
+        const fallback = files[0]?.id || fileId;
+        setActiveFileId(fallback);
+        return [fallback];
+      }
+      if (activeFileId === fileId) {
+        const idx = prev.indexOf(fileId);
+        const nextActive = next[Math.max(0, idx - 1)] || next[0];
+        setActiveFileId(nextActive);
+      }
+      return next;
+    });
+  }, [activeFileId, files]);
+
+  // Track Changes & Reviewer Suggestions Handlers
+  const handleAcceptTrackedChange = useCallback((changeId: string) => {
+    const c = trackedChanges.find(t => t.id === changeId);
+    if (c) {
+      logAuditAction(
+        activeProjectId,
+        'CHANGE_ACCEPTED',
+        `Accepted review suggestion: "${c.text.slice(0, 35)}..."`,
+        currentUser?.fullName || 'Current User',
+        currentRole,
+        'collaboration'
+      );
+      setTrackedChanges(prev => prev.filter(t => t.id !== changeId));
+    }
+  }, [trackedChanges, activeProjectId, currentUser, currentRole]);
+
+  const handleRejectTrackedChange = useCallback((changeId: string) => {
+    const c = trackedChanges.find(t => t.id === changeId);
+    if (c) {
+      logAuditAction(
+        activeProjectId,
+        'CHANGE_REJECTED',
+        `Rejected review suggestion: "${c.text.slice(0, 35)}..."`,
+        currentUser?.fullName || 'Current User',
+        currentRole,
+        'collaboration'
+      );
+      setTrackedChanges(prev => prev.filter(t => t.id !== changeId));
+    }
+  }, [trackedChanges, activeProjectId, currentUser, currentRole]);
+
+  // DOI BibTeX Citation Importer Handler
+  const handleAddBibtexEntry = useCallback((bibtex: string, key: string) => {
+    setFiles(prev => {
+      const bibFile = prev.find(f => f.name.endsWith('.bib'));
+      if (bibFile) {
+        return prev.map(f => f.id === bibFile.id ? { ...f, content: f.content.trim() + '\n\n' + bibtex } : f);
+      } else {
+        const newBib: ProjectFile = {
+          id: 'references.bib',
+          name: 'references.bib',
+          type: 'bib',
+          content: `% BibTeX References\n\n${bibtex}\n`,
+          isEntry: false,
+        };
+        return [...prev, newBib];
+      }
+    });
+
+    logAuditAction(
+      activeProjectId,
+      'DOCUMENT_UPDATE',
+      `Imported DOI citation @${key} via CrossRef`,
+      currentUser?.fullName || 'Current User',
+      currentRole,
+      'document'
+    );
+
+    setIsDoiModalOpen(false);
+  }, [activeProjectId, currentUser, currentRole]);
+
+  // Client-Side E2EE Document Encryption Handler
+  const handleToggleEncryption = useCallback(async (enabled: boolean, passphrase: string, salt: string) => {
+    if (enabled) {
+      const encryptedFiles = await Promise.all(
+        files.map(async f => ({
+          ...f,
+          content: await encryptText(f.content, passphrase, salt),
+        }))
+      );
+      setFiles(encryptedFiles);
+      const updated = updateProject(activeProjectId, {
+        files: encryptedFiles,
+        isEncrypted: true,
+        encryptionSalt: salt,
+      });
+      setProjects(updated);
+      logAuditAction(
+        activeProjectId,
+        'ENCRYPTION_ENABLED',
+        'Enabled client-side AES-256-GCM vault encryption',
+        currentUser?.fullName || 'Current User',
+        currentRole,
+        'security'
+      );
+    } else {
+      try {
+        const decryptedFiles = await Promise.all(
+          files.map(async f => ({
+            ...f,
+            content: await decryptText(f.content, passphrase, salt),
+          }))
+        );
+        setFiles(decryptedFiles);
+        const updated = updateProject(activeProjectId, {
+          files: decryptedFiles,
+          isEncrypted: false,
+          encryptionSalt: undefined,
+        });
+        setProjects(updated);
+        logAuditAction(
+          activeProjectId,
+          'ENCRYPTION_DISABLED',
+          'Decrypted document vault back to plaintext',
+          currentUser?.fullName || 'Current User',
+          currentRole,
+          'security'
+        );
+      } catch (err: any) {
+        alert('Decryption failed: ' + (err.message || 'Incorrect passphrase'));
+        return;
+      }
+    }
+    setIsEncryptionModalOpen(false);
+  }, [files, activeProjectId, currentUser, currentRole]);
+
   // Update file content & broadcast & sync project
   const handleCodeChange = (newCode: string) => {
     const updated = files.map(f => f.id === activeFileId ? { ...f, content: newCode } : f);
@@ -413,6 +597,7 @@ export function App() {
     const updated = [...files, newFile];
     setFiles(updated);
     setActiveFileId(fullName);
+    setOpenFileIds(prev => prev.includes(fullName) ? prev : [...prev, fullName]);
     const updatedProjects = updateProject(activeProjectId, { files: updated });
     setProjects(updatedProjects);
   };
@@ -435,7 +620,9 @@ export function App() {
     });
     setFiles(updatedFiles);
     if (!updatedFiles.some(f => f.id === activeFileId)) {
-      setActiveFileId(updatedFiles[0]?.id || 'main.tex');
+      const fallback = updatedFiles[0]?.id || 'main.tex';
+      setActiveFileId(fallback);
+      setOpenFileIds(prev => prev.filter(id => updatedFiles.some(f => f.id === id)).concat(prev.length === 0 ? [fallback] : []));
     }
     const updatedProjects = updateProject(activeProjectId, {
       folders: nextFolders,
@@ -467,6 +654,10 @@ export function App() {
     if (files.length <= 1) return;
     const updated = files.filter(f => f.id !== fileId);
     setFiles(updated);
+    setOpenFileIds(prev => {
+      const next = prev.filter(id => id !== fileId);
+      return next.length > 0 ? next : [updated[0]?.id || 'main.tex'];
+    });
     if (activeFileId === fileId) {
       setActiveFileId(updated[0].id);
     }
@@ -477,7 +668,9 @@ export function App() {
   // Template Selection
   const handleSelectTemplate = (template: Template) => {
     setFiles(template.files);
-    setActiveFileId(template.files[0].id);
+    const firstId = template.files[0]?.id || 'main.tex';
+    setActiveFileId(firstId);
+    setOpenFileIds([firstId]);
     setProjectTitle(template.name);
     const updatedProjects = updateProject(activeProjectId, {
       title: template.name,
@@ -502,7 +695,9 @@ export function App() {
     setActiveProjectIdState(projId);
     setFiles(proj.files);
     setFolders(proj.folders || ['sections', 'figures']);
-    setActiveFileId(proj.files[0]?.id || 'main.tex');
+    const firstId = proj.files[0]?.id || 'main.tex';
+    setActiveFileId(firstId);
+    setOpenFileIds([firstId]);
     setProjectTitle(proj.title);
     setPeers(areSimulatedPeersEnabled(projId) ? DEFAULT_PEERS : []);
     setTimeout(() => triggerCompile(), 60);
@@ -650,6 +845,12 @@ export function App() {
         onLockPlatformDev={handleLockPlatformDev}
         isDevDemoActive={isDevDemoActive}
         onToggleDevDemoMode={handleToggleDevDemoMode}
+        onOpenDoiModal={() => setIsDoiModalOpen(true)}
+        onOpenPresentationModal={() => setIsPresentationModalOpen(true)}
+        onOpenEncryptionModal={() => setIsEncryptionModalOpen(true)}
+        onOpenAuditModal={() => setIsAuditModalOpen(true)}
+        isEncrypted={!!activeProject?.isEncrypted}
+        isOffline={isOffline}
       />
 
       {/* Main Workspace Body */}
@@ -667,7 +868,7 @@ export function App() {
             files={files}
             folders={folders}
             activeFileId={activeFileId}
-            onSelectFile={setActiveFileId}
+            onSelectFile={handleSelectFile}
             onCreateFile={handleCreateFile}
             onDeleteFile={handleDeleteFile}
             onCreateFolder={handleCreateFolder}
@@ -690,6 +891,10 @@ export function App() {
             <Editor
               code={activeFile.content}
               fileName={activeFile.name}
+              activeFileId={activeFileId}
+              openFileIds={openFileIds}
+              onSelectFile={handleSelectFile}
+              onCloseTab={handleCloseTab}
               onChange={handleCodeChange}
               diagnostics={diagnostics}
               peers={peers}
@@ -705,6 +910,10 @@ export function App() {
               files={files}
               isSidebarOpen={isSidebarOpen}
               onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
+              onForwardSync={(line) => setForwardTargetLine(line)}
+              trackedChanges={trackedChanges}
+              onAcceptTrackedChange={handleAcceptTrackedChange}
+              onRejectTrackedChange={handleRejectTrackedChange}
             />
           </div>
 
@@ -729,6 +938,8 @@ export function App() {
               parsedDoc={parsedDoc}
               onJumpToLine={setTargetLine}
               rawCode={activeFile.content}
+              forwardTargetLine={forwardTargetLine}
+              onClearForwardTargetLine={() => setForwardTargetLine(null)}
             />
           </div>
         </div>
@@ -842,6 +1053,39 @@ export function App() {
         onToggleArchiveProject={handleToggleArchiveProject}
         onDeleteProject={handleDeleteProject}
         currentUser={currentUser}
+      />
+
+      {/* DOI 1-Click BibTeX Citation Importer */}
+      <DoiImportModal
+        isOpen={isDoiModalOpen}
+        onClose={() => setIsDoiModalOpen(false)}
+        onAddBibtexEntry={handleAddBibtexEntry}
+      />
+
+      {/* Beamer Slide Deck Presentation Mode */}
+      <PresentationModal
+        isOpen={isPresentationModalOpen}
+        onClose={() => setIsPresentationModalOpen(false)}
+        latexCode={activeFile.content}
+        projectTitle={projectTitle}
+      />
+
+      {/* Client-Side E2EE Document Vault Modal */}
+      <EncryptionModal
+        isOpen={isEncryptionModalOpen}
+        onClose={() => setIsEncryptionModalOpen(false)}
+        isEncrypted={!!activeProject?.isEncrypted}
+        encryptionSalt={activeProject?.encryptionSalt}
+        files={files}
+        onToggleEncryption={handleToggleEncryption}
+      />
+
+      {/* Security & Activity Audit Log Modal */}
+      <AuditLogModal
+        isOpen={isAuditModalOpen}
+        onClose={() => setIsAuditModalOpen(false)}
+        projectId={activeProjectId}
+        projectTitle={projectTitle}
       />
     </div>
   );

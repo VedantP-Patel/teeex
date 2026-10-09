@@ -132,4 +132,38 @@ export interface Project {
   tags: string[];
   members: ProjectMember[];
   isArchived?: boolean;
+  isEncrypted?: boolean;
+  encryptionSalt?: string;
+}
+
+export interface TrackedChange {
+  id: string;
+  fileId: string;
+  type: 'insertion' | 'deletion';
+  authorName: string;
+  authorColor: string;
+  timestamp: string;
+  line: number;
+  text: string;
+  originalText?: string;
+  status: 'pending' | 'accepted' | 'rejected';
+}
+
+export interface AuditLogEntry {
+  id: string;
+  projectId: string;
+  action: string;
+  detail: string;
+  timestamp: string;
+  userName: string;
+  userRole: string;
+  category: 'security' | 'document' | 'collaboration' | 'system';
+}
+
+export interface LatexLabel {
+  key: string;
+  type: 'section' | 'figure' | 'table' | 'equation' | 'other';
+  caption?: string;
+  line: number;
+  fileName: string;
 }

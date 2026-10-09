@@ -13,15 +13,23 @@ import {
   Eye,
   Code as CodeIcon,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  ArrowRight,
+  Tag,
+  Edit3
 } from 'lucide-react';
-import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile } from '../types/latex';
+import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile, TrackedChange } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
+import { extractLatexLabels } from '../services/latexParser';
 import { VisualEditor } from './VisualEditor';
 
 interface Props {
   code: string;
   fileName: string;
+  activeFileId?: string;
+  openFileIds?: string[];
+  onSelectFile?: (fileId: string) => void;
+  onCloseTab?: (fileId: string) => void;
   onChange: (newCode: string) => void;
   diagnostics: Diagnostic[];
   peers: Collaborator[];
@@ -37,11 +45,19 @@ interface Props {
   files?: ProjectFile[];
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  onForwardSync?: (line: number) => void;
+  trackedChanges?: TrackedChange[];
+  onAcceptTrackedChange?: (changeId: string) => void;
+  onRejectTrackedChange?: (changeId: string) => void;
 }
 
 export const Editor: React.FC<Props> = ({
   code,
   fileName,
+  activeFileId,
+  openFileIds = [],
+  onSelectFile,
+  onCloseTab,
   onChange,
   diagnostics,
   peers,
@@ -57,10 +73,15 @@ export const Editor: React.FC<Props> = ({
   files = [],
   isSidebarOpen = true,
   onToggleSidebar,
+  onForwardSync,
+  trackedChanges = [],
+  onAcceptTrackedChange: _onAcceptTrackedChange,
+  onRejectTrackedChange: _onRejectTrackedChange,
 }) => {
   const [editorMode, setEditorMode] = useState<'code' | 'visual'>(() => {
     return (localStorage.getItem('teeex_editor_mode') as 'code' | 'visual') || 'code';
   });
+  const [suggestionMode, setSuggestionMode] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
   const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
@@ -72,6 +93,17 @@ export const Editor: React.FC<Props> = ({
   // Citation Autocomplete state
   const [citeQuery, setCiteQuery] = useState<string | null>(null);
   const [citeStartPos, setCiteStartPos] = useState<number>(0);
+
+  // Label Autocomplete state (\ref{})
+  const [refQuery, setRefQuery] = useState<string | null>(null);
+  const [refStartPos, setRefStartPos] = useState<number>(0);
+
+  const labels = React.useMemo(() => extractLatexLabels(files), [files]);
+  const filteredLabels = React.useMemo(() => {
+    if (refQuery === null) return [];
+    if (!refQuery) return labels.slice(0, 8);
+    return labels.filter(l => l.key.toLowerCase().includes(refQuery) || l.caption?.toLowerCase().includes(refQuery)).slice(0, 8);
+  }, [labels, refQuery]);
 
   const lines = code.split('\n');
 
@@ -182,6 +214,15 @@ export const Editor: React.FC<Props> = ({
     } else {
       setCiteQuery(null);
     }
+
+    // Check if cursor is right after \ref{...
+    const refMatch = textBefore.match(/\\ref\{([a-zA-Z0-9_:-]*)$/);
+    if (refMatch) {
+      setRefQuery(refMatch[1].toLowerCase());
+      setRefStartPos(pos - refMatch[1].length);
+    } else {
+      setRefQuery(null);
+    }
   };
 
   // Insert citation autocomplete key
@@ -196,6 +237,22 @@ export const Editor: React.FC<Props> = ({
     setTimeout(() => {
       ta.focus();
       const nextPos = citeStartPos + key.length + 1;
+      ta.selectionStart = ta.selectionEnd = nextPos;
+    }, 0);
+  };
+
+  // Insert cross-reference label autocomplete key
+  const handleSelectRefKey = (key: string) => {
+    if (!textareaRef.current || refStartPos === null) return;
+    const ta = textareaRef.current;
+    const pos = ta.selectionStart;
+    const newCode = code.substring(0, refStartPos) + key + '}' + code.substring(pos);
+    onChange(newCode);
+    setRefQuery(null);
+
+    setTimeout(() => {
+      ta.focus();
+      const nextPos = refStartPos + key.length + 1;
       ta.selectionStart = ta.selectionEnd = nextPos;
     }, 0);
   };
@@ -236,6 +293,46 @@ export const Editor: React.FC<Props> = ({
 
   return (
     <div style={editorContainerStyle}>
+      {/* Multi-File Tab Bar */}
+      {openFileIds && openFileIds.length > 0 && onSelectFile && (
+        <div style={tabStripStyle}>
+          {openFileIds.map(fId => {
+            const f = files.find(file => file.id === fId);
+            if (!f) return null;
+            const isActive = f.id === activeFileId;
+
+            return (
+              <div
+                key={f.id}
+                onClick={() => onSelectFile(f.id)}
+                style={{
+                  ...tabItemStyle,
+                  backgroundColor: isActive ? 'var(--bg-app)' : 'var(--bg-surface-0)',
+                  borderTop: isActive ? '2px solid #38bdf8' : '2px solid transparent',
+                  borderRight: '1px solid var(--border-subtle)',
+                  color: isActive ? 'var(--text-primary)' : 'var(--text-muted)',
+                }}
+              >
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)' }}>{f.name}</span>
+                {openFileIds.length > 1 && onCloseTab && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseTab(f.id);
+                    }}
+                    className="btn-ghost"
+                    style={{ padding: '1px 3px', color: 'inherit', borderRadius: 2 }}
+                    title="Close tab"
+                  >
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Viewer Notice Ribbon */}
       {role === 'viewer' && (
         <div style={viewerNoticeStyle}>
@@ -376,6 +473,49 @@ export const Editor: React.FC<Props> = ({
               <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
             </>
           )}
+
+            {/* Suggestion / Track Changes Mode Switch */}
+            <button
+              type="button"
+              onClick={() => setSuggestionMode(!suggestionMode)}
+              className="btn-ghost"
+              style={{
+                ...toolBtnStyle,
+                color: suggestionMode ? '#10b981' : 'var(--text-muted)',
+                backgroundColor: suggestionMode ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
+                border: suggestionMode ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid transparent',
+              }}
+              title={suggestionMode ? 'Switch to Direct Edit mode' : 'Switch to Suggestion / Track Changes mode'}
+            >
+              <Edit3 size={12} />
+              <span style={{ fontSize: 10 }}>{suggestionMode ? 'Suggesting' : 'Edit'}</span>
+              {trackedChanges.length > 0 && (
+                <span className="badge badge-emerald" style={{ fontSize: 9, padding: '0 4px', marginLeft: 3 }}>
+                  {trackedChanges.length}
+                </span>
+              )}
+            </button>
+
+            {/* Forward SyncTeX Button */}
+            {onForwardSync && (
+              <button
+                type="button"
+                onClick={() => onForwardSync(currentCursorLine)}
+                className="btn-ghost"
+                style={{
+                  ...toolBtnStyle,
+                  color: '#38bdf8',
+                  backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
+                }}
+                title="Forward Sync: Center and pulse preview on line"
+              >
+                <ArrowRight size={12} />
+                <span style={{ fontSize: 10 }}>Sync Preview</span>
+              </button>
+            )}
 
             <button
               onClick={() => setActiveCommentLine(currentCursorLine)}
@@ -592,6 +732,58 @@ export const Editor: React.FC<Props> = ({
             </div>
           )}
 
+          {/* Cross-Reference \ref{} Autocomplete Dropdown */}
+          {refQuery !== null && filteredLabels.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: Math.max(10, (currentCursorLine - 1) * 21 + 24),
+              left: 40,
+              zIndex: 35,
+              backgroundColor: 'var(--bg-surface-1)',
+              border: '1px solid var(--border-medium)',
+              borderRadius: 'var(--radius-sm)',
+              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+              maxHeight: 180,
+              width: 320,
+              overflowY: 'auto',
+            }}>
+              <div style={{ padding: '4px 8px', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Tag size={12} color="#10b981" />
+                <span>CROSS-REFERENCE LABEL AUTOCOMPLETE</span>
+              </div>
+              {filteredLabels.map(l => (
+                <div
+                  key={l.key}
+                  onClick={() => handleSelectRefKey(l.key)}
+                  style={{
+                    padding: '6px 8px',
+                    borderBottom: '1px solid var(--border-subtle)',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                  }}
+                  className="hover:bg-active"
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 600, color: '#10b981', fontFamily: 'var(--font-mono)' }}>
+                      \ref&#123;{l.key}&#125;
+                    </span>
+                    <span className="badge badge-emerald" style={{ fontSize: 9 }}>
+                      {l.type}
+                    </span>
+                  </div>
+                  {l.caption && (
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 10.5, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {l.caption}
+                    </div>
+                  )}
+                  <div style={{ color: 'var(--text-muted)', fontSize: 9.5 }}>
+                    {l.fileName} : line {l.line}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Active Comment Bubble Overlay */}
           {activeCommentLine !== null && (
             <div style={{
@@ -668,6 +860,7 @@ export const Editor: React.FC<Props> = ({
             onSelect={handleSelect}
             onClick={handleSelect}
             onKeyUp={handleSelect}
+            onDoubleClick={() => onForwardSync?.(currentCursorLine)}
             onScroll={handleScroll}
             spellCheck={false}
             style={{
@@ -803,4 +996,25 @@ const textareaStyle: React.CSSProperties = {
   overflowWrap: 'normal',
   overflowX: 'auto',
   tabSize: 2,
+};
+
+const tabStripStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  backgroundColor: 'var(--bg-surface-0)',
+  borderBottom: '1px solid var(--border-subtle)',
+  overflowX: 'auto',
+  scrollbarWidth: 'none',
+  flexShrink: 0,
+};
+
+const tabItemStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '6px 12px',
+  cursor: 'pointer',
+  userSelect: 'none',
+  fontSize: 11,
+  transition: 'all 0.15s ease',
 };

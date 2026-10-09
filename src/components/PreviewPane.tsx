@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   ZoomIn,
   ZoomOut,
@@ -16,6 +16,8 @@ interface Props {
   parsedDoc: ParsedDocument;
   onJumpToLine?: (line: number) => void;
   rawCode?: string;
+  forwardTargetLine?: number | null;
+  onClearForwardTargetLine?: () => void;
 }
 
 export const PreviewPane: React.FC<Props> = ({
@@ -23,11 +25,56 @@ export const PreviewPane: React.FC<Props> = ({
   parsedDoc,
   onJumpToLine,
   rawCode,
+  forwardTargetLine,
+  onClearForwardTargetLine,
 }) => {
   const [zoom, setZoom] = useState(100);
   const [forceTwoColumn, setForceTwoColumn] = useState<boolean | null>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
 
   const isTwoCol = forceTwoColumn !== null ? forceTwoColumn : parsedDoc.isTwoColumn;
+
+  // Forward SyncTeX: Code -> Preview
+  useEffect(() => {
+    if (forwardTargetLine && sheetRef.current) {
+      const sheet = sheetRef.current;
+      const allLineEls = Array.from(sheet.querySelectorAll<HTMLElement>('[data-line]'));
+      if (allLineEls.length > 0) {
+        let matchedEl: HTMLElement | null = null;
+        let bestDiff = Infinity;
+
+        for (const el of allLineEls) {
+          const l = parseInt(el.dataset.line || '0', 10);
+          if (l === forwardTargetLine) {
+            matchedEl = el;
+            break;
+          }
+          if (l <= forwardTargetLine) {
+            const diff = forwardTargetLine - l;
+            if (diff < bestDiff) {
+              bestDiff = diff;
+              matchedEl = el;
+            }
+          }
+        }
+
+        if (!matchedEl) matchedEl = allLineEls[0];
+
+        if (matchedEl) {
+          matchedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          matchedEl.classList.remove('synctex-forward-pulse');
+          void matchedEl.offsetWidth; // trigger reflow
+          matchedEl.classList.add('synctex-forward-pulse');
+          const timer = setTimeout(() => {
+            matchedEl?.classList.remove('synctex-forward-pulse');
+          }, 2500);
+          onClearForwardTargetLine?.();
+          return () => clearTimeout(timer);
+        }
+      }
+      onClearForwardTargetLine?.();
+    }
+  }, [forwardTargetLine, onClearForwardTargetLine]);
 
   const handleZoom = (delta: number) => {
     setZoom(prev => Math.min(160, Math.max(60, prev + delta)));
@@ -236,6 +283,7 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
       {/* Paper Sheet View Container */}
       <div style={sheetViewportStyle}>
         <div
+          ref={sheetRef}
           onClick={handlePreviewInteraction}
           onMouseUp={handlePreviewInteraction}
           onDoubleClick={handlePreviewInteraction}
