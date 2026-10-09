@@ -377,6 +377,7 @@ export const Editor: React.FC<Props> = ({
   return (
     <div style={editorContainerStyle}>
       {/* Multi-File Tab Bar */}
+      {openFileIds && openFileIds.length > 0 && onSelectFile && (
         <div
           style={tabStripStyle}
           className="toolbar-scrollbar"
