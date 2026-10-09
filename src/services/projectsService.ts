@@ -1,5 +1,6 @@
 import type { Project } from '../types/latex';
 import { STARTER_TEMPLATES } from './templates';
+import { getSupabaseClient } from './supabaseClient';
 
 const PROJECTS_STORAGE_KEY = 'teeex_saved_projects';
 const ACTIVE_PROJECT_ID_KEY = 'teeex_active_project_id';
@@ -200,6 +201,10 @@ export function createProject(
   const updated = [newProject, ...projects];
   saveProjects(updated);
   setActiveProjectId(newId);
+
+  // Background sync if connected
+  pushProjectToCloud(newProject).catch(() => {});
+
   return newProject;
 }
 
@@ -221,6 +226,10 @@ export function duplicateProject(projectId: string): Project | null {
 
   const updated = [cloned, ...projects];
   saveProjects(updated);
+
+  // Background sync if connected
+  pushProjectToCloud(cloned).catch(() => {});
+
   return cloned;
 }
 
@@ -230,6 +239,10 @@ export function toggleArchiveProject(projectId: string): Project[] {
     p.id === projectId ? { ...p, isArchived: !p.isArchived } : p
   );
   saveProjects(updated);
+
+  const target = updated.find(p => p.id === projectId);
+  if (target) pushProjectToCloud(target).catch(() => {});
+
   return updated;
 }
 
@@ -237,6 +250,17 @@ export function deleteProject(projectId: string): Project[] {
   const projects = loadProjects();
   const filtered = projects.filter(p => p.id !== projectId);
   saveProjects(filtered);
+
+  // Background delete from Supabase if connected
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    (async () => {
+      try {
+        await supabase.from('projects').delete().eq('id', projectId);
+      } catch {}
+    })();
+  }
+
   return filtered;
 }
 
@@ -256,5 +280,100 @@ export function updateProject(
     return p;
   });
   saveProjects(updated);
+
+  const target = updated.find(p => p.id === projectId);
+  if (target) pushProjectToCloud(target).catch(() => {});
+
   return updated;
 }
+
+// ==============================================================================
+// SUPABASE DATABASE CLOUD SYNC HELPERS
+// ==============================================================================
+
+export function projectToRow(p: Project) {
+  return {
+    id: p.id,
+    title: p.title,
+    owner_id: p.ownerId,
+    owner_email: p.ownerEmail,
+    role: p.role,
+    files: p.files,
+    tags: p.tags,
+    members: p.members,
+    is_archived: p.isArchived,
+    created_at: p.createdAt,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export function rowToProject(r: any): Project {
+  return {
+    id: r.id,
+    title: r.title || 'Untitled Project',
+    ownerId: r.owner_id || r.ownerId || 'usr-anonymous',
+    ownerEmail: r.owner_email || r.ownerEmail || 'anonymous@teeex.io',
+    role: r.role || 'owner',
+    files: Array.isArray(r.files) && r.files.length > 0 ? r.files : STARTER_TEMPLATES[0].files,
+    tags: Array.isArray(r.tags) ? r.tags : ['#research'],
+    members: Array.isArray(r.members) ? r.members : [],
+    isArchived: Boolean(r.is_archived ?? r.isArchived),
+    createdAt: r.created_at || r.createdAt || new Date().toISOString(),
+    updatedAt: r.updated_at || r.updatedAt || 'Just now',
+  };
+}
+
+export async function pushProjectToCloud(project: Project): Promise<{ success: boolean; error?: string }> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { success: false, error: 'Supabase client not connected' };
+
+  try {
+    const row = projectToRow(project);
+    const { error } = await supabase.from('projects').upsert(row, { onConflict: 'id' });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: unknown) {
+    const e = err as { message?: string };
+    return { success: false, error: e?.message || 'Cloud sync failed' };
+  }
+}
+
+export async function fetchProjectsFromCloud(): Promise<{ success: boolean; projects?: Project[]; error?: string }> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { success: false, error: 'Supabase client not connected' };
+
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .order('updated_at', { ascending: false });
+
+    if (error) return { success: false, error: error.message };
+    if (!data || data.length === 0) return { success: true, projects: [] };
+
+    return { success: true, projects: data.map(rowToProject) };
+  } catch (err: unknown) {
+    const e = err as { message?: string };
+    return { success: false, error: e?.message || 'Cloud fetch failed' };
+  }
+}
+
+export async function syncAllProjectsWithCloud(localProjects: Project[]): Promise<{ success: boolean; syncedCount: number; error?: string }> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { success: false, syncedCount: 0, error: 'Supabase client not connected' };
+
+  if ((supabase as any)?.supabaseUrl?.includes('demo-teeex-latex')) {
+    return { success: true, syncedCount: localProjects.length };
+  }
+
+  try {
+    const rows = localProjects.map(projectToRow);
+    const { error } = await supabase.from('projects').upsert(rows, { onConflict: 'id' });
+    if (error) return { success: false, syncedCount: 0, error: error.message };
+    return { success: true, syncedCount: rows.length };
+  } catch (err: unknown) {
+    const e = err as { message?: string };
+    return { success: false, syncedCount: 0, error: e?.message || 'Cloud sync failed' };
+  }
+}
+

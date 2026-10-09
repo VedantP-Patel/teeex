@@ -648,6 +648,8 @@ export function App() {
           setIsCloudConnected(isSupabaseConnected());
         }}
         onSyncWithCloud={() => setIsCloudConnected(true)}
+        projects={projects}
+        onProjectsUpdated={setProjects}
       />
 
       <SymbolPaletteModal

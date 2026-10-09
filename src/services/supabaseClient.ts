@@ -19,7 +19,7 @@ export function getSupabaseClient(): SupabaseClient | null {
   const savedUrl = localStorage.getItem('teeex_supabase_url') || envUrl;
   const savedKey = localStorage.getItem('teeex_supabase_anon_key') || envKey;
 
-  if (savedUrl && savedKey) {
+  if (savedUrl && savedKey && !savedUrl.includes('your-project-id')) {
     try {
       supabaseInstance = createClient(savedUrl, savedKey);
       return supabaseInstance;
@@ -52,3 +52,42 @@ export function disconnectSupabase(): void {
   localStorage.removeItem('teeex_supabase_url');
   localStorage.removeItem('teeex_supabase_anon_key');
 }
+
+export async function testSupabaseConnection(url?: string, anonKey?: string): Promise<{ success: boolean; message: string }> {
+  let client = getSupabaseClient();
+  if (url?.includes('demo-teeex-latex') || (client as any)?.supabaseUrl?.includes('demo-teeex-latex')) {
+    return { success: true, message: 'Demo Sandbox verified! Local simulated storage active.' };
+  }
+
+  if (url && anonKey) {
+    try {
+      client = createClient(url, anonKey);
+    } catch (e: unknown) {
+      const err = e as { message?: string };
+      return { success: false, message: err?.message || 'Invalid URL or Key format' };
+    }
+  }
+
+  if (!client) {
+    return { success: false, message: 'No Supabase credentials configured' };
+  }
+
+  try {
+    const { error } = await client.from('projects').select('id').limit(1);
+    if (error) {
+      // Postgres error 42P01 = table does not exist yet
+      if (error.code === '42P01') {
+        return {
+          success: true,
+          message: 'Connected to Supabase! (Note: Please run the SQL schema in Tab 2 to initialize tables)',
+        };
+      }
+      return { success: false, message: error.message };
+    }
+    return { success: true, message: 'Connection verified! PostgreSQL is online and responsive.' };
+  } catch (err: unknown) {
+    const e = err as { message?: string };
+    return { success: false, message: e?.message || 'Network error connecting to Supabase' };
+  }
+}
+
