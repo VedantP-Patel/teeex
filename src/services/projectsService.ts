@@ -157,7 +157,7 @@ function normalizeProject(p: any): Project {
   };
 }
 
-export function loadProjects(userEmail?: string): Project[] {
+export function loadProjects(userEmail?: string, userName?: string): Project[] {
   let allProjects: Project[] = [];
   const saved = localStorage.getItem(PROJECTS_STORAGE_KEY);
   if (saved) {
@@ -186,8 +186,41 @@ export function loadProjects(userEmail?: string): Project[] {
     
     // If user has no projects, create a default one for them
     if (filtered.length === 0) {
-      const defaultProj = createProject('My First Project', userEmail, userEmail.split('@')[0]);
+      const defaultProj = createProject('My First Project', userEmail, userName || userEmail.split('@')[0]);
       return [defaultProj];
+    }
+
+    // Auto-sync existing projects if userName differs from raw email prefix
+    if (userName && userName.trim()) {
+      let anyChanged = false;
+      const updatedAll = allProjects.map(p => {
+        let pChanged = false;
+        const newMembers = (p.members || []).map(m => {
+          if (m.email.toLowerCase() === targetEmail && m.name !== userName) {
+            pChanged = true;
+            return {
+              ...m,
+              name: userName,
+              avatar: userName.substring(0, 2).toUpperCase() || m.avatar,
+            };
+          }
+          return m;
+        });
+        if (pChanged) {
+          anyChanged = true;
+          return { ...p, members: newMembers };
+        }
+        return p;
+      });
+
+      if (anyChanged) {
+        allProjects = updatedAll;
+        saveProjects(allProjects);
+        return allProjects.filter(p => 
+          p.ownerEmail.toLowerCase() === targetEmail || 
+          p.members?.some(m => m.email.toLowerCase() === targetEmail)
+        );
+      }
     }
     
     return filtered;

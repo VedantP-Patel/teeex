@@ -100,9 +100,13 @@ export function App() {
   });
 
   // Multi-Project State
-  const [projects, setProjects] = useState<Project[]>(() => loadProjects(getStoredSession().user?.email));
+  const [projects, setProjects] = useState<Project[]>(() => {
+    const sessionUser = getStoredSession().user;
+    return loadProjects(sessionUser?.email, sessionUser?.fullName);
+  });
   const [activeProjectId, setActiveProjectIdState] = useState<string>(() => {
-    return getActiveProjectId(loadProjects(getStoredSession().user?.email));
+    const sessionUser = getStoredSession().user;
+    return getActiveProjectId(loadProjects(sessionUser?.email, sessionUser?.fullName));
   });
   const [isProjectsHubOpen, setIsProjectsHubOpen] = useState(false);
   const [isAdminUsersOpen, setIsAdminUsersOpen] = useState(false);
@@ -859,6 +863,26 @@ export function App() {
     setProjects(updated);
   };
 
+  // Synchronize authentic full name across active project members if needed
+  useEffect(() => {
+    if (!currentUser?.email || !currentUser?.fullName) return;
+    const targetEmail = currentUser.email.toLowerCase();
+    const currentMember = activeProject?.members?.find(m => m.email?.toLowerCase() === targetEmail);
+    if (currentMember && currentMember.name !== currentUser.fullName) {
+      const updatedMembers = (activeProject.members || []).map(m =>
+        m.email?.toLowerCase() === targetEmail
+          ? {
+              ...m,
+              name: currentUser.fullName,
+              avatar: currentUser.fullName.substring(0, 2).toUpperCase() || m.avatar,
+            }
+          : m
+      );
+      const updated = updateProject(activeProjectId, { members: updatedMembers });
+      setProjects(updated);
+    }
+  }, [currentUser, activeProject, activeProjectId]);
+
   // Auth Handlers
   const handleAuthSuccess = (user: UserProfile) => {
     setCurrentUser(user);
@@ -870,7 +894,7 @@ export function App() {
     }));
     
     // Reload projects based on new user
-    const loadedProjects = loadProjects(user.email);
+    const loadedProjects = loadProjects(user.email, user.fullName);
     setProjects(loadedProjects);
     setActiveProjectIdState(getActiveProjectId(loadedProjects));
   };
@@ -1140,6 +1164,7 @@ export function App() {
         roomId={roomId}
         peers={peers}
         selfUser={selfUser}
+        currentUser={currentUser}
         projectMembers={activeProject?.members || []}
         onInviteMember={handleInviteMember}
         onUpdateMemberRole={handleUpdateMemberRole}

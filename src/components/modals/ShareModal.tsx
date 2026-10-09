@@ -14,7 +14,7 @@ import {
   Lock,
   Key
 } from 'lucide-react';
-import type { Collaborator, ProjectMember, ProjectRole } from '../../types/latex';
+import type { Collaborator, ProjectMember, ProjectRole, UserProfile } from '../../types/latex';
 import { getRoomShareTokens } from '../../services/shareSecurityService';
 
 interface Props {
@@ -23,6 +23,7 @@ interface Props {
   roomId: string;
   peers: Collaborator[];
   selfUser: Collaborator;
+  currentUser?: UserProfile | null;
   projectMembers?: ProjectMember[];
   onInviteMember?: (email: string, role: ProjectRole) => void;
   onUpdateMemberRole?: (memberId: string, newRole: ProjectRole) => void;
@@ -36,6 +37,7 @@ export const ShareModal: React.FC<Props> = ({
   roomId,
   peers,
   selfUser,
+  currentUser,
   projectMembers = [],
   onInviteMember,
   onUpdateMemberRole,
@@ -260,19 +262,35 @@ export const ShareModal: React.FC<Props> = ({
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {projectMembers.length > 0 ? (
-                projectMembers.map(m => (
-                  <div key={m.id} style={peerItemStyle}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ ...avatarStyle, backgroundColor: m.avatarColor }}>
-                        {m.avatar}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
-                          {m.name} {m.id.includes(selfUser.name.toLowerCase().slice(0, 3)) && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(You)</span>}
+                projectMembers.map(m => {
+                  const isCurrentSelf = Boolean(
+                    (currentUser?.email && m.email?.toLowerCase() === currentUser.email.toLowerCase()) ||
+                    (selfUser?.name && m.email?.toLowerCase() === selfUser.name.toLowerCase()) ||
+                    (selfUser?.id && m.id === selfUser.id)
+                  );
+                  const displayName = (isCurrentSelf && currentUser?.fullName)
+                    ? currentUser.fullName
+                    : m.name;
+                  const displayAvatar = (isCurrentSelf && currentUser?.fullName)
+                    ? currentUser.fullName.substring(0, 2).toUpperCase()
+                    : (m.avatar || displayName.substring(0, 2).toUpperCase());
+                  const avatarColor = (isCurrentSelf && currentUser?.avatarColor)
+                    ? currentUser.avatarColor
+                    : m.avatarColor;
+
+                  return (
+                    <div key={m.id} style={peerItemStyle}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ ...avatarStyle, backgroundColor: avatarColor }}>
+                          {displayAvatar}
                         </div>
-                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{m.email}</div>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {displayName} {isCurrentSelf && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(You)</span>}
+                          </div>
+                          <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{m.email}</div>
+                        </div>
                       </div>
-                    </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       {currentRole === 'owner' && m.role !== 'owner' && onUpdateMemberRole ? (
@@ -303,8 +321,9 @@ export const ShareModal: React.FC<Props> = ({
                       )}
                     </div>
                   </div>
-                ))
-              ) : (
+                );
+              })
+            ) : (
                 /* Fallback to peer list */
                 <>
                   <div style={peerItemStyle}>
