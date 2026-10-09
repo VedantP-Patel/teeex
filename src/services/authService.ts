@@ -38,6 +38,7 @@ export const DEMO_ACCOUNTS: Array<{
   profile: UserProfile;
   role: ProjectRole;
   label: string;
+  password?: string;
 }> = [
   {
     profile: {
@@ -52,6 +53,7 @@ export const DEMO_ACCOUNTS: Array<{
     },
     role: 'owner',
     label: 'Main Admin (admin@teeex.io)',
+    password: 'admin', // Change this to set your admin password!
   },
   {
     profile: {
@@ -192,6 +194,9 @@ export async function loginWithEmail(
   );
 
   if (matchedDemo) {
+    if (matchedDemo.password && pass !== matchedDemo.password) {
+      return { success: false, error: 'Invalid admin credentials.' };
+    }
     saveSession(matchedDemo.profile, rememberMe);
     return { success: true, user: matchedDemo.profile };
   }
