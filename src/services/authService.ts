@@ -28,6 +28,12 @@ export function approveLocalUser(email: string): void {
   }
 }
 
+export function rejectLocalUser(email: string): void {
+  const users = getLocalRegisteredUsers();
+  const updatedUsers = users.filter(u => u.email.toLowerCase() !== email.toLowerCase());
+  localStorage.setItem(LOCAL_REGISTERED_USERS_KEY, JSON.stringify(updatedUsers));
+}
+
 export const DEMO_ACCOUNTS: Array<{
   profile: UserProfile;
   role: ProjectRole;
@@ -209,7 +215,7 @@ export async function signUpWithEmail(
   email: string,
   pass: string,
   fullName: string,
-  rememberMe: boolean
+  _rememberMe: boolean
 ): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
   const supabase = getSupabaseClient();
   if (supabase) {

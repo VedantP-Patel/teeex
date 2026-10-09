@@ -68,6 +68,7 @@ import {
   deleteProject,
   updateProject
 } from './services/projectsService';
+import { AdminUsersModal } from './components/modals/AdminUsersModal';
 
 export function App() {
   // Theme State
@@ -103,6 +104,7 @@ export function App() {
     return getActiveProjectId(loadProjects(getStoredSession().user?.email));
   });
   const [isProjectsHubOpen, setIsProjectsHubOpen] = useState(false);
+  const [isAdminUsersOpen, setIsAdminUsersOpen] = useState(false);
 
   const activeProject = useMemo(() => {
     return projects.find(p => p.id === activeProjectId) || projects[0];
@@ -904,6 +906,7 @@ export function App() {
         onOpenProjectsHub={() => setIsProjectsHubOpen(true)}
         currentUser={currentUser}
         onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenAdminUsers={() => setIsAdminUsersOpen(true)}
         onSignOut={handleSignOut}
         currentRole={currentRole}
         isPlatformDev={isPlatformDev}
@@ -1151,6 +1154,13 @@ export function App() {
         onClose={() => setIsAuditModalOpen(false)}
         projectId={activeProjectId}
         projectTitle={projectTitle}
+      />
+
+      {/* Admin Users Dashboard */}
+      <AdminUsersModal
+        isOpen={isAdminUsersOpen}
+        onClose={() => setIsAdminUsersOpen(false)}
+        currentUser={currentUser}
       />
     </div>
   );

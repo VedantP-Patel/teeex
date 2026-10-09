@@ -58,6 +58,7 @@ interface Props {
   currentUser: UserProfile | null;
   onOpenAuth: () => void;
   onSignOut: () => void;
+  onOpenAdminUsers?: () => void;
   currentRole: ProjectRole;
   // Platform Developer & Website Owner props
   isPlatformDev: boolean;
@@ -95,6 +96,7 @@ export const Navbar: React.FC<Props> = ({
   currentUser,
   onOpenAuth,
   onSignOut,
+  onOpenAdminUsers,
   currentRole,
   isPlatformDev,
   onOpenDeveloperUnlock,
@@ -501,6 +503,16 @@ export const Navbar: React.FC<Props> = ({
                   <User size={12} color="var(--text-secondary)" />
                   <span>Switch Account</span>
                 </button>
+
+                {currentUser?.isAdmin && onOpenAdminUsers && (
+                  <button
+                    onClick={() => { setIsUserDropdownOpen(false); onOpenAdminUsers(); }}
+                    style={dropdownItemStyle}
+                  >
+                    <Shield size={12} color="#f43f5e" />
+                    <span>Manage Users</span>
+                  </button>
+                )}
 
                 {/* Website Developer section */}
                 {isPlatformDev ? (
