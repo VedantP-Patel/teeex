@@ -16,11 +16,13 @@ import {
   PanelLeftOpen,
   ArrowRight,
   Tag,
-  Edit3
+  Edit3,
+  Palette
 } from 'lucide-react';
 import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile, TrackedChange } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
 import { extractLatexLabels } from '../services/latexParser';
+import { SYNTAX_THEMES, type SyntaxTheme, highlightLatexCode } from '../services/syntaxHighlighter';
 import { VisualEditor } from './VisualEditor';
 
 interface Props {
@@ -121,12 +123,43 @@ export const Editor: React.FC<Props> = ({
     commentMap.set(c.line, arr);
   });
 
+  const [syntaxTheme, setSyntaxTheme] = useState<SyntaxTheme>(() => {
+    return (localStorage.getItem('teeex_syntax_theme') as SyntaxTheme) || 'antigravity';
+  });
+  const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
+  const syntaxBackdropRef = useRef<HTMLDivElement>(null);
+  const themeMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close theme menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (themeMenuRef.current && !themeMenuRef.current.contains(e.target as Node)) {
+        setIsThemeMenuOpen(false);
+      }
+    };
+    if (isThemeMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isThemeMenuOpen]);
+
+  // Tokenize LaTeX syntax for color backdrop overlay
+  const highlightedHtml = React.useMemo(() => {
+    if (syntaxTheme === 'normal') return '';
+    return highlightLatexCode(code, syntaxTheme) + (code.endsWith('\n') ? ' ' : '');
+  }, [code, syntaxTheme]);
+
   // Sync gutter scroll and overlay position
   const handleScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
     const st = e.currentTarget.scrollTop;
+    const sl = e.currentTarget.scrollLeft;
     setScrollTop(st);
     if (gutterRef.current) {
       gutterRef.current.scrollTop = st;
+    }
+    if (syntaxBackdropRef.current) {
+      syntaxBackdropRef.current.scrollTop = st;
+      syntaxBackdropRef.current.scrollLeft = sl;
     }
   };
 
@@ -155,6 +188,10 @@ export const Editor: React.FC<Props> = ({
         setScrollTop(newScrollTop);
         if (gutterRef.current) {
           gutterRef.current.scrollTop = newScrollTop;
+        }
+        if (syntaxBackdropRef.current) {
+          syntaxBackdropRef.current.scrollTop = newScrollTop;
+          syntaxBackdropRef.current.scrollLeft = 0;
         }
 
         // Flash highlight line for 3 seconds
@@ -517,6 +554,130 @@ export const Editor: React.FC<Props> = ({
               </button>
             )}
 
+            {/* Syntax Theme Switcher */}
+            <div ref={themeMenuRef} style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
+                className="btn-ghost"
+                style={{
+                  ...toolBtnStyle,
+                  padding: '2px 7px',
+                  fontSize: 10.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  backgroundColor: isThemeMenuOpen ? 'var(--bg-surface-2)' : 'rgba(56, 189, 248, 0.08)',
+                  borderRadius: 'var(--radius-xs)',
+                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                }}
+                title="Syntax Highlight Theme (Antigravity Neon, VS Code, Monokai, Dracula, Normal)"
+              >
+                <Palette size={12} color="#38bdf8" />
+                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {SYNTAX_THEMES[syntaxTheme].badge}
+                </span>
+                <span style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                  {SYNTAX_THEMES[syntaxTheme].previewColors.map((c, i) => (
+                    <span
+                      key={i}
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: '50%',
+                        backgroundColor: c,
+                        display: 'inline-block',
+                      }}
+                    />
+                  ))}
+                </span>
+              </button>
+
+              {isThemeMenuOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: 0,
+                    marginTop: 4,
+                    zIndex: 50,
+                    backgroundColor: 'var(--bg-surface-1)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
+                    width: 250,
+                    padding: 4,
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: '6px 8px',
+                      fontSize: 9.5,
+                      fontWeight: 700,
+                      letterSpacing: '0.06em',
+                      textTransform: 'uppercase',
+                      color: 'var(--text-muted)',
+                      borderBottom: '1px solid var(--border-subtle)',
+                    }}
+                  >
+                    Syntax Highlight Theme
+                  </div>
+                  {(Object.keys(SYNTAX_THEMES) as SyntaxTheme[]).map(tKey => {
+                    const th = SYNTAX_THEMES[tKey];
+                    const isSelected = syntaxTheme === tKey;
+                    return (
+                      <div
+                        key={tKey}
+                        onClick={() => {
+                          setSyntaxTheme(tKey);
+                          localStorage.setItem('teeex_syntax_theme', tKey);
+                          setIsThemeMenuOpen(false);
+                        }}
+                        style={{
+                          padding: '7px 9px',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+                          marginBottom: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}
+                        className="hover:bg-active"
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ display: 'flex', gap: 2 }}>
+                            {th.previewColors.map((c, i) => (
+                              <span
+                                key={i}
+                                style={{
+                                  width: 6,
+                                  height: 6,
+                                  borderRadius: '50%',
+                                  backgroundColor: c,
+                                  display: 'inline-block',
+                                }}
+                              />
+                            ))}
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 11.5,
+                              fontWeight: isSelected ? 700 : 500,
+                              color: isSelected ? '#38bdf8' : 'var(--text-primary)',
+                            }}
+                          >
+                            {th.label}
+                          </span>
+                        </div>
+                        {isSelected && <Check size={12} color="#38bdf8" />}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <button
               onClick={() => setActiveCommentLine(currentCursorLine)}
               className="btn-ghost"
@@ -850,6 +1011,34 @@ export const Editor: React.FC<Props> = ({
             </div>
           )}
 
+          {/* Syntax Highlighting Token Backdrop */}
+          {syntaxTheme !== 'normal' && (
+            <div
+              ref={syntaxBackdropRef}
+              aria-hidden="true"
+              className="syntax-backdrop"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                padding: '10px 14px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 13,
+                lineHeight: '21px',
+                whiteSpace: 'pre',
+                overflow: 'hidden',
+                pointerEvents: 'none',
+                zIndex: 1,
+                color: SYNTAX_THEMES[syntaxTheme].colors.defaultText,
+                boxSizing: 'border-box',
+                tabSize: 2,
+              }}
+              dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+            />
+          )}
+
           {/* Core Textarea */}
           <textarea
             ref={textareaRef}
@@ -865,6 +1054,10 @@ export const Editor: React.FC<Props> = ({
             spellCheck={false}
             style={{
               ...textareaStyle,
+              color: syntaxTheme === 'normal' ? 'var(--text-primary)' : 'transparent',
+              caretColor: '#38bdf8',
+              position: 'relative',
+              zIndex: 2,
               cursor: role === 'viewer' ? 'default' : 'text',
               opacity: role === 'viewer' ? 0.9 : 1,
             }}

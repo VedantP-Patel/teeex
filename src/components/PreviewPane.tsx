@@ -7,9 +7,14 @@ import {
   Columns,
   Square,
   Printer,
-  MousePointerClick
+  MousePointerClick,
+  BookOpen,
+  ChevronDown,
+  Check
 } from 'lucide-react';
 import type { ParsedDocument } from '../types/latex';
+import { PAPER_FORMATS, type PaperFormatId } from '../services/paperFormats';
+import { exportDocumentAsPdf } from '../services/pdfExporter';
 
 interface Props {
   renderedHtml: string;
@@ -18,6 +23,8 @@ interface Props {
   rawCode?: string;
   forwardTargetLine?: number | null;
   onClearForwardTargetLine?: () => void;
+  paperFormat?: PaperFormatId;
+  onFormatChange?: (format: PaperFormatId) => void;
 }
 
 export const PreviewPane: React.FC<Props> = ({
@@ -27,12 +34,57 @@ export const PreviewPane: React.FC<Props> = ({
   rawCode,
   forwardTargetLine,
   onClearForwardTargetLine,
+  paperFormat,
+  onFormatChange,
 }) => {
   const [zoom, setZoom] = useState(100);
   const [forceTwoColumn, setForceTwoColumn] = useState<boolean | null>(null);
-  const sheetRef = useRef<HTMLDivElement>(null);
+  const [localFormat, setLocalFormat] = useState<PaperFormatId>(() => {
+    return (localStorage.getItem('teeex_paper_format') as PaperFormatId) || 'ieee';
+  });
+  const [isFormatMenuOpen, setIsFormatMenuOpen] = useState(false);
 
-  const isTwoCol = forceTwoColumn !== null ? forceTwoColumn : parsedDoc.isTwoColumn;
+  const activeFormat = paperFormat || localFormat;
+  const currentFormatConfig = PAPER_FORMATS[activeFormat] || PAPER_FORMATS.ieee;
+  const isTwoCol = forceTwoColumn !== null ? forceTwoColumn : (currentFormatConfig.defaultColumns === 2);
+
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const formatMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close format menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (formatMenuRef.current && !formatMenuRef.current.contains(e.target as Node)) {
+        setIsFormatMenuOpen(false);
+      }
+    };
+    if (isFormatMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isFormatMenuOpen]);
+
+  const handleSelectFormat = (fmt: PaperFormatId) => {
+    setLocalFormat(fmt);
+    localStorage.setItem('teeex_paper_format', fmt);
+    onFormatChange?.(fmt);
+    setIsFormatMenuOpen(false);
+    // Reset manual column override so it uses the format's default standard
+    setForceTwoColumn(null);
+  };
+
+  const handleZoom = (delta: number) => {
+    setZoom(prev => Math.min(160, Math.max(60, prev + delta)));
+  };
+
+  const handlePrint = () => {
+    exportDocumentAsPdf({
+      title: parsedDoc.title || 'LaTeX Document',
+      element: sheetRef.current,
+      format: activeFormat,
+      isTwoColumn: isTwoCol,
+    });
+  };
 
   // Forward SyncTeX: Code -> Preview
   useEffect(() => {
@@ -75,14 +127,6 @@ export const PreviewPane: React.FC<Props> = ({
       onClearForwardTargetLine?.();
     }
   }, [forwardTargetLine, onClearForwardTargetLine]);
-
-  const handleZoom = (delta: number) => {
-    setZoom(prev => Math.min(160, Math.max(60, prev + delta)));
-  };
-
-  const handlePrint = () => {
-    window.print();
-  };
 
 /**
  * Accurately finds the source code line for selected / highlighted text or clicked snippets
@@ -238,9 +282,100 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
           <span className="badge badge-emerald" style={{ fontSize: 9 }}>
             Live Rendered
           </span>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3, marginLeft: 4 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3, marginLeft: 2 }}>
             <MousePointerClick size={10} color="#38bdf8" /> SyncTeX Active
           </span>
+
+          <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+
+          {/* Standard Format Selector Dropdown */}
+          <div ref={formatMenuRef} style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setIsFormatMenuOpen(!isFormatMenuOpen)}
+              className="btn-ghost"
+              style={{
+                padding: '2px 7px',
+                fontSize: 10.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                backgroundColor: isFormatMenuOpen ? 'var(--bg-surface-2)' : 'rgba(56, 189, 248, 0.08)',
+                borderRadius: 'var(--radius-xs)',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
+              }}
+              title="Standard Academic Format (IEEE Transactions default, ACM, Nature, arXiv, Standard)"
+            >
+              <BookOpen size={11} color="#38bdf8" />
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                {currentFormatConfig.badge}
+              </span>
+              <ChevronDown size={10} color="var(--text-muted)" />
+            </button>
+
+            {isFormatMenuOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  marginTop: 4,
+                  zIndex: 50,
+                  backgroundColor: 'var(--bg-surface-1)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-sm)',
+                  boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
+                  width: 290,
+                  padding: 4,
+                }}
+              >
+                <div
+                  style={{
+                    padding: '6px 8px',
+                    fontSize: 9.5,
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    color: 'var(--text-muted)',
+                    borderBottom: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  Academic Publication Format
+                </div>
+                {(Object.keys(PAPER_FORMATS) as PaperFormatId[]).map(fid => {
+                  const fmt = PAPER_FORMATS[fid];
+                  const isSelected = activeFormat === fid;
+                  return (
+                    <div
+                      key={fid}
+                      onClick={() => handleSelectFormat(fid)}
+                      style={{
+                        padding: '7px 9px',
+                        borderRadius: 4,
+                        cursor: 'pointer',
+                        backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+                        marginBottom: 2,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 2,
+                      }}
+                      className="hover:bg-active"
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 11.5, fontWeight: isSelected ? 700 : 500, color: isSelected ? '#38bdf8' : 'var(--text-primary)' }}>
+                          {fmt.name}
+                        </span>
+                        {isSelected && <Check size={12} color="#38bdf8" />}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.3 }}>
+                        {fmt.description}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Controls: Zoom, Column mode, Print */}
@@ -289,13 +424,23 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
           onDoubleClick={handlePreviewInteraction}
           style={{
             ...paperSheetStyle,
+            fontFamily: currentFormatConfig.fontFamily,
+            fontSize: currentFormatConfig.fontSize,
+            lineHeight: currentFormatConfig.lineHeight,
+            padding: currentFormatConfig.padding,
+            maxWidth: currentFormatConfig.maxWidth,
             transform: `scale(${zoom / 100})`,
             transformOrigin: 'top center',
           }}
-          className="latex-paper-sheet"
+          className={`latex-paper-sheet format-${activeFormat}`}
         >
+          {/* Format Metadata Header */}
+          <div className="paper-meta-header synctex-target" data-line="1">
+            <span>{currentFormatConfig.headerMeta}</span>
+            <span style={{ fontWeight: 700 }}>{currentFormatConfig.badge}</span>
+          </div>
+
           {/* Academic Header (Title & Authors) */}
-          {/* Academic Header (Title & Authors) with SyncTeX Line Anchors */}
           <div style={academicHeaderStyle}>
             <h1
               style={{ ...paperTitleStyle, cursor: 'pointer' }}
@@ -334,9 +479,10 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
             style={{
               ...paperBodyStyle,
               columnCount: isTwoCol ? 2 : 1,
-              columnGap: isTwoCol ? '32px' : 'normal',
-              columnRule: isTwoCol ? '1px solid #e5e7eb' : 'none',
+              columnGap: isTwoCol ? currentFormatConfig.columnGap : 'normal',
+              columnRule: isTwoCol && activeFormat === 'ieee' ? '1px solid #e5e7eb' : 'none',
             }}
+            className="paper-body"
             dangerouslySetInnerHTML={{ __html: renderedHtml }}
           />
 
@@ -347,7 +493,7 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
             data-line="1"
             title="Click to jump to document preamble"
           >
-            <span>Teeex Studio Typeset &bull; IEEE / ACM Standard</span>
+            <span>{currentFormatConfig.footerMeta}</span>
             <span>Page 1</span>
           </div>
         </div>

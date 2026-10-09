@@ -1,0 +1,171 @@
+/**
+ * Teeex Studio — Publication PDF Export Service
+ * Isolates the rendered academic document and triggers pristine print-to-PDF
+ * without IDE sidebars, top bars, editors, or UI leakage.
+ */
+
+import { PAPER_FORMATS, type PaperFormatId } from './paperFormats';
+
+export interface ExportPdfOptions {
+  title: string;
+  element: HTMLElement | null;
+  format?: PaperFormatId | string;
+  isTwoColumn?: boolean;
+}
+
+export function exportDocumentAsPdf({
+  title,
+  element,
+  format = 'ieee',
+  isTwoColumn = true,
+}: ExportPdfOptions): void {
+  if (!element) {
+    window.print();
+    return;
+  }
+
+  const formatConfig = PAPER_FORMATS[(format as PaperFormatId)] || PAPER_FORMATS.ieee;
+
+  // Clone document sheet node
+  const clone = element.cloneNode(true) as HTMLElement;
+
+  // Remove any pulse/interaction highlight classes and outline borders from clone
+  clone.querySelectorAll('.synctex-forward-pulse, .synctex-target').forEach(el => {
+    el.classList.remove('synctex-forward-pulse');
+  });
+
+  // Create isolated hidden iframe for printing
+  const iframe = document.createElement('iframe');
+  iframe.id = 'teeex-pdf-print-frame';
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = 'none';
+  iframe.style.zIndex = '-9999';
+
+  document.body.appendChild(iframe);
+
+  const iframeDoc = iframe.contentWindow?.document;
+  if (!iframeDoc) {
+    document.body.removeChild(iframe);
+    window.print();
+    return;
+  }
+
+  // Extract KaTeX styles and fonts from parent document
+  const headElements = Array.from(document.head.querySelectorAll('link[rel="stylesheet"], style'))
+    .map(el => el.outerHTML)
+    .join('\n');
+
+  const printHtml = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${title || 'LaTeX Document'}</title>
+  ${headElements}
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 14mm 14mm 14mm 14mm;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff !important;
+      color: #000000 !important;
+      font-family: ${formatConfig.fontFamily};
+      font-size: ${formatConfig.fontSize};
+      line-height: ${formatConfig.lineHeight};
+    }
+
+    .latex-paper-sheet {
+      width: 100% !important;
+      max-width: 100% !important;
+      min-height: auto !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      box-shadow: none !important;
+      border: none !important;
+      transform: none !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+    }
+
+    .paper-body {
+      column-count: ${isTwoColumn ? 2 : 1} !important;
+      column-gap: ${isTwoColumn ? formatConfig.columnGap : 'normal'} !important;
+      column-rule: ${isTwoColumn && format === 'ieee' ? '1px solid #d1d5db' : 'none'} !important;
+      text-align: justify !important;
+    }
+
+    h1, h2, h3, h4, p, span, div, td, th {
+      color: #000000 !important;
+    }
+
+    /* IEEE Roman section header styles */
+    .format-ieee .latex-section {
+      text-align: center;
+      text-transform: uppercase;
+      font-size: 11.5px;
+      letter-spacing: 0.08em;
+      margin: 16px 0 8px 0;
+      font-weight: 700;
+    }
+
+    /* Prevent awkward equation or heading page-break splits */
+    h1, h2, h3, .latex-section-heading {
+      break-after: avoid !important;
+      page-break-after: avoid !important;
+    }
+
+    .latex-math-display, .latex-figure-container, .table-container {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+      margin: 12px 0 !important;
+    }
+
+    .synctex-target {
+      cursor: default !important;
+      outline: none !important;
+      background: none !important;
+    }
+  </style>
+</head>
+<body class="format-${format}">
+  ${clone.outerHTML}
+</body>
+</html>
+`;
+
+  iframeDoc.open();
+  iframeDoc.write(printHtml);
+  iframeDoc.close();
+
+  // Wait for KaTeX fonts/math to settle in iframe before invoking print
+  setTimeout(() => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } catch (err) {
+      console.warn('Iframe print error, falling back to window.print', err);
+      window.print();
+    } finally {
+      // Clean up iframe after print dialog closes
+      setTimeout(() => {
+        if (iframe.parentNode) {
+          document.body.removeChild(iframe);
+        }
+      }, 3000);
+    }
+  }, 400);
+}

@@ -28,6 +28,8 @@ import {
 import { logAuditAction } from './services/auditService';
 import { saveProjectOffline } from './services/offlineStorageService';
 import { encryptText, decryptText } from './services/encryptionService';
+import { exportDocumentAsPdf } from './services/pdfExporter';
+import { type PaperFormatId } from './services/paperFormats';
 
 import type {
   ProjectFile,
@@ -105,6 +107,9 @@ export function App() {
   const [activeFileId, setActiveFileId] = useState<string>(() => activeProject?.files?.[0]?.id || 'main.tex');
   const [openFileIds, setOpenFileIds] = useState<string[]>(() => [activeProject?.files?.[0]?.id || 'main.tex']);
   const [projectTitle, setProjectTitle] = useState<string>(() => activeProject?.title || 'Neural Quantum State Tomography');
+  const [paperFormat, setPaperFormat] = useState<PaperFormatId>(() => {
+    return (localStorage.getItem('teeex_paper_format') as PaperFormatId) || 'ieee';
+  });
 
   // Active Role Resolution (URL query parameter ?role=viewer overrides, or activeProject.role)
   const currentRole = useMemo<ProjectRole>(() => {
@@ -573,6 +578,17 @@ export function App() {
     setTimeout(() => triggerCompile(), 50);
   };
 
+  // Export pristine publication PDF isolated from IDE UI
+  const handleExportPdf = useCallback(() => {
+    const sheet = document.querySelector('.latex-paper-sheet') as HTMLElement;
+    exportDocumentAsPdf({
+      title: projectTitle || parsedDoc.title || 'LaTeX Document',
+      element: sheet,
+      format: paperFormat,
+      isTwoColumn: paperFormat === 'ieee' || paperFormat === 'acm' || parsedDoc.isTwoColumn,
+    });
+  }, [projectTitle, parsedDoc.title, paperFormat, parsedDoc.isTwoColumn]);
+
   // Export full project as .zip package
   const handleExportZip = () => {
     exportProjectAsZip(projectTitle, files);
@@ -833,7 +849,7 @@ export function App() {
         onOpenImageUpload={() => setIsImageUploadOpen(true)}
         onOpenSupabase={() => setIsSupabaseOpen(true)}
         isCloudConnected={isCloudConnected}
-        onExportPdf={() => window.print()}
+        onExportPdf={handleExportPdf}
         onExportZip={handleExportZip}
         projects={projects}
         activeProjectId={activeProjectId}
@@ -940,6 +956,8 @@ export function App() {
               rawCode={activeFile.content}
               forwardTargetLine={forwardTargetLine}
               onClearForwardTargetLine={() => setForwardTargetLine(null)}
+              paperFormat={paperFormat}
+              onFormatChange={setPaperFormat}
             />
           </div>
         </div>
