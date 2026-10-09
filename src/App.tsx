@@ -973,7 +973,6 @@ export function App() {
             display: 'flex',
             flexDirection: 'column',
             backgroundColor: 'var(--bg-app)',
-            transition: 'background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
           }}>
             <PreviewPane
               renderedHtml={renderedHtml}

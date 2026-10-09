@@ -563,7 +563,6 @@ const previewContainerStyle: React.CSSProperties = {
   backgroundColor: 'var(--bg-app)',
   borderLeft: '1px solid var(--border-subtle)',
   overflow: 'hidden',
-  transition: 'background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 const previewToolbarStyle: React.CSSProperties = {
@@ -579,7 +578,6 @@ const previewToolbarStyle: React.CSSProperties = {
   overflowY: 'hidden',
   whiteSpace: 'nowrap',
   gap: 8,
-  transition: 'background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 const sheetViewportStyle: React.CSSProperties = {
@@ -591,7 +589,6 @@ const sheetViewportStyle: React.CSSProperties = {
   justifyContent: 'center',
   alignItems: 'flex-start',
   backgroundColor: 'var(--bg-app)',
-  transition: 'background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 const paperSheetStyle: React.CSSProperties = {
