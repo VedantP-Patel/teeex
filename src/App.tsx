@@ -97,9 +97,9 @@ export function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
 
   // Multi-Project State
-  const [projects, setProjects] = useState<Project[]>(() => loadProjects());
+  const [projects, setProjects] = useState<Project[]>(() => loadProjects(getStoredSession().user?.email));
   const [activeProjectId, setActiveProjectIdState] = useState<string>(() => {
-    return getActiveProjectId(loadProjects());
+    return getActiveProjectId(loadProjects(getStoredSession().user?.email));
   });
   const [isProjectsHubOpen, setIsProjectsHubOpen] = useState(false);
 
@@ -812,11 +812,21 @@ export function App() {
       avatar: user.fullName.substring(0, 2).toUpperCase(),
       color: user.avatarColor || '#38bdf8',
     }));
+    
+    // Reload projects based on new user
+    const loadedProjects = loadProjects(user.email);
+    setProjects(loadedProjects);
+    setActiveProjectIdState(getActiveProjectId(loadedProjects));
   };
 
   const handleSignOut = async () => {
     await signOutUser();
     setCurrentUser(null);
+    
+    // Reload projects back to default/guest state
+    const loadedProjects = loadProjects(undefined);
+    setProjects(loadedProjects);
+    setActiveProjectIdState(getActiveProjectId(loadedProjects));
   };
 
   // Draggable Split Divider Handlers

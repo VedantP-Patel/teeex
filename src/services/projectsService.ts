@@ -9,8 +9,8 @@ const INITIAL_PROJECTS: Project[] = [
   {
     id: 'proj-neural-quantum',
     title: 'Neural Quantum State Tomography',
-    ownerId: 'usr-elena',
-    ownerEmail: 'elena.rostova@teeex.io',
+    ownerId: 'usr-admin',
+    ownerEmail: 'admin@teeex.io',
     role: 'owner',
     createdAt: '2026-10-01T10:00:00Z',
     updatedAt: 'Just now',
@@ -18,12 +18,21 @@ const INITIAL_PROJECTS: Project[] = [
     tags: ['#quantum', '#ieee-trans', '#neural-networks'],
     members: [
       {
+        id: 'usr-admin',
+        email: 'admin@teeex.io',
+        name: 'System Admin',
+        avatar: 'SA',
+        avatarColor: '#f43f5e',
+        role: 'owner',
+        joinedAt: '2026-10-01',
+      },
+      {
         id: 'usr-elena',
         email: 'elena.rostova@teeex.io',
         name: 'Dr. Elena Rostova',
         avatar: 'ER',
         avatarColor: '#38bdf8',
-        role: 'owner',
+        role: 'editor',
         joinedAt: '2026-10-01',
       },
       {
@@ -50,21 +59,30 @@ const INITIAL_PROJECTS: Project[] = [
   {
     id: 'proj-crdt-distributed',
     title: 'Real-Time CRDT State Synchronization in P2P LaTeX',
-    ownerId: 'usr-marcus',
-    ownerEmail: 'm.vance@cambridge.ac.uk',
-    role: 'editor',
+    ownerId: 'usr-admin',
+    ownerEmail: 'admin@teeex.io',
+    role: 'owner',
     createdAt: '2026-09-28T14:30:00Z',
     updatedAt: '2 hours ago',
     files: STARTER_TEMPLATES[1].files, // Academic CV / Report
     tags: ['#systems', '#crdt', '#acm-sigcomm'],
     members: [
       {
+        id: 'usr-admin',
+        email: 'admin@teeex.io',
+        name: 'System Admin',
+        avatar: 'SA',
+        avatarColor: '#f43f5e',
+        role: 'owner',
+        joinedAt: '2026-09-28',
+      },
+      {
         id: 'usr-marcus',
         email: 'm.vance@cambridge.ac.uk',
         name: 'Prof. Marcus Vance',
         avatar: 'MV',
         avatarColor: '#10b981',
-        role: 'owner',
+        role: 'editor',
         joinedAt: '2026-09-28',
       },
       {
@@ -82,21 +100,30 @@ const INITIAL_PROJECTS: Project[] = [
   {
     id: 'proj-quantum-field-notes',
     title: 'Advanced Quantum Field Theory & Gauge Invariance',
-    ownerId: 'usr-cern',
-    ownerEmail: 'archivist@cern.ch',
-    role: 'viewer',
+    ownerId: 'usr-admin',
+    ownerEmail: 'admin@teeex.io',
+    role: 'owner',
     createdAt: '2026-09-15T09:15:00Z',
     updatedAt: '3 days ago',
     files: STARTER_TEMPLATES[2].files, // Slide / Presentation deck
     tags: ['#physics', '#cern', '#lecture-notes'],
     members: [
       {
+        id: 'usr-admin',
+        email: 'admin@teeex.io',
+        name: 'System Admin',
+        avatar: 'SA',
+        avatarColor: '#f43f5e',
+        role: 'owner',
+        joinedAt: '2026-09-15',
+      },
+      {
         id: 'usr-cern',
         email: 'archivist@cern.ch',
         name: 'CERN Theory Division',
         avatar: 'CT',
         avatarColor: '#8b5cf6',
-        role: 'owner',
+        role: 'editor',
         joinedAt: '2026-09-15',
       },
       {
@@ -130,23 +157,43 @@ function normalizeProject(p: any): Project {
   };
 }
 
-export function loadProjects(): Project[] {
+export function loadProjects(userEmail?: string): Project[] {
+  let allProjects: Project[] = [];
   const saved = localStorage.getItem(PROJECTS_STORAGE_KEY);
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map(normalizeProject);
+        allProjects = parsed.map(normalizeProject);
       }
     } catch {
       localStorage.removeItem(PROJECTS_STORAGE_KEY);
     }
   }
 
-  // Save initial projects
-  const normalized = INITIAL_PROJECTS.map(normalizeProject);
-  saveProjects(normalized);
-  return normalized;
+  if (allProjects.length === 0) {
+    // Save initial projects
+    allProjects = INITIAL_PROJECTS.map(normalizeProject);
+    saveProjects(allProjects);
+  }
+
+  if (userEmail) {
+    const targetEmail = userEmail.toLowerCase();
+    const filtered = allProjects.filter(p => 
+      p.ownerEmail.toLowerCase() === targetEmail || 
+      p.members?.some(m => m.email.toLowerCase() === targetEmail)
+    );
+    
+    // If user has no projects, create a default one for them
+    if (filtered.length === 0) {
+      const defaultProj = createProject('My First Project', userEmail, userEmail.split('@')[0]);
+      return [defaultProj];
+    }
+    
+    return filtered;
+  }
+
+  return allProjects;
 }
 
 export function saveProjects(projects: Project[]): void {

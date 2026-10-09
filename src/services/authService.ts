@@ -3,12 +3,50 @@ import { getSupabaseClient } from './supabaseClient';
 
 const AUTH_STORAGE_KEY = 'teeex_auth_user';
 const REMEMBER_ME_KEY = 'teeex_remember_me';
+const LOCAL_REGISTERED_USERS_KEY = 'teeex_local_registered_users';
+
+export function getLocalRegisteredUsers(): UserProfile[] {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_REGISTERED_USERS_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalRegisteredUser(user: UserProfile): void {
+  const users = getLocalRegisteredUsers();
+  users.push(user);
+  localStorage.setItem(LOCAL_REGISTERED_USERS_KEY, JSON.stringify(users));
+}
+
+export function approveLocalUser(email: string): void {
+  const users = getLocalRegisteredUsers();
+  const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+  if (user) {
+    user.isApproved = true;
+    localStorage.setItem(LOCAL_REGISTERED_USERS_KEY, JSON.stringify(users));
+  }
+}
 
 export const DEMO_ACCOUNTS: Array<{
   profile: UserProfile;
   role: ProjectRole;
   label: string;
 }> = [
+  {
+    profile: {
+      id: 'usr-admin',
+      email: 'admin@teeex.io',
+      fullName: 'System Admin',
+      avatarColor: '#f43f5e',
+      avatarUrl: '',
+      isAnonymous: false,
+      isAdmin: true,
+      isApproved: true,
+    },
+    role: 'owner',
+    label: 'Main Admin (admin@teeex.io)',
+  },
   {
     profile: {
       id: 'usr-elena',
@@ -135,16 +173,24 @@ export async function loginWithEmail(
     d => d.profile.email.toLowerCase() === email.toLowerCase()
   );
 
-  const user: UserProfile = matchedDemo ? matchedDemo.profile : {
-    id: `usr-${Date.now().toString(36)}`,
-    email,
-    fullName: email.split('@')[0].replace(/[\._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-    avatarColor: '#38bdf8',
-    isAnonymous: false,
-  };
+  if (matchedDemo) {
+    saveSession(matchedDemo.profile, rememberMe);
+    return { success: true, user: matchedDemo.profile };
+  }
 
-  saveSession(user, rememberMe);
-  return { success: true, user };
+  const registeredUser = getLocalRegisteredUsers().find(
+    u => u.email.toLowerCase() === email.toLowerCase()
+  );
+
+  if (registeredUser) {
+    if (!registeredUser.isApproved) {
+      return { success: false, error: 'Your account is pending admin approval.' };
+    }
+    saveSession(registeredUser, rememberMe);
+    return { success: true, user: registeredUser };
+  }
+
+  return { success: false, error: 'Invalid email or password.' };
 }
 
 export async function signUpWithEmail(
@@ -185,16 +231,22 @@ export async function signUpWithEmail(
   }
 
   // Local-first fallback registration
+  const existing = getLocalRegisteredUsers().find(u => u.email.toLowerCase() === email.toLowerCase());
+  if (existing) {
+    return { success: false, error: 'User already exists. Please sign in.' };
+  }
+
   const user: UserProfile = {
     id: `usr-${Date.now().toString(36)}`,
     email,
     fullName: fullName || email.split('@')[0],
     avatarColor: '#8b5cf6',
     isAnonymous: false,
+    isApproved: false, // Requires admin approval
   };
 
-  saveSession(user, rememberMe);
-  return { success: true, user };
+  saveLocalRegisteredUser(user);
+  return { success: false, error: 'Your account has been created and is pending admin approval.' };
 }
 
 export async function requestPasswordReset(
@@ -237,4 +289,10 @@ export async function signOutUser(): Promise<void> {
     }
   }
   clearSession();
+}
+
+// Expose mock admin functions for easy testing via browser console
+if (typeof window !== 'undefined') {
+  (window as any).approveUser = approveLocalUser;
+  (window as any).listPendingUsers = () => getLocalRegisteredUsers().filter(u => !u.isApproved);
 }

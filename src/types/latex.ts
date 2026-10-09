@@ -107,6 +107,8 @@ export interface UserProfile {
   avatarColor?: string;
   role?: ProjectRole;
   isAnonymous?: boolean;
+  isAdmin?: boolean;
+  isApproved?: boolean;
 }
 
 export interface ProjectMember {
