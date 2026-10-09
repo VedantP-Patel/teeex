@@ -272,20 +272,48 @@ export function App() {
   const [splitPercent, setSplitPercent] = useState<number>(50);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
 
-  // Diagnostics & Parsed Document computation
-  const diagnostics = useMemo(() => {
-    if (!activeFile.name.endsWith('.tex')) return [];
-    return diagnoseLatex(activeFile.content);
-  }, [activeFile.content, activeFile.name]);
+  // Real-Time High-Performance Live Compilation Pipeline
+  // Diagnoses LaTeX syntax, parses AST, renders KaTeX/HTML, and measures REAL latency
+  const liveCompileResult = useMemo(() => {
+    const t0 = performance.now();
+    const isTex = activeFile.name.endsWith('.tex');
+    const diags = isTex ? diagnoseLatex(activeFile.content) : [];
+    const doc = parseLatexDocument(activeFile.content, files);
+    const html = renderLatexToHtml(activeFile.content, files);
+    const t1 = performance.now();
 
-  const parsedDoc = useMemo(() => {
-    return parseLatexDocument(activeFile.content, files);
-  }, [activeFile.content, files]);
+    const elapsed = t1 - t0;
+    // Accurate real latency formatting: 1 decimal place if < 10ms, whole number if >= 10ms
+    const durationMs = elapsed < 10
+      ? Number(elapsed.toFixed(1))
+      : Math.round(elapsed);
 
-  // Live Rendered HTML with Figure resolution
-  const renderedHtml = useMemo(() => {
-    return renderLatexToHtml(activeFile.content, files);
-  }, [activeFile.content, files]);
+    return {
+      diagnostics: diags,
+      parsedDoc: doc,
+      renderedHtml: html,
+      durationMs: Math.max(0.5, durationMs),
+    };
+  }, [activeFile.content, activeFile.name, files]);
+
+  const diagnostics = liveCompileResult.diagnostics;
+  const parsedDoc = liveCompileResult.parsedDoc;
+  const renderedHtml = liveCompileResult.renderedHtml;
+
+  // Keep compileState live, accurate and synced with actual engine performance
+  useEffect(() => {
+    const errCount = diagnostics.filter(d => d.severity === 'error').length;
+    const warnCount = diagnostics.filter(d => d.severity === 'warning').length;
+
+    setCompileState(prev => ({
+      ...prev,
+      status: errCount > 0 ? 'error' : 'success',
+      durationMs: liveCompileResult.durationMs,
+      errorCount: errCount,
+      warningCount: warnCount,
+      timestamp: new Date().toLocaleTimeString(),
+    }));
+  }, [liveCompileResult.durationMs, diagnostics]);
 
   // Document Stats
   const wordCount = useMemo(() => {
@@ -298,15 +326,23 @@ export function App() {
     return parsedDoc.mathBlocks.length;
   }, [parsedDoc.mathBlocks]);
 
-  // Run Compilation
+  // Run Manual Full Compilation Pass (measures real parsing & typeset execution)
   const triggerCompile = useCallback(() => {
-    const t0 = performance.now();
     setCompileState(prev => ({ ...prev, status: 'compiling' }));
 
-    setTimeout(() => {
-      const errCount = diagnostics.filter(d => d.severity === 'error').length;
-      const warnCount = diagnostics.filter(d => d.severity === 'warning').length;
-      const duration = Math.round(performance.now() - t0);
+    requestAnimationFrame(() => {
+      const t0 = performance.now();
+      const isTex = activeFile.name.endsWith('.tex');
+      const diags = isTex ? diagnoseLatex(activeFile.content) : [];
+      parseLatexDocument(activeFile.content, files);
+      renderLatexToHtml(activeFile.content, files);
+      const t1 = performance.now();
+
+      const elapsed = t1 - t0;
+      const duration = elapsed < 10 ? Number(elapsed.toFixed(1)) : Math.round(elapsed);
+
+      const errCount = diags.filter(d => d.severity === 'error').length;
+      const warnCount = diags.filter(d => d.severity === 'warning').length;
 
       const logs: string[] = [
         `This is pdfTeX, Version 3.141592653-2.6-1.40.24 (TeX Live 2026)`,
@@ -319,18 +355,19 @@ export function App() {
       } else {
         logs.push(`Output written on ${activeFile.name.replace('.tex', '')}.pdf (1 page, ${Math.floor(wordCount * 12 + 18000)} bytes).`);
         logs.push(`SyncTeX database written to ${activeFile.name.replace('.tex', '')}.synctex.gz`);
+        logs.push(`Typeset completed in ${duration}ms.`);
       }
 
       setCompileState({
         status: errCount > 0 ? 'error' : 'success',
-        durationMs: Math.max(8, duration),
+        durationMs: Math.max(0.5, duration),
         timestamp: new Date().toLocaleTimeString(),
         errorCount: errCount,
         warningCount: warnCount,
         rawLogs: logs,
       });
-    }, 120);
-  }, [diagnostics, activeFile.name, wordCount]);
+    });
+  }, [activeFile.name, activeFile.content, files, wordCount]);
 
   // Real-time Collaboration sync listener
   useEffect(() => {

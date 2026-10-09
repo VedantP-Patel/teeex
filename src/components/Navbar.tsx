@@ -300,7 +300,17 @@ export const Navbar: React.FC<Props> = ({
             <>
               <div style={liveRadarDotStyle} />
               <span style={{ color: '#10b981', fontWeight: 600 }}>Live</span>
-              <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>({compileState.durationMs}ms)</span>
+              <span
+                style={{
+                  color: 'var(--text-muted)',
+                  fontSize: 10,
+                  fontFamily: 'var(--font-mono)',
+                  letterSpacing: '-0.02em',
+                }}
+                title={`Live compilation & render latency: ${compileState.durationMs}ms`}
+              >
+                ({compileState.durationMs}ms)
+              </span>
             </>
           )}
 
