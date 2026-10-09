@@ -530,7 +530,7 @@ input:focus, textarea:focus, select:focus {
 @media print {
   @page {
     size: A4 portrait;
-    margin: 14mm 14mm 14mm 14mm;
+    margin: 0;
   }
 
   /* Hide entire IDE interface and docks */
@@ -557,9 +557,9 @@ input:focus, textarea:focus, select:focus {
     color: #000000 !important;
     overflow: visible !important;
     height: auto !important;
-    width: 100% !important;
+    width: 210mm !important;
     display: block !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     padding: 0 !important;
   }
 
@@ -568,14 +568,14 @@ input:focus, textarea:focus, select:focus {
     box-shadow: none !important;
     border: none !important;
     margin: 0 auto !important;
-    padding: 0 !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    min-height: auto !important;
+    width: 210mm !important;
+    max-width: 210mm !important;
+    min-height: 297mm !important;
     background: #ffffff !important;
     color: #000000 !important;
     transform: none !important;
     display: block !important;
+    box-sizing: border-box !important;
   }
 
   .latex-section-heading,

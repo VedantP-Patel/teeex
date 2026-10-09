@@ -37,7 +37,7 @@ export const PreviewPane: React.FC<Props> = ({
   paperFormat,
   onFormatChange,
 }) => {
-  const [zoom, setZoom] = useState(100);
+  const [zoom, setZoom] = useState(78);
   const [forceTwoColumn, setForceTwoColumn] = useState<boolean | null>(null);
   const [localFormat, setLocalFormat] = useState<PaperFormatId>(() => {
     return (localStorage.getItem('teeex_paper_format') as PaperFormatId) || 'ieee';
@@ -480,7 +480,7 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
               ...paperBodyStyle,
               columnCount: isTwoCol ? 2 : 1,
               columnGap: isTwoCol ? currentFormatConfig.columnGap : 'normal',
-              columnRule: isTwoCol && activeFormat === 'ieee' ? '1px solid #e5e7eb' : 'none',
+              columnRule: isTwoCol && activeFormat === 'ieee' ? '1px solid #cbd5e1' : 'none',
             }}
             className="paper-body"
             dangerouslySetInnerHTML={{ __html: renderedHtml }}
@@ -535,16 +535,17 @@ const sheetViewportStyle: React.CSSProperties = {
 };
 
 const paperSheetStyle: React.CSSProperties = {
-  width: '610px',
-  minHeight: '862px',
+  width: '210mm',
+  minHeight: '297mm',
+  maxWidth: '210mm',
+  boxSizing: 'border-box',
   backgroundColor: 'var(--paper-bg)',
   color: 'var(--paper-text)',
   boxShadow: '0 12px 35px -5px rgba(0, 0, 0, 0.45), 0 0 1px 1px rgba(255, 255, 255, 0.08)',
   borderRadius: 2,
-  padding: '44px 36px',
   fontFamily: 'var(--paper-font-serif)',
-  lineHeight: 1.55,
-  fontSize: '13px',
+  lineHeight: 1.5,
+  fontSize: '12.5px',
   transition: 'transform 0.15s ease',
   position: 'relative',
   display: 'flex',
