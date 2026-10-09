@@ -14,6 +14,8 @@ create table if not exists public.profiles (
   full_name text default '',
   avatar_url text,
   avatar_color text default '#38bdf8',
+  is_approved boolean default false,
+  is_admin boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -37,6 +39,14 @@ create policy "Users can insert their own profile"
 create policy "Users can update their own profile"
   on public.profiles for update
   using (auth.uid() = id);
+
+create policy "Admins can update profiles"
+  on public.profiles for update
+  using ( (select is_admin from public.profiles where id = auth.uid()) = true );
+
+create policy "Admins can delete profiles"
+  on public.profiles for delete
+  using ( (select is_admin from public.profiles where id = auth.uid()) = true );
 
 -- 3. Projects Table (LaTeX files, metadata, members, and tags)
 create table if not exists public.projects (
@@ -103,12 +113,14 @@ alter publication supabase_realtime add table public.projects;
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, email, full_name, avatar_color)
+  insert into public.profiles (id, email, full_name, avatar_color, is_approved, is_admin)
   values (
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
-    '#38bdf8'
+    '#38bdf8',
+    coalesce((new.raw_user_meta_data->>'is_approved')::boolean, false),
+    coalesce((new.raw_user_meta_data->>'is_admin')::boolean, false)
   )
   on conflict (id) do nothing;
   return new;

@@ -161,10 +161,15 @@ export async function loginWithEmail(
       }
 
       if (data.user) {
-        const isApproved = data.user.user_metadata?.is_approved === true;
-        
-        // Let admins through automatically (e.g. if we set admin via raw SQL)
-        const isAdmin = data.user.user_metadata?.is_admin === true;
+        // Fetch the profile to check approval status
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('is_approved, is_admin')
+          .eq('id', data.user.id)
+          .single();
+
+        const isApproved = profile?.is_approved === true;
+        const isAdmin = profile?.is_admin === true;
 
         if (!isApproved && !isAdmin) {
           await supabase.auth.signOut();

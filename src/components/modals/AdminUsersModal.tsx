@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, UserCheck, UserX, Shield, AlertCircle } from 'lucide-react';
 import type { UserProfile } from '../../types/latex';
 import { getLocalRegisteredUsers, approveLocalUser, rejectLocalUser } from '../../services/authService';
+import { getSupabaseClient, isSupabaseConnected } from '../../services/supabaseClient';
 
 interface Props {
   isOpen: boolean;
@@ -12,7 +13,24 @@ interface Props {
 export const AdminUsersModal: React.FC<Props> = ({ isOpen, onClose, currentUser }) => {
   const [users, setUsers] = useState<UserProfile[]>([]);
 
-  const loadUsers = () => {
+  const loadUsers = async () => {
+    if (isSupabaseConnected()) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        const { data, error } = await supabase.from('profiles').select('*');
+        if (!error && data) {
+          setUsers(data.map(d => ({
+            id: d.id,
+            email: d.email,
+            fullName: d.full_name,
+            avatarColor: d.avatar_color,
+            isAdmin: d.is_admin,
+            isApproved: d.is_approved,
+          })));
+          return;
+        }
+      }
+    }
     setUsers(getLocalRegisteredUsers());
   };
 
@@ -27,14 +45,30 @@ export const AdminUsersModal: React.FC<Props> = ({ isOpen, onClose, currentUser 
   const pendingUsers = users.filter(u => !u.isApproved && !u.isAdmin);
   const approvedUsers = users.filter(u => u.isApproved && !u.isAdmin);
 
-  const handleApprove = (email: string) => {
-    approveLocalUser(email);
+  const handleApprove = async (user: UserProfile) => {
+    if (isSupabaseConnected()) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        await supabase.from('profiles').update({ is_approved: true }).eq('id', user.id);
+        loadUsers();
+        return;
+      }
+    }
+    approveLocalUser(user.email);
     loadUsers();
   };
 
-  const handleReject = (email: string) => {
+  const handleReject = async (user: UserProfile) => {
+    if (isSupabaseConnected()) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        await supabase.from('profiles').delete().eq('id', user.id);
+        loadUsers();
+        return;
+      }
+    }
     if (rejectLocalUser) {
-      rejectLocalUser(email);
+      rejectLocalUser(user.email);
       loadUsers();
     } else {
       alert("Reject function not implemented in authService.ts yet!");
@@ -79,10 +113,10 @@ export const AdminUsersModal: React.FC<Props> = ({ isOpen, onClose, currentUser 
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{user.email}</div>
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => handleApprove(user.email)} style={approveBtnStyle} title="Approve User">
+                      <button onClick={() => handleApprove(user)} style={approveBtnStyle} title="Approve User">
                         <UserCheck size={14} /> Approve
                       </button>
-                      <button onClick={() => handleReject(user.email)} style={rejectBtnStyle} title="Reject User">
+                      <button onClick={() => handleReject(user)} style={rejectBtnStyle} title="Reject User">
                         <UserX size={14} /> Reject
                       </button>
                     </div>
@@ -116,8 +150,9 @@ export const AdminUsersModal: React.FC<Props> = ({ isOpen, onClose, currentUser 
           <div style={noticeBannerStyle}>
             <AlertCircle size={14} color="#38bdf8" style={{ flexShrink: 0 }} />
             <span>
-              This panel manages local mock users. If using a live Supabase backend, manual approval 
-              must be done via the Supabase Dashboard by updating the <code>user_metadata</code> field.
+              {isSupabaseConnected() 
+                ? "You are connected to Supabase. Approvals here update the 'profiles' table directly."
+                : "This panel manages local mock users. Connect to Supabase to manage real users."}
             </span>
           </div>
         </div>
