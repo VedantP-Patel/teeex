@@ -863,6 +863,20 @@ export function App() {
     };
   }, [isDraggingSplit]);
 
+  if (!currentUser) {
+    return (
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-app)' }}>
+        <AuthModal
+          isOpen={true}
+          onClose={() => {}}
+          currentUser={null}
+          onAuthSuccess={handleAuthSuccess}
+          onDeveloperStatusChanged={handleDeveloperStatusChanged}
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-app)', userSelect: isDraggingSplit ? 'none' : 'auto' }}>
       {/* Top Navigation */}
