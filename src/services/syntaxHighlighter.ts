@@ -24,22 +24,8 @@ export interface SyntaxThemeMeta {
 }
 
 export const SYNTAX_THEMES: Record<SyntaxTheme, SyntaxThemeMeta> = {
-  antigravity: {
-    label: 'Antigravity Neon',
-    badge: 'AGY',
-    previewColors: ['#38bdf8', '#c084fc', '#34d399'],
-    colors: {
-      command: '#38bdf8',
-      math: '#34d399',
-      brace: '#c084fc',
-      bracket: '#f472b6',
-      comment: '#64748b',
-      number: '#fbbf24',
-      defaultText: 'var(--text-primary)',
-    },
-  },
   vscode: {
-    label: 'VS Code Theme',
+    label: 'VS Code Dark+',
     badge: 'VS Code',
     previewColors: ['#569cd6', '#4ec9b0', '#dcdcaa'],
     colors: {
@@ -49,6 +35,20 @@ export const SYNTAX_THEMES: Record<SyntaxTheme, SyntaxThemeMeta> = {
       bracket: '#9cdcfe',
       comment: '#6a9955',
       number: '#b5cea8',
+      defaultText: 'var(--text-primary)',
+    },
+  },
+  antigravity: {
+    label: 'Cyber Neon',
+    badge: 'Neon',
+    previewColors: ['#38bdf8', '#c084fc', '#34d399'],
+    colors: {
+      command: '#38bdf8',
+      math: '#34d399',
+      brace: '#c084fc',
+      bracket: '#f472b6',
+      comment: '#64748b',
+      number: '#fbbf24',
       defaultText: 'var(--text-primary)',
     },
   },
@@ -99,7 +99,7 @@ export const SYNTAX_THEMES: Record<SyntaxTheme, SyntaxThemeMeta> = {
 /**
  * Resolves theme colors with high-contrast adaptation for Light and Dark modes
  */
-export function getThemeColors(theme: SyntaxTheme = 'antigravity', isLight: boolean = false): ThemeColors {
+export function getThemeColors(theme: SyntaxTheme = 'vscode', isLight: boolean = false): ThemeColors {
   if (isLight) {
     switch (theme) {
       case 'vscode':
@@ -156,7 +156,7 @@ export function getThemeColors(theme: SyntaxTheme = 'antigravity', isLight: bool
     }
   }
 
-  return SYNTAX_THEMES[theme]?.colors || SYNTAX_THEMES.antigravity.colors;
+  return SYNTAX_THEMES[theme]?.colors || SYNTAX_THEMES.vscode.colors;
 }
 
 function escapeHtml(str: string): string {
@@ -171,7 +171,7 @@ function escapeHtml(str: string): string {
  */
 export function highlightLatexCode(
   code: string,
-  theme: SyntaxTheme = 'antigravity',
+  theme: SyntaxTheme = 'vscode',
   isLight: boolean = false
 ): string {
   if (theme === 'normal') {

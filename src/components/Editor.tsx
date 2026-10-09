@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Bold,
   Italic,
@@ -18,7 +19,8 @@ import {
   Tag,
   Edit3,
   Palette,
-  FileText
+  FileText,
+  ChevronDown
 } from 'lucide-react';
 import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile, TrackedChange } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
@@ -125,22 +127,50 @@ export const Editor: React.FC<Props> = ({
   });
 
   const [syntaxTheme, setSyntaxTheme] = useState<SyntaxTheme>(() => {
-    return (localStorage.getItem('teeex_syntax_theme') as SyntaxTheme) || 'antigravity';
+    const saved = localStorage.getItem('teeex_syntax_theme') as SyntaxTheme;
+    if (saved && (saved === 'vscode' || saved === 'antigravity' || saved === 'monokai' || saved === 'dracula' || saved === 'normal')) {
+      return saved;
+    }
+    return 'vscode';
   });
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
+  const [menuCoords, setMenuCoords] = useState<{ top: number; right: number } | null>(null);
   const syntaxBackdropRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
+  const themeButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Close theme menu on outside click
+  const toggleThemeMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isThemeMenuOpen && themeButtonRef.current) {
+      const rect = themeButtonRef.current.getBoundingClientRect();
+      setMenuCoords({
+        top: rect.bottom + 5,
+        right: Math.max(10, window.innerWidth - rect.right),
+      });
+    }
+    setIsThemeMenuOpen(prev => !prev);
+  };
+
+  // Close theme menu on outside click or window resize
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (themeMenuRef.current && !themeMenuRef.current.contains(e.target as Node)) {
+      if (
+        themeMenuRef.current &&
+        !themeMenuRef.current.contains(e.target as Node) &&
+        themeButtonRef.current &&
+        !themeButtonRef.current.contains(e.target as Node)
+      ) {
         setIsThemeMenuOpen(false);
       }
     };
     if (isThemeMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
+      const handleResize = () => setIsThemeMenuOpen(false);
+      window.addEventListener('resize', handleResize);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+        window.removeEventListener('resize', handleResize);
+      };
     }
   }, [isThemeMenuOpen]);
 
@@ -661,10 +691,11 @@ export const Editor: React.FC<Props> = ({
             )}
 
             {/* Syntax Theme Switcher */}
-            <div ref={themeMenuRef} style={{ position: 'relative' }}>
+            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
               <button
+                ref={themeButtonRef}
                 type="button"
-                onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
+                onClick={toggleThemeMenu}
                 style={{
                   height: 24,
                   padding: '0 8px',
@@ -675,20 +706,20 @@ export const Editor: React.FC<Props> = ({
                   gap: 5,
                   backgroundColor: isThemeMenuOpen ? 'var(--bg-surface-elevated)' : 'var(--bg-surface-1)',
                   borderRadius: 5,
-                  border: '1px solid var(--border-medium)',
+                  border: isThemeMenuOpen ? '1px solid #38bdf8' : '1px solid var(--border-medium)',
                   color: 'var(--text-primary)',
                   whiteSpace: 'nowrap',
                   flexShrink: 0,
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                 }}
-                title="Syntax Highlight Theme (Antigravity Neon, VS Code, Monokai, Dracula, Normal)"
+                title="Editor Syntax Color Theme (VS Code, Cyber Neon, Monokai, Dracula, Plain)"
               >
                 <Palette size={11} color="#38bdf8" />
                 <span style={{ fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
-                  {SYNTAX_THEMES[syntaxTheme].badge}
+                  Syntax: {SYNTAX_THEMES[syntaxTheme].badge}
                 </span>
-                <span style={{ display: 'flex', gap: 2.5, alignItems: 'center', marginLeft: 2 }}>
+                <span style={{ display: 'flex', gap: 2, alignItems: 'center', marginLeft: 2 }}>
                   {SYNTAX_THEMES[syntaxTheme].previewColors.map((c, i) => (
                     <span
                       key={i}
@@ -703,36 +734,42 @@ export const Editor: React.FC<Props> = ({
                     />
                   ))}
                 </span>
+                <ChevronDown size={10} color="var(--text-muted)" style={{ marginLeft: 2 }} />
               </button>
 
-              {isThemeMenuOpen && (
+              {isThemeMenuOpen && menuCoords && createPortal(
                 <div
+                  ref={themeMenuRef}
                   style={{
-                    position: 'absolute',
-                    top: '100%',
-                    right: 0,
-                    marginTop: 4,
-                    zIndex: 50,
+                    position: 'fixed',
+                    top: menuCoords.top,
+                    right: menuCoords.right,
+                    zIndex: 99999,
                     backgroundColor: 'var(--bg-surface-1)',
                     border: '1px solid var(--border-medium)',
                     borderRadius: 'var(--radius-sm)',
-                    boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
+                    boxShadow: '0 12px 32px rgba(0, 0, 0, 0.55)',
                     width: 250,
-                    padding: 4,
+                    padding: 6,
+                    backdropFilter: 'blur(16px)',
                   }}
                 >
                   <div
                     style={{
-                      padding: '6px 8px',
-                      fontSize: 9.5,
-                      fontWeight: 700,
-                      letterSpacing: '0.06em',
-                      textTransform: 'uppercase',
-                      color: 'var(--text-muted)',
+                      padding: '6px 8px 6px 8px',
                       borderBottom: '1px solid var(--border-subtle)',
+                      marginBottom: 4,
                     }}
                   >
-                    Syntax Highlight Theme
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Palette size={12} color="#38bdf8" />
+                      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-primary)' }}>
+                        Syntax Color Theme
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                      Customize code colors in editor
+                    </div>
                   </div>
                   {(Object.keys(SYNTAX_THEMES) as SyntaxTheme[]).map(tKey => {
                     const th = SYNTAX_THEMES[tKey];
@@ -740,7 +777,8 @@ export const Editor: React.FC<Props> = ({
                     return (
                       <div
                         key={tKey}
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSyntaxTheme(tKey);
                           localStorage.setItem('teeex_syntax_theme', tKey);
                           setIsThemeMenuOpen(false);
@@ -754,6 +792,7 @@ export const Editor: React.FC<Props> = ({
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
+                          transition: 'background 0.15s ease',
                         }}
                         className="hover:bg-active"
                       >
@@ -786,7 +825,8 @@ export const Editor: React.FC<Props> = ({
                       </div>
                     );
                   })}
-                </div>
+                </div>,
+                document.body
               )}
             </div>
 
