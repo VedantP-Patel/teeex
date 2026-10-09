@@ -15,6 +15,9 @@
 export interface RoomShareTokens {
   editToken: string;
   viewToken: string;
+  createdAt: number;
+  expiresAt: number | null; // Milliseconds timestamp, null = Never
+  isRevoked?: boolean;
 }
 
 // Fast synchronous SHA-256 implementation
@@ -100,6 +103,16 @@ function sha256Sync(str: string): string {
   return hexParts.join('');
 }
 
+function generateCryptographicKey(): string {
+  const randomBytes = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(randomBytes);
+  } else {
+    for (let i = 0; i < 16; i++) randomBytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 /**
  * Retrieves or generates unguessable cryptographic tokens for a room
  */
@@ -117,25 +130,68 @@ export function getRoomShareTokens(roomId: string): RoomShareTokens {
     }
   }
 
-  // Generate cryptographically random 128-bit secret
-  const randomBytes = new Uint8Array(16);
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    crypto.getRandomValues(randomBytes);
-  } else {
-    for (let i = 0; i < 16; i++) randomBytes[i] = Math.floor(Math.random() * 256);
-  }
-
-  const rawHex = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  const rawHex = generateCryptographicKey();
   const editToken = `ed_${rawHex}`;
   const viewToken = `vw_${sha256Sync(`${roomId}:${editToken}`).slice(0, 24)}`;
 
-  const tokens: RoomShareTokens = { editToken, viewToken };
+  const tokens: RoomShareTokens = {
+    editToken,
+    viewToken,
+    createdAt: Date.now(),
+    expiresAt: null,
+    isRevoked: false,
+  };
+
   try {
     localStorage.setItem(storageKey, JSON.stringify(tokens));
   } catch {
     // Ignore localStorage quota errors
   }
   return tokens;
+}
+
+/**
+ * Rotates / regenerates cryptographic capability keys for a room.
+ * Invalidates all previously shared links immediately.
+ */
+export function rotateRoomShareTokens(roomId: string, expiresInDays?: number | null): RoomShareTokens {
+  const storageKey = `teeex_room_tokens_${roomId}`;
+  const rawHex = generateCryptographicKey();
+  const editToken = `ed_${rawHex}`;
+  const viewToken = `vw_${sha256Sync(`${roomId}:${editToken}`).slice(0, 24)}`;
+
+  const expiresAt = expiresInDays && expiresInDays > 0
+    ? Date.now() + expiresInDays * 24 * 60 * 60 * 1000
+    : null;
+
+  const tokens: RoomShareTokens = {
+    editToken,
+    viewToken,
+    createdAt: Date.now(),
+    expiresAt,
+    isRevoked: false,
+  };
+
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(tokens));
+  } catch {}
+
+  return tokens;
+}
+
+/**
+ * Revokes all active share links for a room, reverting it to private access.
+ */
+export function revokeRoomShareTokens(roomId: string): void {
+  const storageKey = `teeex_room_tokens_${roomId}`;
+  try {
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      const parsed = JSON.parse(saved) as RoomShareTokens;
+      parsed.isRevoked = true;
+      localStorage.setItem(storageKey, JSON.stringify(parsed));
+    }
+  } catch {}
 }
 
 /**
@@ -156,6 +212,16 @@ export function verifyShareKey(roomId: string, key: string | null): 'editor' | '
     // Ignore storage parse errors
   }
 
+  // If room tokens have been revoked, reject all external keys
+  if (savedTokens?.isRevoked) {
+    return null;
+  }
+
+  // If token has an active expiration date and has passed it, reject
+  if (savedTokens?.expiresAt && Date.now() > savedTokens.expiresAt) {
+    return null;
+  }
+
   // 1. Editor capability key provided (ed_...)
   if (key.startsWith('ed_')) {
     // Direct match with active stored token
@@ -168,7 +234,7 @@ export function verifyShareKey(roomId: string, key: string | null): 'editor' | '
       const derived = `vw_${sha256Sync(`${roomId}:${key}`).slice(0, 24)}`;
       if (derived === savedTokens.viewToken) {
         try {
-          localStorage.setItem(storageKey, JSON.stringify({ editToken: key, viewToken: derived }));
+          localStorage.setItem(storageKey, JSON.stringify({ ...savedTokens, editToken: key, viewToken: derived }));
         } catch {}
         return 'editor';
       }
@@ -180,7 +246,13 @@ export function verifyShareKey(roomId: string, key: string | null): 'editor' | '
     if (key.length >= 16) {
       const derived = `vw_${sha256Sync(`${roomId}:${key}`).slice(0, 24)}`;
       try {
-        localStorage.setItem(storageKey, JSON.stringify({ editToken: key, viewToken: derived }));
+        localStorage.setItem(storageKey, JSON.stringify({
+          editToken: key,
+          viewToken: derived,
+          createdAt: Date.now(),
+          expiresAt: null,
+          isRevoked: false,
+        }));
       } catch {}
       return 'editor';
     }
@@ -190,7 +262,13 @@ export function verifyShareKey(roomId: string, key: string | null): 'editor' | '
   if (key.startsWith('vw_')) {
     if (!savedTokens || !savedTokens.viewToken) {
       try {
-        localStorage.setItem(storageKey, JSON.stringify({ editToken: '', viewToken: key }));
+        localStorage.setItem(storageKey, JSON.stringify({
+          editToken: '',
+          viewToken: key,
+          createdAt: Date.now(),
+          expiresAt: null,
+          isRevoked: false,
+        }));
       } catch {}
     }
     return 'viewer';
@@ -198,4 +276,5 @@ export function verifyShareKey(roomId: string, key: string | null): 'editor' | '
 
   return 'viewer';
 }
+
 

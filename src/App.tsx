@@ -285,7 +285,31 @@ export function App() {
   const [isOffline, setIsOffline] = useState<boolean>(() => !navigator.onLine);
 
   // Track Changes & Reviewer Suggestions
-  const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
+  const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([
+    {
+      id: 'change-1',
+      fileId: 'main.tex',
+      type: 'insertion',
+      authorName: 'Dr. Elena Rostova',
+      authorColor: '#10b981',
+      timestamp: '15 mins ago',
+      line: 18,
+      text: '\\cite{rostova2026benchmarks}',
+      status: 'pending',
+    },
+    {
+      id: 'change-2',
+      fileId: 'main.tex',
+      type: 'deletion',
+      authorName: 'Marcus Chen',
+      authorColor: '#f59e0b',
+      timestamp: '30 mins ago',
+      line: 29,
+      text: 'classical heuristics',
+      originalText: 'classical heuristics',
+      status: 'pending',
+    }
+  ]);
 
   // Split Pane & Sidebar Layout
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -501,6 +525,16 @@ export function App() {
       setTrackedChanges(prev => prev.filter(t => t.id !== changeId));
     }
   }, [trackedChanges, activeProjectId, currentUser, currentRole]);
+
+  const handleAddTrackedChange = useCallback((change: Omit<TrackedChange, 'id' | 'status' | 'timestamp'>) => {
+    const newChange: TrackedChange = {
+      ...change,
+      id: `change-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: 'Just now',
+      status: 'pending',
+    };
+    setTrackedChanges(prev => [newChange, ...prev]);
+  }, []);
 
   // DOI BibTeX Citation Importer Handler
   const handleAddBibtexEntry = useCallback((bibtex: string, key: string) => {
@@ -1057,6 +1091,7 @@ export function App() {
               trackedChanges={trackedChanges}
               onAcceptTrackedChange={handleAcceptTrackedChange}
               onRejectTrackedChange={handleRejectTrackedChange}
+              onAddTrackedChange={handleAddTrackedChange}
             />
           </div>
 

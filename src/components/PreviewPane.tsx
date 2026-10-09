@@ -324,8 +324,25 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
             <span style={{ width: 4.5, height: 4.5, borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }} />
             Live
           </span>
-          <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 2, whiteSpace: 'nowrap' }} title="SyncTeX click & selection bidirectional sync is active">
-            <MousePointerClick size={10} color="#38bdf8" /> SyncTeX
+          <span
+            style={{
+              fontSize: 9.5,
+              padding: '1.5px 7px',
+              borderRadius: 999,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontWeight: 600,
+              backgroundColor: 'rgba(56, 189, 248, 0.12)',
+              color: '#38bdf8',
+              border: '1px solid rgba(56, 189, 248, 0.25)',
+              marginLeft: 2,
+              whiteSpace: 'nowrap',
+              cursor: 'help',
+            }}
+            title="SyncTeX: Click or double-click any section in the preview to jump to that line in LaTeX code!"
+          >
+            <MousePointerClick size={10} color="#38bdf8" /> SyncTeX: Active
           </span>
         </div>
 

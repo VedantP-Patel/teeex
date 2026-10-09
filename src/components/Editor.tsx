@@ -55,6 +55,7 @@ interface Props {
   trackedChanges?: TrackedChange[];
   onAcceptTrackedChange?: (changeId: string) => void;
   onRejectTrackedChange?: (changeId: string) => void;
+  onAddTrackedChange?: (change: Omit<TrackedChange, 'id' | 'status' | 'timestamp'>) => void;
 }
 
 export const Editor: React.FC<Props> = ({
@@ -81,13 +82,16 @@ export const Editor: React.FC<Props> = ({
   onToggleSidebar,
   onForwardSync,
   trackedChanges = [],
-  onAcceptTrackedChange: _onAcceptTrackedChange,
-  onRejectTrackedChange: _onRejectTrackedChange,
+  onAcceptTrackedChange,
+  onRejectTrackedChange,
+  onAddTrackedChange: _onAddTrackedChange,
 }) => {
   const [editorMode, setEditorMode] = useState<'code' | 'visual'>(() => {
     return (localStorage.getItem('teeex_editor_mode') as 'code' | 'visual') || 'code';
   });
   const [suggestionMode, setSuggestionMode] = useState(false);
+  const [isReviewPanelOpen, setIsReviewPanelOpen] = useState(false);
+  const [activeChangeId, setActiveChangeId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
   const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
@@ -126,6 +130,17 @@ export const Editor: React.FC<Props> = ({
     arr.push(c);
     commentMap.set(c.line, arr);
   });
+
+  // Tracked Changes map: line -> TrackedChange[]
+  const changeMap = React.useMemo(() => {
+    const map = new Map<number, TrackedChange[]>();
+    trackedChanges.filter(t => t.status === 'pending').forEach(t => {
+      const arr = map.get(t.line) || [];
+      arr.push(t);
+      map.set(t.line, arr);
+    });
+    return map;
+  }, [trackedChanges]);
 
   const [autoSyncPreview, setAutoSyncPreview] = useState<boolean>(() => {
     return localStorage.getItem('teeex_auto_sync_preview') === 'true';
@@ -543,6 +558,86 @@ export const Editor: React.FC<Props> = ({
             </span>
           </div>
 
+          {/* Active Co-Authors Presence Avatar Stack */}
+          {peers.filter(p => p.activeFile === fileName).length > 0 && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginLeft: 2 }}>
+                {peers
+                  .filter(p => p.activeFile === fileName)
+                  .map((p, idx) => (
+                    <div
+                      key={p.id}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: '50%',
+                        backgroundColor: p.color,
+                        color: '#ffffff',
+                        fontSize: 9,
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '2px solid var(--bg-surface-0)',
+                        marginLeft: idx > 0 ? -6 : 0,
+                        position: 'relative',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+                        cursor: 'default',
+                      }}
+                      title={`${p.name} (Line ${p.cursorLine} • ${p.status === 'typing' ? 'Typing...' : 'Active'})`}
+                    >
+                      {p.avatar || p.name.substring(0, 2).toUpperCase()}
+                    </div>
+                  ))}
+              </div>
+              <span className="badge badge-emerald" style={{ fontSize: 9, padding: '2px 6px', gap: 4 }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }} />
+                {peers.filter(p => p.activeFile === fileName).length} co-author{peers.filter(p => p.activeFile === fileName).length > 1 ? 's' : ''} live
+              </span>
+            </div>
+          )}
+
+          {/* Suggesting vs Editing Mode Toggle */}
+          {role !== 'viewer' && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', backgroundColor: 'var(--bg-surface-2)', borderRadius: 5, padding: 2, border: '1px solid var(--border-subtle)', height: 24, flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setSuggestionMode(false)}
+                style={{
+                  ...segmentedBtnStyle,
+                  height: 20,
+                  padding: '0 6px',
+                  fontSize: 10,
+                  backgroundColor: !suggestionMode ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                  color: !suggestionMode ? '#38bdf8' : 'var(--text-muted)',
+                }}
+                title="Editing Mode: Direct changes apply immediately"
+              >
+                <Edit3 size={10} />
+                <span>Editing</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSuggestionMode(true);
+                  setIsReviewPanelOpen(true);
+                }}
+                style={{
+                  ...segmentedBtnStyle,
+                  height: 20,
+                  padding: '0 6px',
+                  fontSize: 10,
+                  backgroundColor: suggestionMode ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
+                  color: suggestionMode ? '#10b981' : 'var(--text-muted)',
+                }}
+                title="Suggesting Mode: Edits become track-change suggestions that can be accepted or rejected"
+              >
+                <Check size={10} />
+                <span>Suggesting</span>
+              </button>
+            </div>
+          )}
+
           {role === 'viewer' && (
             <span
               style={{
@@ -906,6 +1001,34 @@ export const Editor: React.FC<Props> = ({
               <MessageSquarePlus size={13} />
               <span style={{ fontSize: 10 }}>Comment</span>
             </button>
+
+            {/* Review & Annotations Panel Button */}
+            <button
+              onClick={() => setIsReviewPanelOpen(prev => !prev)}
+              className="btn-ghost"
+              style={{
+                ...toolBtnStyle,
+                color: isReviewPanelOpen ? '#38bdf8' : (comments.filter(c => !c.resolved).length > 0 || trackedChanges.filter(t => t.status === 'pending').length > 0) ? '#f59e0b' : 'var(--text-muted)',
+                backgroundColor: isReviewPanelOpen ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+              }}
+              title="Toggle Review & Suggestions Drawer"
+            >
+              <MessageSquare size={12} />
+              <span style={{ fontSize: 10 }}>Review</span>
+              {(comments.filter(c => !c.resolved).length + trackedChanges.filter(t => t.status === 'pending').length) > 0 && (
+                <span style={{
+                  backgroundColor: '#f59e0b',
+                  color: '#000000',
+                  borderRadius: 10,
+                  padding: '1px 5px',
+                  fontSize: 9,
+                  fontWeight: 700,
+                  marginLeft: 2,
+                }}>
+                  {comments.filter(c => !c.resolved).length + trackedChanges.filter(t => t.status === 'pending').length}
+                </span>
+              )}
+            </button>
           </div>
         )}
       </div>
@@ -968,6 +1091,26 @@ export const Editor: React.FC<Props> = ({
                     >
                       <MessageSquare size={10} color="#f59e0b" />
                     </span>
+                  ) : changeMap.get(lineNum)?.length ? (
+                    <span
+                      onClick={() => {
+                        setIsReviewPanelOpen(true);
+                        setActiveChangeId(changeMap.get(lineNum)![0].id);
+                      }}
+                      style={{
+                        cursor: 'pointer',
+                        fontSize: 10,
+                        fontWeight: 800,
+                        color: changeMap.get(lineNum)![0].type === 'insertion' ? '#10b981' : '#f43f5e',
+                        lineHeight: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      title={`Line ${lineNum}: Tracked suggestion (${changeMap.get(lineNum)![0].type})`}
+                    >
+                      {changeMap.get(lineNum)![0].type === 'insertion' ? '+' : '−'}
+                    </span>
                   ) : null}
                 </div>
 
@@ -1021,47 +1164,100 @@ export const Editor: React.FC<Props> = ({
             />
           )}
 
+          {/* Peer Selections & Highlight Ranges */}
+          {peers
+            .filter(p => p.activeFile === fileName)
+            .map(p => {
+              const startLine = p.selectionStartLine || p.cursorLine;
+              const endLine = p.selectionEndLine || p.cursorLine;
+              const topOffset = (startLine - 1) * 21 + 10 - scrollTop;
+              const height = (endLine - startLine + 1) * 21;
+              return (
+                <div
+                  key={`peer-sel-${p.id}`}
+                  style={{
+                    position: 'absolute',
+                    top: topOffset,
+                    left: 0,
+                    right: 0,
+                    height,
+                    backgroundColor: `${p.color}15`,
+                    borderLeft: `2px solid ${p.color}`,
+                    pointerEvents: 'none',
+                    zIndex: 14,
+                    transition: 'all 0.15s ease',
+                  }}
+                />
+              );
+            })}
+
           {/* Peer Cursors Overlay */}
           {peers
             .filter(p => p.activeFile === fileName)
             .map(p => {
               const topOffset = (p.cursorLine - 1) * 21 + 10 - scrollTop;
+              const isTyping = p.status === 'typing';
               return (
                 <div
                   key={p.id}
                   style={{
                     position: 'absolute',
                     top: topOffset,
-                    left: 12 + Math.min(p.cursorCol * 8, 400),
+                    left: 12 + Math.min(p.cursorCol * 8, 480),
                     pointerEvents: 'none',
-                    zIndex: 20,
-                    transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                    zIndex: 25,
+                    transition: 'top 0.15s ease, left 0.15s ease',
                     display: 'flex',
-                    alignItems: 'center',
+                    alignItems: 'flex-start',
                     gap: 3,
                   }}
                 >
                   <div
                     style={{
                       width: 2,
-                      height: 18,
+                      height: 20,
                       backgroundColor: p.color,
-                      boxShadow: `0 0 8px ${p.color}`,
+                      boxShadow: `0 0 10px ${p.color}`,
+                      borderRadius: 1,
+                      animation: 'peerCursorBlink 1.2s ease-in-out infinite',
                     }}
                   />
                   <div
                     style={{
                       backgroundColor: p.color,
                       color: '#ffffff',
-                      fontSize: 9,
+                      fontSize: 9.5,
                       fontWeight: 700,
-                      padding: '1px 5px',
-                      borderRadius: 3,
-                      boxShadow: '0 2px 4px rgba(0, 0, 0, 0.4)',
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.45)',
                       whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      lineHeight: '13px',
+                      transform: 'translateY(-6px)',
                     }}
                   >
-                    {p.name}
+                    <span style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: '50%',
+                      backgroundColor: 'rgba(255, 255, 255, 0.25)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 7.5,
+                      fontWeight: 800,
+                    }}>
+                      {p.avatar || p.name.substring(0, 2).toUpperCase()}
+                    </span>
+                    <span>{p.name}</span>
+                    {isTyping && (
+                      <span style={{ fontSize: 8, opacity: 0.9, fontWeight: 500, fontStyle: 'italic' }}>
+                        typing...
+                      </span>
+                    )}
                   </div>
                 </div>
               );
@@ -1281,6 +1477,185 @@ export const Editor: React.FC<Props> = ({
               opacity: role === 'viewer' ? 0.9 : 1,
             }}
           />
+
+          {/* Floating Review & Suggestions Drawer */}
+          {isReviewPanelOpen && (
+            <div style={{
+              position: 'absolute',
+              top: 8,
+              right: 12,
+              bottom: 8,
+              width: 310,
+              zIndex: 38,
+              backgroundColor: 'var(--bg-surface-1)',
+              border: '1px solid var(--border-medium)',
+              borderRadius: 'var(--radius-md)',
+              boxShadow: '0 12px 36px rgba(0, 0, 0, 0.55)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              backdropFilter: 'blur(16px)',
+              animation: 'modalContent 0.2s var(--ease-spring) forwards',
+            }}>
+              {/* Drawer Header */}
+              <div style={{
+                padding: '10px 14px',
+                borderBottom: '1px solid var(--border-subtle)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: 'var(--bg-surface-0)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <MessageSquare size={13} color="#38bdf8" />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Review &amp; Suggestions
+                  </span>
+                </div>
+                <button onClick={() => setIsReviewPanelOpen(false)} className="btn-ghost" style={{ padding: 2 }}>
+                  <X size={13} />
+                </button>
+              </div>
+
+              {/* Drawer Content */}
+              <div style={{ flex: 1, padding: 10, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Section 1: Pending Tracked Changes */}
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+                    Tracked Suggestions ({trackedChanges.filter(t => t.status === 'pending').length})
+                  </div>
+
+                  {trackedChanges.filter(t => t.status === 'pending').length === 0 ? (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', padding: '6px 8px' }}>
+                      No pending suggestions.
+                    </div>
+                  ) : (
+                    trackedChanges.filter(t => t.status === 'pending').map(t => (
+                      <div
+                        key={t.id}
+                        style={{
+                          padding: 8,
+                          backgroundColor: activeChangeId === t.id ? 'rgba(56, 189, 248, 0.08)' : 'var(--bg-surface-0)',
+                          border: `1px solid ${activeChangeId === t.id ? '#38bdf8' : 'var(--border-subtle)'}`,
+                          borderRadius: 'var(--radius-sm)',
+                          marginBottom: 6,
+                          fontSize: 11,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: t.authorColor }} />
+                            <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{t.authorName}</span>
+                          </div>
+                          <span style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>Line {t.line}</span>
+                        </div>
+
+                        {/* Diff Box */}
+                        <div style={{
+                          padding: '4px 6px',
+                          borderRadius: 3,
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: 10.5,
+                          backgroundColor: t.type === 'insertion' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(244, 63, 94, 0.12)',
+                          color: t.type === 'insertion' ? '#10b981' : '#f43f5e',
+                          border: `1px solid ${t.type === 'insertion' ? 'rgba(16, 185, 129, 0.25)' : 'rgba(244, 63, 94, 0.25)'}`,
+                          marginBottom: 6,
+                          textDecoration: t.type === 'deletion' ? 'line-through' : 'none',
+                        }}>
+                          {t.type === 'insertion' ? `+ ${t.text}` : `- ${t.text}`}
+                        </div>
+
+                        {/* Accept / Reject Buttons */}
+                        {role !== 'viewer' && (
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                            <button
+                              onClick={() => onRejectTrackedChange?.(t.id)}
+                              className="btn-ghost"
+                              style={{ fontSize: 10.5, padding: '3px 8px', color: '#f43f5e', display: 'flex', alignItems: 'center', gap: 3 }}
+                              title="Reject suggestion"
+                            >
+                              <X size={11} /> Reject
+                            </button>
+                            <button
+                              onClick={() => onAcceptTrackedChange?.(t.id)}
+                              className="btn-primary"
+                              style={{ fontSize: 10.5, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 3 }}
+                              title="Accept suggestion"
+                            >
+                              <Check size={11} /> Accept
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Section 2: Review Comments */}
+                <div style={{ marginTop: 6, borderTop: '1px solid var(--border-subtle)', paddingTop: 10 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+                    Review Comments ({comments.filter(c => !c.resolved).length})
+                  </div>
+
+                  {comments.filter(c => !c.resolved).length === 0 ? (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', padding: '6px 8px' }}>
+                      No active comments.
+                    </div>
+                  ) : (
+                    comments.filter(c => !c.resolved).map(c => (
+                      <div
+                        key={c.id}
+                        style={{
+                          padding: 8,
+                          backgroundColor: 'var(--bg-surface-0)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: 'var(--radius-sm)',
+                          marginBottom: 6,
+                          fontSize: 11,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div style={{
+                              width: 18,
+                              height: 18,
+                              borderRadius: '50%',
+                              backgroundColor: c.authorColor,
+                              color: '#fff',
+                              fontSize: 8.5,
+                              fontWeight: 700,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}>
+                              {c.authorAvatar}
+                            </div>
+                            <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.authorName}</span>
+                          </div>
+                          <span style={{ fontSize: 9.5, color: '#f59e0b' }}>Line {c.line}</span>
+                        </div>
+
+                        <div style={{ color: 'var(--text-secondary)', marginBottom: 6, lineHeight: 1.4 }}>
+                          {c.text}
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                          <button
+                            onClick={() => onResolveComment(c.id)}
+                            className="btn-secondary"
+                            style={{ fontSize: 10, padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 3 }}
+                            title="Resolve comment"
+                          >
+                            <Check size={10} /> Resolve
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       )}

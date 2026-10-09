@@ -41,6 +41,9 @@ export interface Collaborator {
   activeFile: string;
   status: 'active' | 'idle' | 'typing';
   isSelf?: boolean;
+  selectionStartLine?: number;
+  selectionEndLine?: number;
+  selectionText?: string;
 }
 
 export interface ReviewComment {

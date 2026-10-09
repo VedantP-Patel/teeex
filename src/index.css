@@ -754,3 +754,53 @@ input:focus, textarea:focus, select:focus {
     outline: none !important;
   }
 }
+
+/* ==============================================================================
+   SYNCTEX BIDIRECTIONAL HIGHLIGHT & PULSE ANIMATIONS
+   ============================================================================== */
+@keyframes synctexPulse {
+  0% {
+    background-color: rgba(56, 189, 248, 0.42);
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.65), 0 0 20px rgba(56, 189, 248, 0.4);
+  }
+  60% {
+    background-color: rgba(56, 189, 248, 0.18);
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35), 0 0 10px rgba(56, 189, 248, 0.2);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.synctex-forward-pulse {
+  animation: synctexPulse 2.4s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  border-radius: 4px;
+}
+
+.synctex-target {
+  transition: outline 0.18s ease, background-color 0.18s ease;
+}
+
+.synctex-target:hover {
+  outline: 1.5px dashed rgba(56, 189, 248, 0.55) !important;
+  outline-offset: 3px;
+  border-radius: 3px;
+  background-color: rgba(56, 189, 248, 0.05);
+  cursor: crosshair !important;
+}
+
+/* ==============================================================================
+   REAL-TIME CO-AUTHOR CURSOR BLINK & PRESENCE ANIMATIONS
+   ============================================================================== */
+@keyframes peerCursorBlink {
+  0%, 100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scaleY(0.92);
+  }
+}
+

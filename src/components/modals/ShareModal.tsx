@@ -11,10 +11,18 @@ import {
   Eye,
   Trash2,
   Lock,
-  Key
+  Key,
+  RefreshCw,
+  ShieldOff,
+  Clock
 } from 'lucide-react';
 import type { Collaborator, ProjectMember, ProjectRole, UserProfile } from '../../types/latex';
-import { getRoomShareTokens } from '../../services/shareSecurityService';
+import {
+  getRoomShareTokens,
+  rotateRoomShareTokens,
+  revokeRoomShareTokens,
+  type RoomShareTokens,
+} from '../../services/shareSecurityService';
 
 interface Props {
   isOpen: boolean;
@@ -48,20 +56,42 @@ export const ShareModal: React.FC<Props> = ({
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<ProjectRole>('editor');
   const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
+  const [tokensState, setTokensState] = useState<RoomShareTokens>(() => getRoomShareTokens(roomId));
+  const [expiresInDays, setExpiresInDays] = useState<number | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ message: string; type: 'success' | 'warn' } | null>(null);
 
   if (!isOpen) return null;
 
-  const tokens = getRoomShareTokens(roomId);
-  const activeKey = linkRole === 'editor' ? tokens.editToken : tokens.viewToken;
-  const currentUrl =
-    window.location.origin +
-    window.location.pathname +
-    `?room=${encodeURIComponent(roomId)}&key=${activeKey}`;
+  const activeKey = linkRole === 'editor' ? tokensState.editToken : tokensState.viewToken;
+  const currentUrl = tokensState.isRevoked
+    ? 'Access Revoked (Generate new keys below to re-enable sharing)'
+    : `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(roomId)}&key=${activeKey}`;
 
   const handleCopy = () => {
+    if (tokensState.isRevoked) return;
     navigator.clipboard.writeText(currentUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleRotateKeys = () => {
+    const rotated = rotateRoomShareTokens(roomId, expiresInDays);
+    setTokensState(rotated);
+    setActionFeedback({
+      message: 'Fresh secret keys generated! All previously shared links have been invalidated.',
+      type: 'success',
+    });
+    setTimeout(() => setActionFeedback(null), 4000);
+  };
+
+  const handleRevokeKeys = () => {
+    revokeRoomShareTokens(roomId);
+    setTokensState(prev => ({ ...prev, isRevoked: true }));
+    setActionFeedback({
+      message: 'All links revoked. Room is now strictly private.',
+      type: 'warn',
+    });
+    setTimeout(() => setActionFeedback(null), 4000);
   };
 
   const handleSendInvite = (e: React.FormEvent) => {
@@ -170,11 +200,111 @@ export const ShareModal: React.FC<Props> = ({
             }}>
               {linkRole === 'viewer' ? <Lock size={12} /> : <Key size={12} />}
               <span>
-                {linkRole === 'viewer'
+                {tokensState.isRevoked
+                  ? 'All capability keys revoked. Collaborators cannot access this room until keys are regenerated.'
+                  : linkRole === 'viewer'
                   ? 'Cryptographically sealed view link (vw_...). Viewers cannot elevate to edit access by altering query parameters.'
                   : 'Authoritative edit capability key (ed_...). Anyone with this link has real-time co-authoring & editing privileges.'}
               </span>
             </div>
+
+            {/* Key Rotation & Expiration Controls Strip */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginTop: 10,
+              paddingTop: 8,
+              borderTop: '1px solid var(--border-subtle)',
+              fontSize: 11,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)' }}>
+                <Clock size={12} />
+                <span>Link Expiration:</span>
+                <select
+                  value={expiresInDays === null ? 'never' : expiresInDays}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const days = val === 'never' ? null : parseInt(val, 10);
+                    setExpiresInDays(days);
+                    const rotated = rotateRoomShareTokens(roomId, days);
+                    setTokensState(rotated);
+                    setActionFeedback({
+                      message: days ? `Expiration set to ${days} days.` : 'Expiration set to Never (permanent).',
+                      type: 'success',
+                    });
+                    setTimeout(() => setActionFeedback(null), 3000);
+                  }}
+                  style={{
+                    backgroundColor: 'var(--bg-surface-0)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-xs)',
+                    color: 'var(--text-primary)',
+                    fontSize: 11,
+                    padding: '2px 6px',
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="never">Never (Permanent)</option>
+                  <option value="7">7 Days</option>
+                  <option value="30">30 Days</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={handleRotateKeys}
+                  className="btn-ghost"
+                  style={{
+                    fontSize: 11,
+                    padding: '3px 8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    color: '#38bdf8',
+                  }}
+                  title="Generate new capability keys and invalidate previously shared links"
+                >
+                  <RefreshCw size={11} /> Rotate Keys
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRevokeKeys}
+                  className="btn-ghost"
+                  style={{
+                    fontSize: 11,
+                    padding: '3px 8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    color: '#f43f5e',
+                  }}
+                  title="Revoke all active links immediately"
+                >
+                  <ShieldOff size={11} /> Revoke Links
+                </button>
+              </div>
+            </div>
+
+            {actionFeedback && (
+              <div style={{
+                marginTop: 6,
+                fontSize: 11,
+                padding: '4px 8px',
+                borderRadius: 'var(--radius-xs)',
+                backgroundColor: actionFeedback.type === 'success' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(244, 63, 94, 0.12)',
+                color: actionFeedback.type === 'success' ? '#10b981' : '#f43f5e',
+                border: `1px solid ${actionFeedback.type === 'success' ? 'rgba(16, 185, 129, 0.25)' : 'rgba(244, 63, 94, 0.25)'}`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+              }}>
+                <Check size={12} />
+                <span>{actionFeedback.message}</span>
+              </div>
+            )}
           </div>
 
           {/* Email Invite Box (For Owners & Editors) */}
