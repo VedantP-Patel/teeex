@@ -1,6 +1,7 @@
 /**
  * Teeex Studio — High-Performance LaTeX Syntax Highlighter & Tokenizer
- * Provides customizable IDE color themes: Antigravity Neon, VS Code Dark+, Monokai Pro, Dracula, and Normal
+ * Provides customizable IDE color themes: Antigravity Neon, VS Code Dark+/Light, Monokai Pro, Dracula, and Normal
+ * Automatically adapts token contrast for both Obsidian Dark and Studio Light modes.
  */
 
 export type SyntaxTheme = 'antigravity' | 'vscode' | 'monokai' | 'dracula' | 'normal';
@@ -34,11 +35,11 @@ export const SYNTAX_THEMES: Record<SyntaxTheme, SyntaxThemeMeta> = {
       bracket: '#f472b6',
       comment: '#64748b',
       number: '#fbbf24',
-      defaultText: '#f1f5f9',
+      defaultText: 'var(--text-primary)',
     },
   },
   vscode: {
-    label: 'VS Code Dark+',
+    label: 'VS Code Theme',
     badge: 'VS Code',
     previewColors: ['#569cd6', '#4ec9b0', '#dcdcaa'],
     colors: {
@@ -48,7 +49,7 @@ export const SYNTAX_THEMES: Record<SyntaxTheme, SyntaxThemeMeta> = {
       bracket: '#9cdcfe',
       comment: '#6a9955',
       number: '#b5cea8',
-      defaultText: '#d4d4d4',
+      defaultText: 'var(--text-primary)',
     },
   },
   monokai: {
@@ -62,7 +63,7 @@ export const SYNTAX_THEMES: Record<SyntaxTheme, SyntaxThemeMeta> = {
       bracket: '#fd971f',
       comment: '#75715e',
       number: '#ae81ff',
-      defaultText: '#f8f8f2',
+      defaultText: 'var(--text-primary)',
     },
   },
   dracula: {
@@ -76,7 +77,7 @@ export const SYNTAX_THEMES: Record<SyntaxTheme, SyntaxThemeMeta> = {
       bracket: '#8be9fd',
       comment: '#6272a4',
       number: '#f1fa8c',
-      defaultText: '#f8f8f2',
+      defaultText: 'var(--text-primary)',
     },
   },
   normal: {
@@ -95,6 +96,69 @@ export const SYNTAX_THEMES: Record<SyntaxTheme, SyntaxThemeMeta> = {
   },
 };
 
+/**
+ * Resolves theme colors with high-contrast adaptation for Light and Dark modes
+ */
+export function getThemeColors(theme: SyntaxTheme = 'antigravity', isLight: boolean = false): ThemeColors {
+  if (isLight) {
+    switch (theme) {
+      case 'vscode':
+        return {
+          command: '#0000ff',
+          math: '#098658',
+          brace: '#811f3f',
+          bracket: '#0451a5',
+          comment: '#008000',
+          number: '#098658',
+          defaultText: 'var(--text-primary)',
+        };
+      case 'monokai':
+        return {
+          command: '#d30e52',
+          math: '#0284c7',
+          brace: '#4d7c0f',
+          bracket: '#c2410c',
+          comment: '#78716c',
+          number: '#7c3aed',
+          defaultText: 'var(--text-primary)',
+        };
+      case 'dracula':
+        return {
+          command: '#c026d3',
+          math: '#059669',
+          brace: '#7c3aed',
+          bracket: '#0284c7',
+          comment: '#64748b',
+          number: '#d97706',
+          defaultText: 'var(--text-primary)',
+        };
+      case 'normal':
+        return {
+          command: 'inherit',
+          math: 'inherit',
+          brace: 'inherit',
+          bracket: 'inherit',
+          comment: 'var(--text-muted)',
+          number: 'inherit',
+          defaultText: 'var(--text-primary)',
+        };
+      case 'antigravity':
+      default:
+        return {
+          command: '#0284c7',
+          math: '#059669',
+          brace: '#7c3aed',
+          bracket: '#db2777',
+          comment: '#64748b',
+          number: '#d97706',
+          defaultText: 'var(--text-primary)',
+        };
+    }
+  }
+
+  return SYNTAX_THEMES[theme]?.colors || SYNTAX_THEMES.antigravity.colors;
+}
+
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -105,12 +169,16 @@ function escapeHtml(str: string): string {
 /**
  * Tokenize raw LaTeX code into syntax-highlighted HTML spans for the editor backdrop
  */
-export function highlightLatexCode(code: string, theme: SyntaxTheme = 'antigravity'): string {
+export function highlightLatexCode(
+  code: string,
+  theme: SyntaxTheme = 'antigravity',
+  isLight: boolean = false
+): string {
   if (theme === 'normal') {
     return escapeHtml(code);
   }
 
-  const { colors } = SYNTAX_THEMES[theme];
+  const colors = getThemeColors(theme, isLight);
 
   // Regex tokenizer matching comments, math blocks, commands, braces, brackets, numbers, and symbols
   const tokenRegex = /(%[^\n]*)|(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^$\n]+\$|\\\(.*?\\\))|(\\[a-zA-Z@]+)|([{}])|([\[\]])|(\b\d+(?:\.\d+)?(?:pt|mm|cm|in|em|ex|%|s|ms|k|M|G)?\b)|(&|\\\\)/g;

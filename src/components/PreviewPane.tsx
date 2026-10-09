@@ -273,43 +273,62 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
   return (
     <div style={previewContainerStyle}>
       {/* Top Toolbar */}
-      <div style={previewToolbarStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <FileCheck size={14} color="#10b981" />
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>
-            PUBLICATION PREVIEW
+      <div style={previewToolbarStyle} className="no-scrollbar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
+          <FileCheck size={13} color="#10b981" />
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+            Preview
           </span>
-          <span className="badge badge-emerald" style={{ fontSize: 9 }}>
-            Live Rendered
+          <span
+            style={{
+              fontSize: 9.5,
+              padding: '1.5px 6px',
+              borderRadius: 999,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontWeight: 600,
+              backgroundColor: 'rgba(16, 185, 129, 0.12)',
+              color: '#10b981',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span style={{ width: 4.5, height: 4.5, borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }} />
+            Live
           </span>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3, marginLeft: 2 }}>
-            <MousePointerClick size={10} color="#38bdf8" /> SyncTeX Active
+          <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 2, whiteSpace: 'nowrap' }} title="SyncTeX click & selection bidirectional sync is active">
+            <MousePointerClick size={10} color="#38bdf8" /> SyncTeX
           </span>
+        </div>
 
-          <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
-
+        {/* Controls: Format, Column mode, Zoom, Print */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
           {/* Standard Format Selector Dropdown */}
           <div ref={formatMenuRef} style={{ position: 'relative' }}>
             <button
               type="button"
               onClick={() => setIsFormatMenuOpen(!isFormatMenuOpen)}
-              className="btn-ghost"
               style={{
-                padding: '2px 7px',
+                padding: '2px 8px',
                 fontSize: 10.5,
-                display: 'flex',
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                backgroundColor: isFormatMenuOpen ? 'var(--bg-surface-elevated)' : 'var(--bg-surface-1)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 5,
+                display: 'inline-flex',
                 alignItems: 'center',
                 gap: 5,
-                backgroundColor: isFormatMenuOpen ? 'var(--bg-surface-2)' : 'rgba(56, 189, 248, 0.08)',
-                borderRadius: 'var(--radius-xs)',
-                border: '1px solid rgba(56, 189, 248, 0.25)',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+                height: 24,
+                transition: 'all 0.15s ease',
               }}
-              title="Standard Academic Format (IEEE Transactions default, ACM, Nature, arXiv, Standard)"
+              title="Academic publication format"
             >
               <BookOpen size={11} color="#38bdf8" />
-              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                {currentFormatConfig.badge}
-              </span>
+              <span style={{ whiteSpace: 'nowrap' }}>{currentFormatConfig.badge}</span>
               <ChevronDown size={10} color="var(--text-muted)" />
             </button>
 
@@ -318,14 +337,14 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
                 style={{
                   position: 'absolute',
                   top: '100%',
-                  left: 0,
+                  right: 0,
                   marginTop: 4,
                   zIndex: 50,
-                  backgroundColor: 'var(--bg-surface-1)',
+                  backgroundColor: 'var(--bg-surface-0)',
                   border: '1px solid var(--border-medium)',
                   borderRadius: 'var(--radius-sm)',
                   boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
-                  width: 290,
+                  width: 280,
                   padding: 4,
                 }}
               >
@@ -350,7 +369,7 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
                       key={fid}
                       onClick={() => handleSelectFormat(fid)}
                       style={{
-                        padding: '7px 9px',
+                        padding: '6px 8px',
                         borderRadius: 4,
                         cursor: 'pointer',
                         backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
@@ -362,12 +381,12 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
                       className="hover:bg-active"
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 11.5, fontWeight: isSelected ? 700 : 500, color: isSelected ? '#38bdf8' : 'var(--text-primary)' }}>
+                        <span style={{ fontSize: 11, fontWeight: isSelected ? 700 : 500, color: isSelected ? '#38bdf8' : 'var(--text-primary)' }}>
                           {fmt.name}
                         </span>
                         {isSelected && <Check size={12} color="#38bdf8" />}
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.3 }}>
+                      <div style={{ fontSize: 9.5, color: 'var(--text-muted)', lineHeight: 1.3 }}>
                         {fmt.description}
                       </div>
                     </div>
@@ -376,41 +395,101 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
               </div>
             )}
           </div>
-        </div>
 
-        {/* Controls: Zoom, Column mode, Print */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {/* Column Toggle */}
+          {/* Column Toggle Button */}
           <button
+            type="button"
             onClick={() => setForceTwoColumn(!isTwoCol)}
-            className="btn-ghost"
-            style={{ padding: '3px 6px', fontSize: 11 }}
-            title={`Toggle layout (currently ${isTwoCol ? '2-Column' : '1-Column'})`}
+            style={{
+              padding: '2px 7px',
+              fontSize: 10.5,
+              fontWeight: 500,
+              color: 'var(--text-secondary)',
+              backgroundColor: 'var(--bg-surface-1)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 5,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+              height: 24,
+              transition: 'all 0.15s ease',
+            }}
+            title={`Toggle column layout (currently ${isTwoCol ? '2-Column' : '1-Column'})`}
           >
-            {isTwoCol ? <Columns size={13} color="#38bdf8" /> : <Square size={13} />}
-            <span style={{ fontSize: 10 }}>{isTwoCol ? '2-Col' : '1-Col'}</span>
+            {isTwoCol ? <Columns size={12} color="#38bdf8" /> : <Square size={12} />}
+            <span style={{ whiteSpace: 'nowrap' }}>{isTwoCol ? '2-Col' : '1-Col'}</span>
           </button>
 
-          <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)' }} />
+          <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', flexShrink: 0 }} />
 
-          {/* Zoom Controls */}
-          <button onClick={() => handleZoom(-10)} className="btn-ghost" style={{ padding: 4 }} title="Zoom Out">
-            <ZoomOut size={13} />
-          </button>
-          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', minWidth: 36, textAlign: 'center', color: 'var(--text-secondary)' }}>
-            {zoom}%
-          </span>
-          <button onClick={() => handleZoom(10)} className="btn-ghost" style={{ padding: 4 }} title="Zoom In">
-            <ZoomIn size={13} />
-          </button>
-          <button onClick={() => setZoom(100)} className="btn-ghost" style={{ padding: 4 }} title="Reset Zoom">
-            <Maximize2 size={12} />
-          </button>
+          {/* Zoom Segmented Controls */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            backgroundColor: 'var(--bg-surface-1)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 5,
+            height: 24,
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+          }}>
+            <button
+              type="button"
+              onClick={() => handleZoom(-10)}
+              className="btn-ghost"
+              style={{ padding: '2px 5px', height: '100%', borderRadius: 0, display: 'flex', alignItems: 'center' }}
+              title="Zoom Out"
+            >
+              <ZoomOut size={11} />
+            </button>
+            <span style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', minWidth: 32, textAlign: 'center', color: 'var(--text-primary)', fontWeight: 600, padding: '0 2px' }}>
+              {zoom}%
+            </span>
+            <button
+              type="button"
+              onClick={() => handleZoom(10)}
+              className="btn-ghost"
+              style={{ padding: '2px 5px', height: '100%', borderRadius: 0, display: 'flex', alignItems: 'center' }}
+              title="Zoom In"
+            >
+              <ZoomIn size={11} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setZoom(78)}
+              className="btn-ghost"
+              style={{ padding: '2px 5px', height: '100%', borderRadius: 0, borderLeft: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center' }}
+              title="Fit Page (78%)"
+            >
+              <Maximize2 size={10} />
+            </button>
+          </div>
 
-          <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)' }} />
+          <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', flexShrink: 0 }} />
 
-          <button onClick={handlePrint} className="btn-ghost" style={{ padding: 4 }} title="Print / Save as PDF">
-            <Printer size={13} />
+          {/* Print / Save as PDF Button */}
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="btn-secondary"
+            style={{
+              padding: '2px 8px',
+              fontSize: 10.5,
+              fontWeight: 600,
+              height: 24,
+              borderRadius: 5,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+            }}
+            title="Print / Save as PDF"
+          >
+            <Printer size={11} />
+            <span>Print</span>
           </button>
         </div>
       </div>
@@ -519,8 +598,12 @@ const previewToolbarStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  padding: '0 12px',
+  padding: '0 10px',
   flexShrink: 0,
+  overflowX: 'auto',
+  overflowY: 'hidden',
+  whiteSpace: 'nowrap',
+  gap: 8,
 };
 
 const sheetViewportStyle: React.CSSProperties = {
@@ -541,7 +624,7 @@ const paperSheetStyle: React.CSSProperties = {
   boxSizing: 'border-box',
   backgroundColor: 'var(--paper-bg)',
   color: 'var(--paper-text)',
-  boxShadow: '0 12px 35px -5px rgba(0, 0, 0, 0.45), 0 0 1px 1px rgba(255, 255, 255, 0.08)',
+  boxShadow: 'var(--paper-shadow)',
   borderRadius: 2,
   fontFamily: 'var(--paper-font-serif)',
   lineHeight: 1.5,

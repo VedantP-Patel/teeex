@@ -143,11 +143,26 @@ export const Editor: React.FC<Props> = ({
     }
   }, [isThemeMenuOpen]);
 
-  // Tokenize LaTeX syntax for color backdrop overlay
+  const [isLightMode, setIsLightMode] = useState<boolean>(() => {
+    return document.documentElement.getAttribute('data-theme') === 'light';
+  });
+
+  // Track theme changes dynamically
+  useEffect(() => {
+    const checkTheme = () => {
+      setIsLightMode(document.documentElement.getAttribute('data-theme') === 'light');
+    };
+    checkTheme();
+    const observer = new MutationObserver(checkTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+
+  // Tokenize LaTeX syntax for color backdrop overlay with light/dark mode adaptation
   const highlightedHtml = React.useMemo(() => {
     if (syntaxTheme === 'normal') return '';
-    return highlightLatexCode(code, syntaxTheme) + (code.endsWith('\n') ? ' ' : '');
-  }, [code, syntaxTheme]);
+    return highlightLatexCode(code, syntaxTheme, isLightMode) + (code.endsWith('\n') ? ' ' : '');
+  }, [code, syntaxTheme, isLightMode]);
 
   // Sync gutter scroll and overlay position
   const handleScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
@@ -758,7 +773,7 @@ export const Editor: React.FC<Props> = ({
                     ? '#38bdf8'
                     : diag
                     ? (diag.severity === 'error' ? '#f43f5e' : '#f59e0b')
-                    : 'var(--text-faint)',
+                    : 'var(--text-muted)',
                   fontWeight: isHighlighted || diag ? 700 : 400
                 }}>
                   {lineNum}
