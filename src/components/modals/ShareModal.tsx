@@ -3,7 +3,6 @@ import {
   Users,
   Copy,
   Check,
-  ExternalLink,
   X,
   Mail,
   UserPlus,
@@ -63,10 +62,6 @@ export const ShareModal: React.FC<Props> = ({
     navigator.clipboard.writeText(currentUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const openNewTab = () => {
-    window.open(currentUrl, '_blank');
   };
 
   const handleSendInvite = (e: React.FormEvent) => {
@@ -180,27 +175,6 @@ export const ShareModal: React.FC<Props> = ({
                   : 'Authoritative edit capability key (ed_...). Anyone with this link has real-time co-authoring & editing privileges.'}
               </span>
             </div>
-          </div>
-
-          {/* Instant Multi-Tab Test Button */}
-          <div style={{
-            backgroundColor: 'rgba(56, 189, 248, 0.08)',
-            border: '1px solid rgba(56, 189, 248, 0.2)',
-            borderRadius: 'var(--radius-md)',
-            padding: 12,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 13, color: '#38bdf8' }}>Test Live Multi-User Sync</div>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                Open this link in another tab or private window to see real-time updates and cursor broadcast.
-              </div>
-            </div>
-            <button onClick={openNewTab} className="btn-secondary" style={{ fontSize: 12 }}>
-              <ExternalLink size={13} /> Open Tab
-            </button>
           </div>
 
           {/* Email Invite Box (For Owners & Editors) */}
