@@ -365,6 +365,27 @@ input:focus, textarea:focus, select:focus {
   scrollbar-width: none;
 }
 
+/* Subtle Toolbar Scrollbar for visual affordance */
+.toolbar-scrollbar::-webkit-scrollbar {
+  height: 4px;
+}
+.toolbar-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.toolbar-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+[data-theme="light"] .toolbar-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+.toolbar-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-cyan);
+}
+.toolbar-scrollbar {
+  scrollbar-width: thin;
+}
+
 /* Eye-Friendly Smooth Theme Cross-Fade Transition */
 .sheet-viewport,
 .preview-container,
