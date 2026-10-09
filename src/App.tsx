@@ -76,12 +76,18 @@ export function App() {
   });
 
   useEffect(() => {
+    // Set data-theme immediately on mount to match stored theme
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('teeex_theme', theme);
-  }, [theme]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleTheme = () => {
-    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+    const next = theme === 'dark' ? 'light' : 'dark';
+    // Synchronously update data-theme BEFORE React re-renders
+    // so CSS variable transitions and inline-style transitions land in the same frame
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('teeex_theme', next);
+    setTheme(next);
   };
 
   // Auth & Session State
@@ -966,11 +972,10 @@ export function App() {
             height: '100%',
             display: 'flex',
             flexDirection: 'column',
-            backgroundColor: theme === 'light' ? '#f1f5f9' : '#080a0f',
+            backgroundColor: 'var(--bg-app)',
             transition: 'background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
           }}>
             <PreviewPane
-              theme={theme}
               renderedHtml={renderedHtml}
               parsedDoc={parsedDoc}
               onJumpToLine={setTargetLine}
