@@ -333,23 +333,24 @@ const sheetViewportStyle: React.CSSProperties = {
   flex: 1,
   overflowY: 'auto',
   overflowX: 'auto',
-  padding: '28px 20px',
+  padding: '20px 14px',
   display: 'flex',
   justifyContent: 'center',
+  alignItems: 'flex-start',
   backgroundColor: 'var(--bg-app)',
 };
 
 const paperSheetStyle: React.CSSProperties = {
-  width: '740px',
-  minHeight: '1040px',
+  width: '610px',
+  minHeight: '862px',
   backgroundColor: 'var(--paper-bg)',
   color: 'var(--paper-text)',
-  boxShadow: 'var(--paper-shadow)',
+  boxShadow: '0 12px 35px -5px rgba(0, 0, 0, 0.45), 0 0 1px 1px rgba(255, 255, 255, 0.08)',
   borderRadius: 2,
-  padding: '56px 48px',
+  padding: '44px 36px',
   fontFamily: 'var(--paper-font-serif)',
-  lineHeight: 1.6,
-  fontSize: '13.5px',
+  lineHeight: 1.55,
+  fontSize: '13px',
   transition: 'transform 0.15s ease',
   position: 'relative',
   display: 'flex',
@@ -359,16 +360,16 @@ const paperSheetStyle: React.CSSProperties = {
 
 const academicHeaderStyle: React.CSSProperties = {
   textAlign: 'center',
-  marginBottom: 24,
-  paddingBottom: 16,
+  marginBottom: 18,
+  paddingBottom: 12,
   borderBottom: '1px solid #e5e7eb',
 };
 
 const paperTitleStyle: React.CSSProperties = {
-  fontSize: '22px',
+  fontSize: '20px',
   fontWeight: 700,
   letterSpacing: '-0.01em',
-  marginBottom: 10,
+  marginBottom: 8,
   lineHeight: 1.25,
   color: '#111827',
 };

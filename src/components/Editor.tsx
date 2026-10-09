@@ -11,7 +11,9 @@ import {
   MessageSquare,
   BookMarked,
   Eye,
-  Code as CodeIcon
+  Code as CodeIcon,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
@@ -33,6 +35,8 @@ interface Props {
   bibEntries?: BibEntry[];
   role?: ProjectRole;
   files?: ProjectFile[];
+  isSidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
 }
 
 export const Editor: React.FC<Props> = ({
@@ -51,6 +55,8 @@ export const Editor: React.FC<Props> = ({
   bibEntries = [],
   role = 'owner',
   files = [],
+  isSidebarOpen = true,
+  onToggleSidebar,
 }) => {
   const [editorMode, setEditorMode] = useState<'code' | 'visual'>(() => {
     return (localStorage.getItem('teeex_editor_mode') as 'code' | 'visual') || 'code';
@@ -243,6 +249,26 @@ export const Editor: React.FC<Props> = ({
       {/* Editor Sub-Header Toolbar */}
       <div style={editorToolbarStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* Sidebar Toggle Button */}
+          {onToggleSidebar && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              className="btn-ghost"
+              style={{
+                padding: '3px 6px',
+                display: 'flex',
+                alignItems: 'center',
+                color: isSidebarOpen ? 'var(--text-secondary)' : '#38bdf8',
+                backgroundColor: isSidebarOpen ? 'transparent' : 'rgba(56, 189, 248, 0.12)',
+                borderRadius: 'var(--radius-xs)',
+              }}
+              title={isSidebarOpen ? 'Collapse files sidebar (maximizes editor & preview)' : 'Expand files sidebar'}
+            >
+              {isSidebarOpen ? <PanelLeftClose size={13} /> : <PanelLeftOpen size={13} />}
+            </button>
+          )}
+
           {/* Overleaf-Style Code vs Visual Segmented Switch */}
           <div style={segmentedControlStyle}>
             <button

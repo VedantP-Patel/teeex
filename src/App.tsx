@@ -217,7 +217,8 @@ export function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isWordCountOpen, setIsWordCountOpen] = useState(false);
 
-  // Split Pane Resizing
+  // Split Pane & Sidebar Layout
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [splitPercent, setSplitPercent] = useState<number>(50);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
 
@@ -654,23 +655,33 @@ export function App() {
       {/* Main Workspace Body */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Left Sidebar */}
-        <Sidebar
-          files={files}
-          folders={folders}
-          activeFileId={activeFileId}
-          onSelectFile={setActiveFileId}
-          onCreateFile={handleCreateFile}
-          onDeleteFile={handleDeleteFile}
-          onCreateFolder={handleCreateFolder}
-          onDeleteFolder={handleDeleteFolder}
-          documentOutline={parsedDoc.sections}
-          onJumpToLine={setTargetLine}
-          wordCount={wordCount}
-          equationCount={equationCount}
-          onOpenWordCount={() => setIsWordCountOpen(true)}
-          onOpenHistory={() => setIsHistoryOpen(true)}
-          role={currentRole}
-        />
+        <div style={{
+          width: isSidebarOpen ? 210 : 0,
+          transition: 'width 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          flexShrink: 0,
+        }}>
+          <Sidebar
+            files={files}
+            folders={folders}
+            activeFileId={activeFileId}
+            onSelectFile={setActiveFileId}
+            onCreateFile={handleCreateFile}
+            onDeleteFile={handleDeleteFile}
+            onCreateFolder={handleCreateFolder}
+            onDeleteFolder={handleDeleteFolder}
+            documentOutline={parsedDoc.sections}
+            onJumpToLine={setTargetLine}
+            wordCount={wordCount}
+            equationCount={equationCount}
+            onOpenWordCount={() => setIsWordCountOpen(true)}
+            onOpenHistory={() => setIsHistoryOpen(true)}
+            role={currentRole}
+            onCollapse={() => setIsSidebarOpen(false)}
+          />
+        </div>
 
         {/* Center & Right Split Pane */}
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
@@ -692,6 +703,8 @@ export function App() {
               bibEntries={bibEntries}
               role={currentRole}
               files={files}
+              isSidebarOpen={isSidebarOpen}
+              onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
             />
           </div>
 

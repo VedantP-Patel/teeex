@@ -14,7 +14,8 @@ import {
   FilePlus,
   ChevronDown,
   ChevronRight,
-  Image as ImageIcon
+  Image as ImageIcon,
+  PanelLeftClose
 } from 'lucide-react';
 import type { ProjectFile, ParsedDocument, ProjectRole } from '../types/latex';
 
@@ -34,6 +35,7 @@ interface Props {
   onOpenWordCount?: () => void;
   onOpenHistory?: () => void;
   role?: ProjectRole;
+  onCollapse?: () => void;
 }
 
 export const Sidebar: React.FC<Props> = ({
@@ -52,6 +54,7 @@ export const Sidebar: React.FC<Props> = ({
   onOpenWordCount,
   onOpenHistory,
   role = 'owner',
+  onCollapse,
 }) => {
   const [activeTab, setActiveTab] = useState<'files' | 'outline'>('files');
 
@@ -191,6 +194,17 @@ export const Sidebar: React.FC<Props> = ({
         >
           <ListTree size={13} /> Outline ({documentOutline.length})
         </button>
+
+        {onCollapse && (
+          <button
+            onClick={onCollapse}
+            className="btn-ghost"
+            style={{ padding: '6px 8px', borderRadius: 0, color: 'var(--text-muted)' }}
+            title="Collapse Sidebar"
+          >
+            <PanelLeftClose size={13} />
+          </button>
+        )}
       </div>
 
       {/* Files List View */}
@@ -535,7 +549,7 @@ export const Sidebar: React.FC<Props> = ({
 };
 
 const sidebarStyle: React.CSSProperties = {
-  width: 220,
+  width: 210,
   height: '100%',
   backgroundColor: 'var(--bg-surface-0)',
   borderRight: '1px solid var(--border-subtle)',

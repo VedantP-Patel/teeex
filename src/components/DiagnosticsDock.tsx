@@ -23,12 +23,19 @@ export const DiagnosticsDock: React.FC<Props> = ({
   onJumpToLine,
   rawLogs,
 }) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const [activeTab, setActiveTab] = useState<'diagnostics' | 'logs'>('diagnostics');
   const [severityFilter, setSeverityFilter] = useState<'all' | 'error' | 'warning'>('all');
 
   const errors = diagnostics.filter(d => d.severity === 'error');
   const warnings = diagnostics.filter(d => d.severity === 'warning');
+
+  // Auto-expand dock if new errors are introduced
+  React.useEffect(() => {
+    if (errors.length > 0) {
+      setIsCollapsed(false);
+    }
+  }, [errors.length]);
 
   const filteredDiagnostics = diagnostics.filter(d => {
     if (severityFilter === 'error') return d.severity === 'error';
@@ -45,7 +52,10 @@ export const DiagnosticsDock: React.FC<Props> = ({
       <div style={dockHeaderStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
-            onClick={() => setActiveTab('diagnostics')}
+            onClick={() => {
+              setActiveTab('diagnostics');
+              if (isCollapsed) setIsCollapsed(false);
+            }}
             style={{
               ...tabBtnStyle,
               color: activeTab === 'diagnostics' ? 'var(--text-primary)' : 'var(--text-muted)',
@@ -59,7 +69,10 @@ export const DiagnosticsDock: React.FC<Props> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('logs')}
+            onClick={() => {
+              setActiveTab('logs');
+              if (isCollapsed) setIsCollapsed(false);
+            }}
             style={{
               ...tabBtnStyle,
               color: activeTab === 'logs' ? 'var(--text-primary)' : 'var(--text-muted)',
