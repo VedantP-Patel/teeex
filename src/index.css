@@ -145,7 +145,7 @@ html, body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  transition: background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1), color 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+  transition: color 0.35s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 #root {
@@ -154,7 +154,6 @@ html, body {
   display: flex;
   flex-direction: column;
   background-color: var(--bg-app);
-  transition: background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 /* Scrollbar Refinement */
@@ -371,9 +370,7 @@ input:focus, textarea:focus, select:focus {
 .preview-container,
 .preview-toolbar,
 .editor-toolbar {
-  transition: background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-              border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-              box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .latex-paper-sheet {
