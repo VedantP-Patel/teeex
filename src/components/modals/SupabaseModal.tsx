@@ -13,7 +13,10 @@ import {
   Check,
   FileCode,
   ExternalLink,
-  Layers
+  Layers,
+  Lock,
+  KeyRound,
+  ShieldAlert
 } from 'lucide-react';
 import {
   configureSupabase,
@@ -22,7 +25,7 @@ import {
   testSupabaseConnection
 } from '../../services/supabaseClient';
 import { syncAllProjectsWithCloud } from '../../services/projectsService';
-import type { Project } from '../../types/latex';
+import type { Project, ProjectRole, UserProfile } from '../../types/latex';
 
 interface Props {
   isOpen: boolean;
@@ -30,6 +33,8 @@ interface Props {
   onSyncWithCloud: () => void;
   projects?: Project[];
   onProjectsUpdated?: (projects: Project[]) => void;
+  currentRole?: ProjectRole;
+  currentUser?: UserProfile | null;
 }
 
 const SUPABASE_SQL_SCRIPT = `-- ==============================================================================
@@ -115,10 +120,17 @@ export const SupabaseModal: React.FC<Props> = ({
   onClose,
   onSyncWithCloud,
   projects = [],
+  currentRole = 'owner',
+  currentUser,
 }) => {
   // Credentials State
   const [url, setUrl] = useState(() => localStorage.getItem('teeex_supabase_url') || import.meta.env.VITE_SUPABASE_URL || '');
   const [anonKey, setAnonKey] = useState(() => localStorage.getItem('teeex_supabase_anon_key') || import.meta.env.VITE_SUPABASE_ANON_KEY || '');
+
+  // Admin Security States
+  const [adminPasscode, setAdminPasscode] = useState('');
+  const [passcodeError, setPasscodeError] = useState(false);
+  const [elevatedAdmin, setElevatedAdmin] = useState(false);
 
   // UI States
   const [showAnonKey, setShowAnonKey] = useState(false);
@@ -131,6 +143,20 @@ export const SupabaseModal: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<'cloud' | 'sql' | 'security'>('cloud');
 
   if (!isOpen) return null;
+
+  const isAuthorized = currentRole === 'owner' || elevatedAdmin;
+
+  const handleUnlockAdmin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = adminPasscode.trim().toLowerCase();
+    if (clean === 'admin' || clean === 'owner' || clean === 'teeex' || clean === '2026' || clean === 'admin123') {
+      setElevatedAdmin(true);
+      setPasscodeError(false);
+      setAdminPasscode('');
+    } else {
+      setPasscodeError(true);
+    }
+  };
 
   // Test Connection
   const handleTestConnection = async () => {
@@ -196,6 +222,102 @@ export const SupabaseModal: React.FC<Props> = ({
     setTimeout(() => setCopiedSql(false), 2000);
   };
 
+  // RENDER ADMIN GATE IF NOT AUTHORIZED
+  if (!isAuthorized) {
+    return (
+      <div style={backdropStyle} onClick={onClose}>
+        <div style={{ ...modalStyle, maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+          <div style={headerStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ padding: 6, borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(244, 63, 94, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Lock size={16} color="#f43f5e" />
+              </div>
+              <div>
+                <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                  Admin Clearance Required
+                </h2>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>
+                  Restricted Cloud &amp; Security Vault
+                </p>
+              </div>
+            </div>
+            <button onClick={onClose} style={closeBtnStyle}>
+              <X size={18} />
+            </button>
+          </div>
+
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{
+              padding: 12,
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'rgba(244, 63, 94, 0.06)',
+              border: '1px solid rgba(244, 63, 94, 0.2)',
+              fontSize: 12,
+              color: 'var(--text-secondary)',
+              lineHeight: 1.5,
+              display: 'flex',
+              gap: 10,
+              alignItems: 'flex-start'
+            }}>
+              <ShieldAlert size={18} color="#f43f5e" style={{ flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <div style={{ fontWeight: 600, color: '#f43f5e', marginBottom: 2 }}>
+                  Sensitive Production Credentials
+                </div>
+                Database connection strings, anon API keys, and SQL migrations are restricted to the Workspace Owner / Administrator.
+              </div>
+            </div>
+
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>ACTIVE SESSION</span>
+              <span className="badge badge-amber" style={{ fontSize: 10 }}>
+                {currentUser?.fullName || 'User'} &bull; {currentRole.toUpperCase()}
+              </span>
+            </div>
+
+            <form onSubmit={handleUnlockAdmin} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label style={labelStyle}>ADMIN / OWNER PASSCODE</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="password"
+                    placeholder="Enter admin passcode (e.g. admin)"
+                    value={adminPasscode}
+                    onChange={e => {
+                      setAdminPasscode(e.target.value);
+                      if (passcodeError) setPasscodeError(false);
+                    }}
+                    style={{
+                      ...inputStyle,
+                      paddingLeft: 34,
+                      borderColor: passcodeError ? '#f43f5e' : 'var(--border-subtle)',
+                    }}
+                    autoFocus
+                  />
+                  <KeyRound size={14} color="var(--text-muted)" style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)' }} />
+                </div>
+                {passcodeError && (
+                  <div style={{ fontSize: 11, color: '#f43f5e', marginTop: 4 }}>
+                    Invalid admin passcode. Try 'admin' or switch to Owner profile.
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+                <button type="submit" className="btn-primary" style={{ flex: 1, fontSize: 12 }}>
+                  <ShieldCheck size={14} /> Unlock Admin Vault
+                </button>
+                <button type="button" onClick={onClose} className="btn-secondary" style={{ fontSize: 12 }}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={backdropStyle} onClick={onClose}>
       <div style={modalStyle} onClick={e => e.stopPropagation()}>
@@ -204,9 +326,14 @@ export const SupabaseModal: React.FC<Props> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Database size={18} color="#10b981" />
             <div>
-              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Supabase Cloud Setup &amp; Vault</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Supabase Cloud Setup &amp; Vault</h2>
+                <span className="badge badge-cyan" style={{ fontSize: 9.5, padding: '1px 6px' }}>
+                  👑 Admin Mode
+                </span>
+              </div>
               <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>
-                PostgreSQL persistence, Auth &amp; Realtime sync
+                Restricted to {currentRole === 'owner' ? 'Project Owner' : 'Elevated Administrator'}
               </p>
             </div>
           </div>

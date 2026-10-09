@@ -293,22 +293,25 @@ export const Navbar: React.FC<Props> = ({
 
       {/* Right Side: Tools, Collaboration, User Account */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        {/* Cloud Status */}
-        <button
-          onClick={onOpenSupabase}
-          className="btn-ghost"
-          style={{
-            ...toolBtnStyle,
-            color: isCloudConnected ? '#10b981' : 'var(--text-secondary)',
-            backgroundColor: isCloudConnected ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
-          }}
-          title={isCloudConnected ? "Supabase Cloud Integrated" : "Cloud & Security Vault"}
-        >
-          {isCloudConnected ? <Cloud size={13} /> : <ShieldCheck size={13} />}
-          <span>{isCloudConnected ? 'Cloud Synced' : 'Cloud Setup'}</span>
-        </button>
-
-        <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+        {/* Cloud Status (Admin / Owner Only) */}
+        {currentRole === 'owner' && (
+          <>
+            <button
+              onClick={onOpenSupabase}
+              className="btn-ghost"
+              style={{
+                ...toolBtnStyle,
+                color: isCloudConnected ? '#10b981' : 'var(--text-secondary)',
+                backgroundColor: isCloudConnected ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+              }}
+              title="Admin Cloud & Database Vault"
+            >
+              {isCloudConnected ? <Cloud size={13} /> : <ShieldCheck size={13} />}
+              <span>{isCloudConnected ? 'Cloud Synced' : 'Admin Cloud'}</span>
+            </button>
+            <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+          </>
+        )}
 
         {/* Math & TikZ Library */}
         <button onClick={onOpenSymbols} className="btn-ghost" title="LaTeX Symbols & Formulas Library" style={toolBtnStyle}>
@@ -450,13 +453,18 @@ export const Navbar: React.FC<Props> = ({
                   <span>Switch Account / Sign In</span>
                 </button>
 
-                <button
-                  onClick={() => { setIsUserDropdownOpen(false); onOpenSupabase(); }}
-                  style={dropdownItemStyle}
-                >
-                  <Cloud size={13} color="var(--text-secondary)" />
-                  <span>Supabase &amp; Cloud Vault</span>
-                </button>
+                {currentRole === 'owner' && (
+                  <button
+                    onClick={() => { setIsUserDropdownOpen(false); onOpenSupabase(); }}
+                    style={dropdownItemStyle}
+                  >
+                    <Shield size={13} color="#10b981" />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <span>Admin &amp; Cloud Vault</span>
+                      <span className="badge badge-cyan" style={{ fontSize: 9, padding: '1px 5px' }}>Admin</span>
+                    </div>
+                  </button>
+                )}
 
                 <div style={{ height: 1, backgroundColor: 'var(--border-subtle)', margin: '4px 0' }} />
 

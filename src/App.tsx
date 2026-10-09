@@ -650,6 +650,8 @@ export function App() {
         onSyncWithCloud={() => setIsCloudConnected(true)}
         projects={projects}
         onProjectsUpdated={setProjects}
+        currentRole={currentRole}
+        currentUser={currentUser}
       />
 
       <SymbolPaletteModal
