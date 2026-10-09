@@ -691,6 +691,7 @@ export function App() {
               onResolveComment={handleResolveComment}
               bibEntries={bibEntries}
               role={currentRole}
+              files={files}
             />
           </div>
 

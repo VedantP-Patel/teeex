@@ -10,10 +10,12 @@ import {
   X,
   MessageSquare,
   BookMarked,
-  Eye
+  Eye,
+  Code as CodeIcon
 } from 'lucide-react';
-import type { Collaborator, Diagnostic, ReviewComment, ProjectRole } from '../types/latex';
+import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
+import { VisualEditor } from './VisualEditor';
 
 interface Props {
   code: string;
@@ -30,6 +32,7 @@ interface Props {
   onResolveComment: (commentId: string) => void;
   bibEntries?: BibEntry[];
   role?: ProjectRole;
+  files?: ProjectFile[];
 }
 
 export const Editor: React.FC<Props> = ({
@@ -47,7 +50,11 @@ export const Editor: React.FC<Props> = ({
   onResolveComment,
   bibEntries = [],
   role = 'owner',
+  files = [],
 }) => {
+  const [editorMode, setEditorMode] = useState<'code' | 'visual'>(() => {
+    return (localStorage.getItem('teeex_editor_mode') as 'code' | 'visual') || 'code';
+  });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [activeCommentLine, setActiveCommentLine] = useState<number | null>(null);
   const [commentDraft, setCommentDraft] = useState('');
@@ -195,7 +202,41 @@ export const Editor: React.FC<Props> = ({
 
       {/* Editor Sub-Header Toolbar */}
       <div style={editorToolbarStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* Overleaf-Style Code vs Visual Segmented Switch */}
+          <div style={segmentedControlStyle}>
+            <button
+              type="button"
+              onClick={() => {
+                setEditorMode('code');
+                localStorage.setItem('teeex_editor_mode', 'code');
+              }}
+              style={{
+                ...segmentedBtnStyle,
+                ...(editorMode === 'code' ? activeSegmentedBtnStyle : {}),
+              }}
+              title="Code Editor: Raw LaTeX source with syntax highlighting"
+            >
+              <CodeIcon size={12} />
+              <span>Code</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditorMode('visual');
+                localStorage.setItem('teeex_editor_mode', 'visual');
+              }}
+              style={{
+                ...segmentedBtnStyle,
+                ...(editorMode === 'visual' ? activeSegmentedBtnStyle : {}),
+              }}
+              title="Visual Editor: Interactive rich-text LaTeX WYSIWYG editor"
+            >
+              <Eye size={12} />
+              <span>Visual</span>
+            </button>
+          </div>
+
           <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-secondary)' }}>
             {fileName}
           </span>
@@ -207,18 +248,19 @@ export const Editor: React.FC<Props> = ({
           )}
         </div>
 
-        {/* Quick Formatting Snippets & Comment action */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {role !== 'viewer' && (
-            <>
-              <button
-                onClick={() => insertSnippet('\\textbf{', '}')}
-                className="btn-ghost"
-                style={toolBtnStyle}
-                title="Bold (\textbf{})"
-              >
-                <Bold size={13} />
-              </button>
+        {/* Quick Formatting Snippets & Comment action (shown in Code mode) */}
+        {editorMode === 'code' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {role !== 'viewer' && (
+              <>
+                <button
+                  onClick={() => insertSnippet('\\textbf{', '}')}
+                  className="btn-ghost"
+                  style={toolBtnStyle}
+                  title="Bold (\textbf{})"
+                >
+                  <Bold size={13} />
+                </button>
 
               <button
                 onClick={() => insertSnippet('\\textit{', '}')}
@@ -269,20 +311,37 @@ export const Editor: React.FC<Props> = ({
             </>
           )}
 
-          <button
-            onClick={() => setActiveCommentLine(currentCursorLine)}
-            className="btn-ghost"
-            style={{ ...toolBtnStyle, color: '#f59e0b' }}
-            title="Add inline review comment at cursor"
-          >
-            <MessageSquarePlus size={13} />
-            <span style={{ fontSize: 10 }}>Comment</span>
-          </button>
-        </div>
+            <button
+              onClick={() => setActiveCommentLine(currentCursorLine)}
+              className="btn-ghost"
+              style={{ ...toolBtnStyle, color: '#f59e0b' }}
+              title="Add inline review comment at cursor"
+            >
+              <MessageSquarePlus size={13} />
+              <span style={{ fontSize: 10 }}>Comment</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Editor Body: Line Gutters + Code Area */}
-      <div style={editorBodyStyle}>
+      {/* RENDER VISUAL OR CODE EDITOR */}
+      {editorMode === 'visual' ? (
+        <VisualEditor
+          code={code}
+          fileName={fileName}
+          onChange={onChange}
+          files={files}
+          bibEntries={bibEntries}
+          role={role}
+          peers={peers}
+          onSwitchToCode={() => {
+            setEditorMode('code');
+            localStorage.setItem('teeex_editor_mode', 'code');
+          }}
+        />
+      ) : (
+        /* Editor Body: Line Gutters + Code Area */
+        <div style={editorBodyStyle}>
         {/* Line Numbers & Diagnostic Gutters */}
         <div style={gutterStyle}>
           {lines.map((_, idx) => {
@@ -520,8 +579,39 @@ export const Editor: React.FC<Props> = ({
           />
         </div>
       </div>
+      )}
     </div>
   );
+};
+
+const segmentedControlStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  backgroundColor: 'var(--bg-surface-2)',
+  borderRadius: 'var(--radius-sm)',
+  padding: 2,
+  border: '1px solid var(--border-subtle)',
+};
+
+const segmentedBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: '3px 8px',
+  borderRadius: 3,
+  fontSize: 11,
+  fontWeight: 600,
+  color: 'var(--text-muted)',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  transition: 'all 0.15s ease',
+};
+
+const activeSegmentedBtnStyle: React.CSSProperties = {
+  backgroundColor: 'var(--bg-surface-0)',
+  color: 'var(--text-primary)',
+  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
 };
 
 const viewerNoticeStyle: React.CSSProperties = {
