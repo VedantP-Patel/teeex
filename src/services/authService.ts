@@ -153,12 +153,24 @@ export async function loginWithEmail(
       }
 
       if (data.user) {
+        const isApproved = data.user.user_metadata?.is_approved === true;
+        
+        // Let admins through automatically (e.g. if we set admin via raw SQL)
+        const isAdmin = data.user.user_metadata?.is_admin === true;
+
+        if (!isApproved && !isAdmin) {
+          await supabase.auth.signOut();
+          return { success: false, error: 'Your account is pending admin approval.' };
+        }
+
         const user: UserProfile = {
           id: data.user.id,
           email: data.user.email || email,
           fullName: data.user.user_metadata?.full_name || email.split('@')[0],
           avatarColor: '#38bdf8',
           isAnonymous: false,
+          isAdmin,
+          isApproved: true,
         };
         saveSession(user, rememberMe);
         return { success: true, user };
@@ -206,7 +218,11 @@ export async function signUpWithEmail(
         email,
         password: pass,
         options: {
-          data: { full_name: fullName },
+          data: { 
+            full_name: fullName,
+            is_approved: false, // Requires manual approval in Supabase dashboard
+            is_admin: false,
+          },
         },
       });
 
@@ -215,15 +231,9 @@ export async function signUpWithEmail(
       }
 
       if (data.user) {
-        const user: UserProfile = {
-          id: data.user.id,
-          email: data.user.email || email,
-          fullName: fullName || email.split('@')[0],
-          avatarColor: '#8b5cf6',
-          isAnonymous: false,
-        };
-        saveSession(user, rememberMe);
-        return { success: true, user };
+        // Sign them out immediately since they are not approved
+        await supabase.auth.signOut();
+        return { success: false, error: 'Your account has been created and is pending admin approval.' };
       }
     } catch (err: unknown) {
       console.warn('Supabase auth sign up error, falling back:', err);
