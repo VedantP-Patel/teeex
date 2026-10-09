@@ -416,7 +416,7 @@ export const Navbar: React.FC<Props> = ({
           )}
 
           {isUserDropdownOpen && currentUser && (
-            <div style={{ ...dropdownMenuStyle, right: 0, width: 230 }}>
+            <div style={{ ...dropdownMenuStyle, left: 'auto', right: 0, width: 240 }}>
               {/* User Profile Card */}
               <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-surface-0)' }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
