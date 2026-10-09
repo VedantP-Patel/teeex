@@ -323,6 +323,15 @@ input:focus, textarea:focus, select:focus {
 }
 
 /* Eye-Friendly Smooth Theme Cross-Fade Transition */
+.sheet-viewport,
+.preview-container,
+.preview-toolbar,
+.latex-paper-sheet {
+  transition: background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1),
+              border-color 0.4s cubic-bezier(0.25, 1, 0.5, 1),
+              box-shadow 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
 html.theme-transitioning,
 html.theme-transitioning *,
 html.theme-transitioning *::before,

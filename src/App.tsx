@@ -85,7 +85,7 @@ export function App() {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
     setTimeout(() => {
       document.documentElement.classList.remove('theme-transitioning');
-    }, 450);
+    }, 600);
   };
 
   // Auth & Session State

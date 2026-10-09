@@ -264,9 +264,9 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
   };
 
   return (
-    <div style={previewContainerStyle}>
+    <div style={previewContainerStyle} className="preview-container">
       {/* Top Toolbar */}
-      <div style={previewToolbarStyle} className="no-scrollbar">
+      <div style={previewToolbarStyle} className="preview-toolbar no-scrollbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
           <FileCheck size={13} color="#10b981" />
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
@@ -462,8 +462,8 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
         </div>
       </div>
 
-      {/* Paper Sheet View Container */}
-      <div style={sheetViewportStyle}>
+      {/* Paper Sheet View Container (PDF Surrounding Area) */}
+      <div style={sheetViewportStyle} className="sheet-viewport">
         <div
           ref={sheetRef}
           onClick={handlePreviewInteraction}
@@ -557,6 +557,7 @@ const previewContainerStyle: React.CSSProperties = {
   backgroundColor: 'var(--bg-app)',
   borderLeft: '1px solid var(--border-subtle)',
   overflow: 'hidden',
+  transition: 'background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1), border-color 0.4s cubic-bezier(0.25, 1, 0.5, 1)',
 };
 
 const previewToolbarStyle: React.CSSProperties = {
@@ -572,6 +573,7 @@ const previewToolbarStyle: React.CSSProperties = {
   overflowY: 'hidden',
   whiteSpace: 'nowrap',
   gap: 8,
+  transition: 'background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1), border-color 0.4s cubic-bezier(0.25, 1, 0.5, 1)',
 };
 
 const sheetViewportStyle: React.CSSProperties = {
@@ -583,6 +585,7 @@ const sheetViewportStyle: React.CSSProperties = {
   justifyContent: 'center',
   alignItems: 'flex-start',
   backgroundColor: 'var(--bg-app)',
+  transition: 'background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1)',
 };
 
 const paperSheetStyle: React.CSSProperties = {
@@ -596,8 +599,8 @@ const paperSheetStyle: React.CSSProperties = {
   borderRadius: 2,
   fontFamily: 'var(--paper-font-serif)',
   lineHeight: 1.5,
-  fontSize: '12.5px',
-  transition: 'transform 0.15s ease',
+  fontSize: '12px',
+  transition: 'transform 0.15s ease, box-shadow 0.4s cubic-bezier(0.25, 1, 0.5, 1), background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1)',
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',
