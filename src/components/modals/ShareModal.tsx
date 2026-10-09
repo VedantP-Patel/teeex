@@ -10,9 +10,12 @@ import {
   Shield,
   Edit3,
   Eye,
-  Trash2
+  Trash2,
+  Lock,
+  Key
 } from 'lucide-react';
 import type { Collaborator, ProjectMember, ProjectRole } from '../../types/latex';
+import { getRoomShareTokens } from '../../services/shareSecurityService';
 
 interface Props {
   isOpen: boolean;
@@ -47,10 +50,12 @@ export const ShareModal: React.FC<Props> = ({
 
   if (!isOpen) return null;
 
+  const tokens = getRoomShareTokens(roomId);
+  const activeKey = linkRole === 'editor' ? tokens.editToken : tokens.viewToken;
   const currentUrl =
     window.location.origin +
     window.location.pathname +
-    `?room=${roomId}${linkRole === 'viewer' ? '&role=viewer' : '&role=editor'}`;
+    `?room=${encodeURIComponent(roomId)}&key=${activeKey}`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(currentUrl);
@@ -154,10 +159,24 @@ export const ShareModal: React.FC<Props> = ({
                 {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
               </button>
             </div>
-            <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4 }}>
-              {linkRole === 'viewer'
-                ? 'Anyone with this link will join as a Read-Only Viewer (can review & leave comments).'
-                : 'Anyone with this link will have full Co-Author Editor privileges.'}
+            <div style={{
+              fontSize: 11,
+              marginTop: 6,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              color: linkRole === 'viewer' ? '#f59e0b' : '#38bdf8',
+              backgroundColor: linkRole === 'viewer' ? 'rgba(245, 158, 11, 0.08)' : 'rgba(56, 189, 248, 0.08)',
+              padding: '6px 10px',
+              borderRadius: 'var(--radius-xs)',
+              border: `1px solid ${linkRole === 'viewer' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(56, 189, 248, 0.2)'}`,
+            }}>
+              {linkRole === 'viewer' ? <Lock size={12} /> : <Key size={12} />}
+              <span>
+                {linkRole === 'viewer'
+                  ? 'Cryptographically sealed view link (vw_...). Viewers cannot elevate to edit access by altering query parameters.'
+                  : 'Authoritative edit capability key (ed_...). Anyone with this link has real-time co-authoring & editing privileges.'}
+              </span>
             </div>
           </div>
 

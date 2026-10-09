@@ -30,6 +30,7 @@ import { saveProjectOffline } from './services/offlineStorageService';
 import { encryptText, decryptText } from './services/encryptionService';
 import { exportDocumentAsPdf } from './services/pdfExporter';
 import { type PaperFormatId } from './services/paperFormats';
+import { verifyShareKey } from './services/shareSecurityService';
 
 import type {
   ProjectFile,
@@ -133,15 +134,36 @@ export function App() {
     });
   }, []);
 
-  // Active Role Resolution (URL query parameter ?role=viewer overrides, or activeProject.role)
+  // Room & Collaboration State
+  const [roomId] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('room') || 'quantum-project-alpha';
+  });
+
+  // Active Role Resolution:
+  // If ?room= is present (shared collaboration link), validate through cryptographic capability token (?key=...).
+  // Query param tampering (e.g. ?role=editor) is strictly ignored to eliminate privilege escalation vulnerabilities.
   const currentRole = useMemo<ProjectRole>(() => {
     const params = new URLSearchParams(window.location.search);
-    const urlRole = params.get('role') as ProjectRole | null;
-    if (urlRole === 'viewer' || urlRole === 'editor' || urlRole === 'owner') {
-      return urlRole;
+    const isSharedRoom = Boolean(params.get('room'));
+    const key = params.get('key');
+
+    if (isSharedRoom) {
+      if (key) {
+        const verified = verifyShareKey(roomId, key);
+        if (verified) return verified;
+      }
+      // If user is the logged-in owner of this active project, preserve owner role
+      if (currentUser && activeProject?.ownerEmail === currentUser.email) {
+        return 'owner';
+      }
+      // Any missing, untrusted, or tampered keys strictly default to read-only viewer
+      return 'viewer';
     }
+
+    if (currentUser && activeProject?.ownerEmail === currentUser.email) return 'owner';
     return activeProject?.role || 'owner';
-  }, [activeProject]);
+  }, [activeProject, currentUser, roomId]);
 
   // Checkpoints State (Time Machine)
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([
@@ -171,12 +193,6 @@ export function App() {
 
   // Cloud & Supabase State (automatically detected from Vercel)
   const [isCloudConnected, setIsCloudConnected] = useState(() => isSupabaseConnected());
-
-  // Room & Collaboration State
-  const [roomId] = useState<string>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('room') || 'quantum-project-alpha';
-  });
 
   const [hub] = useState<CollaborationHub>(() => new CollaborationHub(roomId));
   const [selfUser, setSelfUser] = useState<Collaborator>(() => {
