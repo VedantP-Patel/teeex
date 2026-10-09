@@ -188,8 +188,23 @@ export function diagnoseLatex(code: string): Diagnostic[] {
 /**
  * Structural Parser: Extracts Title, Authors, Abstract, Sections, Math, and Layout
  */
-export function parseLatexDocument(code: string): ParsedDocument {
-  const lines = code.split('\n');
+export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedDocument {
+  // Expand \input / \include before parsing structure
+  let expandedCode = code;
+  if (files && files.length > 0) {
+    expandedCode = expandedCode.replace(/\\(?:input|include)\{([^}]+)\}/g, (orig, path) => {
+      const cleanPath = path.trim();
+      const target = files.find(f => 
+        f.name === cleanPath || 
+        f.name === `${cleanPath}.tex` ||
+        f.name.endsWith(`/${cleanPath}`) ||
+        f.name.endsWith(`/${cleanPath}.tex`)
+      );
+      return target ? target.content : orig;
+    });
+  }
+
+  const lines = expandedCode.split('\n');
 
   let title = 'Untitled Document';
   const authors: string[] = [];
@@ -199,7 +214,7 @@ export function parseLatexDocument(code: string): ParsedDocument {
   let isTwoColumn = false;
 
   // Extract \documentclass
-  const docClassMatch = code.match(/\\documentclass(?:\[(.*?)\])?\{([a-zA-Z0-9]+)\}/);
+  const docClassMatch = expandedCode.match(/\\documentclass(?:\[(.*?)\])?\{([a-zA-Z0-9]+)\}/);
   if (docClassMatch) {
     documentClass = docClassMatch[2];
     if (docClassMatch[1] && docClassMatch[1].includes('twocolumn')) {
@@ -295,6 +310,20 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     })
     .map(l => l.text)
     .join('\n');
+
+  // Support \input{sections/intro.tex} or \include{sections/intro}
+  if (files && files.length > 0) {
+    cleanCode = cleanCode.replace(/\\(?:input|include)\{([^}]+)\}/g, (orig, path) => {
+      const cleanPath = path.trim();
+      const target = files.find(f => 
+        f.name === cleanPath || 
+        f.name === `${cleanPath}.tex` ||
+        f.name.endsWith(`/${cleanPath}`) ||
+        f.name.endsWith(`/${cleanPath}.tex`)
+      );
+      return target ? target.content : orig;
+    });
+  }
 
   // Extract Document Body
   const bodyMatch = cleanCode.match(/\\begin\{document\}([\s\S]*?)\\end\{document\}/);

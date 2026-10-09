@@ -86,6 +86,7 @@ export function App() {
 
   // Project & Files State (Bound to active project)
   const [files, setFiles] = useState<ProjectFile[]>(() => activeProject?.files || STARTER_TEMPLATES[0].files);
+  const [folders, setFolders] = useState<string[]>(() => activeProject?.folders || ['sections', 'figures']);
   const [activeFileId, setActiveFileId] = useState<string>(() => activeProject?.files?.[0]?.id || 'main.tex');
   const [projectTitle, setProjectTitle] = useState<string>(() => activeProject?.title || 'Neural Quantum State Tomography');
 
@@ -194,8 +195,8 @@ export function App() {
   }, [activeFile.content, activeFile.name]);
 
   const parsedDoc = useMemo(() => {
-    return parseLatexDocument(activeFile.content);
-  }, [activeFile.content]);
+    return parseLatexDocument(activeFile.content, files);
+  }, [activeFile.content, files]);
 
   // Live Rendered HTML with Figure resolution
   const renderedHtml = useMemo(() => {
@@ -356,23 +357,73 @@ export function App() {
     exportProjectAsZip(projectTitle, files);
   };
 
-  // File management
-  const handleCreateFile = (name: string, type: 'tex' | 'bib') => {
+  // File & Folder management
+  const handleCreateFile = (name: string, type: 'tex' | 'bib', targetFolder?: string) => {
+    let fullName = name.trim();
+    let folder = targetFolder;
+
+    if (targetFolder && !fullName.startsWith(targetFolder + '/')) {
+      fullName = `${targetFolder}/${fullName}`;
+    } else if (fullName.includes('/')) {
+      const parts = fullName.split('/');
+      folder = parts.slice(0, -1).join('/');
+    }
+
     const newFile: ProjectFile = {
-      id: name,
-      name,
+      id: fullName,
+      name: fullName,
       type,
+      folder,
       content: type === 'bib' ? `% Bibliography File\n` : `\\section{New Section}\nContent goes here...\n`,
     };
     const updated = [...files, newFile];
     setFiles(updated);
-    setActiveFileId(name);
+    setActiveFileId(fullName);
     const updatedProjects = updateProject(activeProjectId, { files: updated });
     setProjects(updatedProjects);
   };
 
+  const handleCreateFolder = (folderName: string) => {
+    const clean = folderName.trim().replace(/^\/+|\/+$/g, '');
+    if (!clean) return;
+    const nextFolders = folders.includes(clean) ? folders : [...folders, clean];
+    setFolders(nextFolders);
+    const updatedProjects = updateProject(activeProjectId, { folders: nextFolders });
+    setProjects(updatedProjects);
+  };
+
+  const handleDeleteFolder = (folderName: string) => {
+    const nextFolders = folders.filter(f => f !== folderName);
+    setFolders(nextFolders);
+    const updatedFiles = files.filter(f => {
+      const fFolder = f.folder || (f.name.includes('/') ? f.name.split('/')[0] : null);
+      return fFolder !== folderName;
+    });
+    setFiles(updatedFiles);
+    if (!updatedFiles.some(f => f.id === activeFileId)) {
+      setActiveFileId(updatedFiles[0]?.id || 'main.tex');
+    }
+    const updatedProjects = updateProject(activeProjectId, {
+      folders: nextFolders,
+      files: updatedFiles,
+    });
+    setProjects(updatedProjects);
+  };
+
   const handleAddImageFile = (imageFile: ProjectFile) => {
-    const updated = [...files, imageFile];
+    const targetFolder = folders.includes('figures') ? 'figures' : undefined;
+    const resolvedName = targetFolder && !imageFile.name.startsWith('figures/')
+      ? `figures/${imageFile.name}`
+      : imageFile.name;
+
+    const fileToSave: ProjectFile = {
+      ...imageFile,
+      id: resolvedName,
+      name: resolvedName,
+      folder: targetFolder,
+    };
+
+    const updated = [...files, fileToSave];
     setFiles(updated);
     const updatedProjects = updateProject(activeProjectId, { files: updated });
     setProjects(updatedProjects);
@@ -416,6 +467,7 @@ export function App() {
     setActiveProjectId(projId);
     setActiveProjectIdState(projId);
     setFiles(proj.files);
+    setFolders(proj.folders || ['sections', 'figures']);
     setActiveFileId(proj.files[0]?.id || 'main.tex');
     setProjectTitle(proj.title);
     setTimeout(() => triggerCompile(), 60);
@@ -565,10 +617,13 @@ export function App() {
         {/* Left Sidebar */}
         <Sidebar
           files={files}
+          folders={folders}
           activeFileId={activeFileId}
           onSelectFile={setActiveFileId}
           onCreateFile={handleCreateFile}
           onDeleteFile={handleDeleteFile}
+          onCreateFolder={handleCreateFolder}
+          onDeleteFolder={handleDeleteFolder}
           documentOutline={parsedDoc.sections}
           onJumpToLine={setTargetLine}
           wordCount={wordCount}

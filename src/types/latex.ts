@@ -7,6 +7,7 @@ export interface ProjectFile {
   type: FileType;
   isEntry?: boolean;
   dataUrl?: string; // For uploaded figure assets (PNG, JPG, SVG)
+  folder?: string;  // Folder path/id (e.g. 'sections', 'figures')
 }
 
 export type DiagnosticSeverity = 'error' | 'warning' | 'info';
@@ -123,6 +124,7 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
   files: ProjectFile[];
+  folders?: string[];
   tags: string[];
   members: ProjectMember[];
   isArchived?: boolean;
