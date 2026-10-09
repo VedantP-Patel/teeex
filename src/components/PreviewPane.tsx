@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ZoomIn,
   ZoomOut,
@@ -45,6 +46,7 @@ export const PreviewPane: React.FC<Props> = ({
     return (localStorage.getItem('teeex_paper_format') as PaperFormatId) || 'ieee';
   });
   const [isFormatMenuOpen, setIsFormatMenuOpen] = useState(false);
+  const [formatMenuCoords, setFormatMenuCoords] = useState<{ top: number; right: number } | null>(null);
 
   const activeFormat = paperFormat || localFormat;
   const currentFormatConfig = PAPER_FORMATS[activeFormat] || PAPER_FORMATS.ieee;
@@ -54,17 +56,40 @@ export const PreviewPane: React.FC<Props> = ({
 
   const sheetRef = useRef<HTMLDivElement>(null);
   const formatMenuRef = useRef<HTMLDivElement>(null);
+  const formatButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Close format menu on outside click
+  const toggleFormatMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isFormatMenuOpen && formatButtonRef.current) {
+      const rect = formatButtonRef.current.getBoundingClientRect();
+      setFormatMenuCoords({
+        top: rect.bottom + 5,
+        right: Math.max(10, window.innerWidth - rect.right),
+      });
+    }
+    setIsFormatMenuOpen(prev => !prev);
+  };
+
+  // Close format menu on outside click or window resize
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (formatMenuRef.current && !formatMenuRef.current.contains(e.target as Node)) {
+      if (
+        formatMenuRef.current &&
+        !formatMenuRef.current.contains(e.target as Node) &&
+        formatButtonRef.current &&
+        !formatButtonRef.current.contains(e.target as Node)
+      ) {
         setIsFormatMenuOpen(false);
       }
     };
     if (isFormatMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
+      const handleResize = () => setIsFormatMenuOpen(false);
+      window.addEventListener('resize', handleResize);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+        window.removeEventListener('resize', handleResize);
+      };
     }
   }, [isFormatMenuOpen]);
 
@@ -307,17 +332,18 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
         {/* Controls: Format, Column mode, Zoom, Print */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
           {/* Standard Format Selector Dropdown */}
-          <div ref={formatMenuRef} style={{ position: 'relative' }}>
+          <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
             <button
+              ref={formatButtonRef}
               type="button"
-              onClick={() => setIsFormatMenuOpen(!isFormatMenuOpen)}
+              onClick={toggleFormatMenu}
               style={{
                 padding: '2px 8px',
                 fontSize: 10.5,
                 fontWeight: 600,
                 color: 'var(--text-primary)',
                 backgroundColor: isFormatMenuOpen ? 'var(--bg-surface-elevated)' : 'var(--bg-surface-1)',
-                border: '1px solid var(--border-medium)',
+                border: isFormatMenuOpen ? '1px solid #38bdf8' : '1px solid var(--border-medium)',
                 borderRadius: 5,
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -334,34 +360,39 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
               <ChevronDown size={10} color="var(--text-muted)" />
             </button>
 
-            {isFormatMenuOpen && (
+            {isFormatMenuOpen && formatMenuCoords && createPortal(
               <div
+                ref={formatMenuRef}
                 style={{
-                  position: 'absolute',
-                  top: '100%',
-                  right: 0,
-                  marginTop: 4,
-                  zIndex: 50,
-                  backgroundColor: 'var(--bg-surface-0)',
+                  position: 'fixed',
+                  top: formatMenuCoords.top,
+                  right: formatMenuCoords.right,
+                  zIndex: 99999,
+                  backgroundColor: 'var(--bg-surface-1)',
                   border: '1px solid var(--border-medium)',
                   borderRadius: 'var(--radius-sm)',
-                  boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
+                  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.55)',
                   width: 280,
-                  padding: 4,
+                  padding: 6,
+                  backdropFilter: 'blur(16px)',
                 }}
               >
                 <div
                   style={{
-                    padding: '6px 8px',
-                    fontSize: 9.5,
-                    fontWeight: 700,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
+                    padding: '6px 8px 6px 8px',
                     borderBottom: '1px solid var(--border-subtle)',
+                    marginBottom: 4,
                   }}
                 >
-                  Academic Publication Format
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <BookOpen size={12} color="#38bdf8" />
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-primary)' }}>
+                      Academic Publication Format
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                    Typesetting & layout standards
+                  </div>
                 </div>
                 {(Object.keys(PAPER_FORMATS) as PaperFormatId[]).map(fid => {
                   const fmt = PAPER_FORMATS[fid];
@@ -369,7 +400,10 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
                   return (
                     <div
                       key={fid}
-                      onClick={() => handleSelectFormat(fid)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectFormat(fid);
+                      }}
                       style={{
                         padding: '6px 8px',
                         borderRadius: 4,
@@ -379,6 +413,7 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
                         display: 'flex',
                         flexDirection: 'column',
                         gap: 2,
+                        transition: 'background 0.15s ease',
                       }}
                       className="hover:bg-active"
                     >
@@ -394,7 +429,8 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
                     </div>
                   );
                 })}
-              </div>
+              </div>,
+              document.body
             )}
           </div>
 
