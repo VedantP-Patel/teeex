@@ -269,7 +269,13 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
       className="preview-container"
     >
       {/* Top Toolbar */}
-      <div style={previewToolbarStyle} className="preview-toolbar toolbar-scrollbar">
+      <div
+        style={previewToolbarStyle}
+        className="preview-toolbar toolbar-scrollbar"
+        onWheel={(e) => {
+          if (e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY;
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
           <FileCheck size={13} color="#10b981" />
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
@@ -566,7 +572,7 @@ const previewContainerStyle: React.CSSProperties = {
 };
 
 const previewToolbarStyle: React.CSSProperties = {
-  height: 36,
+  height: 38,
   backgroundColor: 'var(--bg-surface-0)',
   borderBottom: '1px solid var(--border-subtle)',
   display: 'flex',

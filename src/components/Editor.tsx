@@ -347,8 +347,13 @@ export const Editor: React.FC<Props> = ({
   return (
     <div style={editorContainerStyle}>
       {/* Multi-File Tab Bar */}
-      {openFileIds && openFileIds.length > 0 && onSelectFile && (
-        <div style={tabStripStyle} className="toolbar-scrollbar">
+        <div
+          style={tabStripStyle}
+          className="toolbar-scrollbar"
+          onWheel={(e) => {
+            if (e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY;
+          }}
+        >
           {openFileIds.map(fId => {
             const f = files.find(file => file.id === fId);
             if (!f) return null;
@@ -397,7 +402,13 @@ export const Editor: React.FC<Props> = ({
       )}
 
       {/* Editor Sub-Header Toolbar */}
-      <div style={editorToolbarStyle} className="editor-toolbar toolbar-scrollbar">
+      <div
+        style={editorToolbarStyle}
+        className="editor-toolbar toolbar-scrollbar"
+        onWheel={(e) => {
+          if (e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY;
+        }}
+      >
         {/* Left Controls: Sidebar toggle, Code/Visual switcher, File Badge */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
           {/* Sidebar Toggle Button */}
@@ -1259,7 +1270,7 @@ const editorContainerStyle: React.CSSProperties = {
 };
 
 const editorToolbarStyle: React.CSSProperties = {
-  height: 36,
+  height: 38,
   backgroundColor: 'var(--bg-surface-0)',
   borderBottom: '1px solid var(--border-subtle)',
   display: 'flex',
