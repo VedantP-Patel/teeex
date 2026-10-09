@@ -573,7 +573,7 @@ const previewToolbarStyle: React.CSSProperties = {
   overflowY: 'hidden',
   whiteSpace: 'nowrap',
   gap: 8,
-  transition: 'background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1), border-color 0.4s cubic-bezier(0.25, 1, 0.5, 1)',
+  transition: 'background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1), border-color 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
 };
 
 const sheetViewportStyle: React.CSSProperties = {
@@ -585,7 +585,7 @@ const sheetViewportStyle: React.CSSProperties = {
   justifyContent: 'center',
   alignItems: 'flex-start',
   backgroundColor: 'var(--bg-app)',
-  transition: 'background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1)',
+  transition: 'background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
 };
 
 const paperSheetStyle: React.CSSProperties = {
@@ -600,7 +600,7 @@ const paperSheetStyle: React.CSSProperties = {
   fontFamily: 'var(--paper-font-serif)',
   lineHeight: 1.5,
   fontSize: '12px',
-  transition: 'transform 0.15s ease, box-shadow 0.4s cubic-bezier(0.25, 1, 0.5, 1), background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1)',
+  transition: 'transform 0.15s ease, box-shadow 0.45s cubic-bezier(0.25, 1, 0.5, 1), background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',

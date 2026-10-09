@@ -5,6 +5,38 @@
    No AI Slop: High-contrast, refined typography, obsidian dark, smooth micro-motion
    ========================================================================== */
 
+/* CSS Houdini Custom Property Registration for Buttery Smooth Color Interpolation */
+@property --bg-app {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #080a0f;
+}
+@property --bg-surface-0 {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #0d1017;
+}
+@property --bg-surface-1 {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #131722;
+}
+@property --bg-surface-2 {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #1a202e;
+}
+@property --text-primary {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #f1f5f9;
+}
+@property --border-subtle {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: rgba(255, 255, 255, 0.07);
+}
+
 :root {
   /* Color Palette - Dark Obsidian (Default) */
   --bg-app: #080a0f;
@@ -37,10 +69,10 @@
   --accent-rose-glow: rgba(244, 63, 94, 0.2);
   --accent-purple: #a855f7;
 
-  /* Paper Preview Sheet Variables */
+  /* Paper Preview Sheet Variables - Exact 3-Layer Shadow matching Light Mode */
   --paper-bg: #ffffff;
   --paper-text: #111827;
-  --paper-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.6), 0 0 1px 1px rgba(255, 255, 255, 0.1);
+  --paper-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.7), 0 4px 12px -2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1);
   --paper-font-serif: "Newsreader", "Times New Roman", Cambria, Georgia, serif;
 
   /* UI Fonts */
@@ -104,6 +136,7 @@ html, body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1), color 0.35s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 #root {
@@ -111,6 +144,8 @@ html, body {
   width: 100%;
   display: flex;
   flex-direction: column;
+  background-color: var(--bg-app);
+  transition: background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 /* Scrollbar Refinement */
@@ -325,21 +360,26 @@ input:focus, textarea:focus, select:focus {
 /* Eye-Friendly Smooth Theme Cross-Fade Transition */
 .sheet-viewport,
 .preview-container,
-.preview-toolbar,
+.preview-toolbar {
+  background-color: var(--bg-app);
+  transition: background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1),
+              border-color 0.45s cubic-bezier(0.25, 1, 0.5, 1),
+              box-shadow 0.45s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
 .latex-paper-sheet {
-  transition: background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1),
-              border-color 0.4s cubic-bezier(0.25, 1, 0.5, 1),
-              box-shadow 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+  transition: transform 0.15s ease,
+              box-shadow 0.45s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 html.theme-transitioning,
 html.theme-transitioning *,
 html.theme-transitioning *::before,
 html.theme-transitioning *::after {
-  transition: background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1),
+  transition: background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1),
               color 0.35s cubic-bezier(0.25, 1, 0.5, 1),
-              border-color 0.35s cubic-bezier(0.25, 1, 0.5, 1),
-              box-shadow 0.4s cubic-bezier(0.25, 1, 0.5, 1) !important;
+              border-color 0.45s cubic-bezier(0.25, 1, 0.5, 1),
+              box-shadow 0.45s cubic-bezier(0.25, 1, 0.5, 1) !important;
   transition-delay: 0s !important;
 }
 

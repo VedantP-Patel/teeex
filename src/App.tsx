@@ -965,7 +965,14 @@ export function App() {
           />
 
           {/* Right Split: Publication Preview Pane with SyncTeX */}
-          <div style={{ width: `${100 - splitPercent}%`, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div style={{
+            width: `${100 - splitPercent}%`,
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            backgroundColor: 'var(--bg-app)',
+            transition: 'background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
+          }}>
             <PreviewPane
               renderedHtml={renderedHtml}
               parsedDoc={parsedDoc}
