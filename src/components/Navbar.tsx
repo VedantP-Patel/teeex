@@ -22,7 +22,9 @@ import {
   Shield,
   Edit3,
   Eye,
-  Plus
+  Plus,
+  Code,
+  Lock
 } from 'lucide-react';
 import type { CompileState, Collaborator, Project, ProjectRole, UserProfile } from '../types/latex';
 
@@ -54,6 +56,12 @@ interface Props {
   onOpenAuth: () => void;
   onSignOut: () => void;
   currentRole: ProjectRole;
+  // Platform Developer & Website Owner props
+  isPlatformDev: boolean;
+  onOpenDeveloperUnlock: () => void;
+  onLockPlatformDev: () => void;
+  isDevDemoActive: boolean;
+  onToggleDevDemoMode: () => void;
 }
 
 export const Navbar: React.FC<Props> = ({
@@ -82,6 +90,11 @@ export const Navbar: React.FC<Props> = ({
   onOpenAuth,
   onSignOut,
   currentRole,
+  isPlatformDev,
+  onOpenDeveloperUnlock,
+  onLockPlatformDev,
+  isDevDemoActive,
+  onToggleDevDemoMode,
 }) => {
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
@@ -293,25 +306,46 @@ export const Navbar: React.FC<Props> = ({
 
       {/* Right Side: Tools, Collaboration, User Account */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        {/* Cloud Status (Admin / Owner Only) */}
-        {currentRole === 'owner' && (
+        {/* Cloud Status: Website Developer has Vault access; Paper Authors see clean Cloud Sync badge */}
+        {isPlatformDev ? (
           <>
             <button
               onClick={onOpenSupabase}
               className="btn-ghost"
               style={{
                 ...toolBtnStyle,
-                color: isCloudConnected ? '#10b981' : 'var(--text-secondary)',
-                backgroundColor: isCloudConnected ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                color: '#38bdf8',
+                backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
               }}
-              title="Admin Cloud & Database Vault"
+              title="Website Developer Cloud & Database Vault"
             >
-              {isCloudConnected ? <Cloud size={13} /> : <ShieldCheck size={13} />}
-              <span>{isCloudConnected ? 'Cloud Synced' : 'Admin Cloud'}</span>
+              <ShieldCheck size={13} color="#38bdf8" />
+              <span>Dev Vault</span>
             </button>
             <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
           </>
-        )}
+        ) : isCloudConnected ? (
+          <>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 8px',
+                fontSize: 11,
+                color: '#10b981',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'rgba(16, 185, 129, 0.08)',
+              }}
+              title="Connected to Teeex Cloud Storage. All paper edits are safely synchronized."
+            >
+              <Cloud size={12} />
+              <span>Cloud Synced</span>
+            </div>
+            <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+          </>
+        ) : null}
 
         {/* Math & TikZ Library */}
         <button onClick={onOpenSymbols} className="btn-ghost" title="LaTeX Symbols & Formulas Library" style={toolBtnStyle}>
@@ -453,17 +487,50 @@ export const Navbar: React.FC<Props> = ({
                   <span>Switch Account / Sign In</span>
                 </button>
 
-                {currentRole === 'owner' && (
-                  <button
-                    onClick={() => { setIsUserDropdownOpen(false); onOpenSupabase(); }}
-                    style={dropdownItemStyle}
-                  >
-                    <Shield size={13} color="#10b981" />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                      <span>Admin &amp; Cloud Vault</span>
-                      <span className="badge badge-cyan" style={{ fontSize: 9, padding: '1px 5px' }}>Admin</span>
+                {/* Website Developer / Platform Owner section */}
+                {isPlatformDev ? (
+                  <>
+                    <div style={{ height: 1, backgroundColor: 'var(--border-subtle)', margin: '4px 0' }} />
+                    <div style={{ padding: '4px 12px', fontSize: 9.5, fontWeight: 700, color: 'var(--accent-cyan)', letterSpacing: '0.05em' }}>
+                      WEBSITE OWNER / DEVELOPER
                     </div>
-                  </button>
+                    <button
+                      onClick={() => { setIsUserDropdownOpen(false); onOpenSupabase(); }}
+                      style={dropdownItemStyle}
+                    >
+                      <Shield size={13} color="#38bdf8" />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <span>Cloud &amp; Database Vault</span>
+                        <span className="badge badge-cyan" style={{ fontSize: 9, padding: '1px 5px' }}>Dev</span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { onToggleDevDemoMode(); }}
+                      style={dropdownItemStyle}
+                    >
+                      <Code size={13} color={isDevDemoActive ? '#10b981' : 'var(--text-muted)'} />
+                      <span>Test Accounts: {isDevDemoActive ? 'Visible' : 'Hidden'}</span>
+                    </button>
+                    <button
+                      onClick={() => { setIsUserDropdownOpen(false); onLockPlatformDev(); }}
+                      style={{ ...dropdownItemStyle, color: 'var(--text-muted)' }}
+                    >
+                      <Lock size={13} />
+                      <span>Lock Developer Mode</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ height: 1, backgroundColor: 'var(--border-subtle)', margin: '4px 0' }} />
+                    <button
+                      onClick={() => { setIsUserDropdownOpen(false); onOpenDeveloperUnlock(); }}
+                      style={{ ...dropdownItemStyle, fontSize: 11, color: 'var(--text-muted)' }}
+                      title="Website Developer Access"
+                    >
+                      <Lock size={12} />
+                      <span>Developer Access</span>
+                    </button>
+                  </>
                 )}
 
                 <div style={{ height: 1, backgroundColor: 'var(--border-subtle)', margin: '4px 0' }} />

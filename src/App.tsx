@@ -14,6 +14,14 @@ import { VersionHistoryModal, type Checkpoint } from './components/modals/Versio
 import { WordCountModal } from './components/modals/WordCountModal';
 import { AuthModal } from './components/modals/AuthModal';
 import { ProjectsDashboardModal } from './components/modals/ProjectsDashboardModal';
+import { DeveloperUnlockModal } from './components/modals/DeveloperUnlockModal';
+import {
+  isPlatformDeveloper,
+  lockPlatformDeveloper,
+  isDemoModeEnabled,
+  setDemoModeEnabled,
+  areSimulatedPeersEnabled,
+} from './services/developerService';
 
 import type {
   ProjectFile,
@@ -148,7 +156,32 @@ export function App() {
     }
     return initial;
   });
-  const [peers, setPeers] = useState<Collaborator[]>(DEFAULT_PEERS);
+  // Co-Authors: Simulated peers only appear on the introductory sample demo project or when developer enabled
+  const [peers, setPeers] = useState<Collaborator[]>(() => {
+    return areSimulatedPeersEnabled(activeProjectId) ? DEFAULT_PEERS : [];
+  });
+
+  // Website Developer / Platform Owner Clearance State
+  const [isPlatformDev, setIsPlatformDev] = useState<boolean>(() => isPlatformDeveloper());
+  const [isDevDemoActive, setIsDevDemoActive] = useState<boolean>(() => isDemoModeEnabled());
+  const [isDevUnlockOpen, setIsDevUnlockOpen] = useState<boolean>(false);
+
+  const handleDeveloperStatusChanged = useCallback(() => {
+    setIsPlatformDev(isPlatformDeveloper());
+    setIsDevDemoActive(isDemoModeEnabled());
+  }, []);
+
+  const handleToggleDevDemoMode = useCallback(() => {
+    const next = !isDemoModeEnabled();
+    setDemoModeEnabled(next);
+    setIsDevDemoActive(next);
+  }, []);
+
+  const handleLockPlatformDev = useCallback(() => {
+    lockPlatformDeveloper();
+    setIsPlatformDev(false);
+    setIsDevDemoActive(false);
+  }, []);
 
   // Active File reference
   const activeFile = useMemo(() => {
@@ -470,6 +503,7 @@ export function App() {
     setFolders(proj.folders || ['sections', 'figures']);
     setActiveFileId(proj.files[0]?.id || 'main.tex');
     setProjectTitle(proj.title);
+    setPeers(areSimulatedPeersEnabled(projId) ? DEFAULT_PEERS : []);
     setTimeout(() => triggerCompile(), 60);
   };
 
@@ -610,6 +644,11 @@ export function App() {
         onOpenAuth={() => setIsAuthOpen(true)}
         onSignOut={handleSignOut}
         currentRole={currentRole}
+        isPlatformDev={isPlatformDev}
+        onOpenDeveloperUnlock={() => setIsDevUnlockOpen(true)}
+        onLockPlatformDev={handleLockPlatformDev}
+        isDevDemoActive={isDevDemoActive}
+        onToggleDevDemoMode={handleToggleDevDemoMode}
       />
 
       {/* Main Workspace Body */}
@@ -707,6 +746,7 @@ export function App() {
         onProjectsUpdated={setProjects}
         currentRole={currentRole}
         currentUser={currentUser}
+        onDeveloperStatusChanged={handleDeveloperStatusChanged}
       />
 
       <SymbolPaletteModal
@@ -764,6 +804,15 @@ export function App() {
         onClose={() => setIsAuthOpen(false)}
         currentUser={currentUser}
         onAuthSuccess={handleAuthSuccess}
+        onDeveloperStatusChanged={handleDeveloperStatusChanged}
+      />
+
+      {/* Website Developer & Platform Owner Access Modal */}
+      <DeveloperUnlockModal
+        isOpen={isDevUnlockOpen}
+        onClose={() => setIsDevUnlockOpen(false)}
+        onDeveloperStatusChanged={handleDeveloperStatusChanged}
+        onOpenVault={() => setIsSupabaseOpen(true)}
       />
 
       {/* Multi-Project Hub Dashboard */}

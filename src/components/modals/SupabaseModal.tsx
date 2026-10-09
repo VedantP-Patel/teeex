@@ -26,6 +26,10 @@ import {
 } from '../../services/supabaseClient';
 import { syncAllProjectsWithCloud } from '../../services/projectsService';
 import type { Project, ProjectRole, UserProfile } from '../../types/latex';
+import {
+  isPlatformDeveloper,
+  unlockPlatformDeveloper,
+} from '../../services/developerService';
 
 interface Props {
   isOpen: boolean;
@@ -35,6 +39,7 @@ interface Props {
   onProjectsUpdated?: (projects: Project[]) => void;
   currentRole?: ProjectRole;
   currentUser?: UserProfile | null;
+  onDeveloperStatusChanged?: () => void;
 }
 
 const SUPABASE_SQL_SCRIPT = `-- ==============================================================================
@@ -122,6 +127,7 @@ export const SupabaseModal: React.FC<Props> = ({
   projects = [],
   currentRole = 'owner',
   currentUser,
+  onDeveloperStatusChanged,
 }) => {
   // Credentials State
   const [url, setUrl] = useState(() => localStorage.getItem('teeex_supabase_url') || import.meta.env.VITE_SUPABASE_URL || '');
@@ -144,15 +150,17 @@ export const SupabaseModal: React.FC<Props> = ({
 
   if (!isOpen) return null;
 
-  const isAuthorized = currentRole === 'owner' || elevatedAdmin;
+  // STRICT PRIVILEGE SEPARATION: Restricted to Website Developer / Platform Owner only
+  const isAuthorized = isPlatformDeveloper() || elevatedAdmin;
 
   const handleUnlockAdmin = (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = adminPasscode.trim().toLowerCase();
-    if (clean === 'admin' || clean === 'owner' || clean === 'teeex' || clean === '2026' || clean === 'admin123') {
+    const res = unlockPlatformDeveloper(adminPasscode);
+    if (res.success) {
       setElevatedAdmin(true);
       setPasscodeError(false);
       setAdminPasscode('');
+      onDeveloperStatusChanged?.();
     } else {
       setPasscodeError(true);
     }
@@ -222,7 +230,7 @@ export const SupabaseModal: React.FC<Props> = ({
     setTimeout(() => setCopiedSql(false), 2000);
   };
 
-  // RENDER ADMIN GATE IF NOT AUTHORIZED
+  // RENDER PLATFORM DEVELOPER CLEARANCE GATE IF NOT AUTHORIZED
   if (!isAuthorized) {
     return (
       <div style={backdropStyle} onClick={onClose}>
@@ -234,10 +242,10 @@ export const SupabaseModal: React.FC<Props> = ({
               </div>
               <div>
                 <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-                  Admin Clearance Required
+                  Website Developer Clearance Required
                 </h2>
                 <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>
-                  Restricted Cloud &amp; Security Vault
+                  Restricted Cloud Infrastructure &amp; Security Vault
                 </p>
               </div>
             </div>
@@ -262,26 +270,26 @@ export const SupabaseModal: React.FC<Props> = ({
               <ShieldAlert size={18} color="#f43f5e" style={{ flexShrink: 0, marginTop: 2 }} />
               <div>
                 <div style={{ fontWeight: 600, color: '#f43f5e', marginBottom: 2 }}>
-                  Sensitive Production Credentials
+                  Restricted Platform Infrastructure
                 </div>
-                Database connection strings, anon API keys, and SQL migrations are restricted to the Workspace Owner / Administrator.
+                Database connection strings, anon API keys, and SQL schema migrations are reserved strictly for the <strong>Website Developer / Platform Owner</strong>. Project owners and paper authors do not have access to platform infrastructure.
               </div>
             </div>
 
             <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>ACTIVE SESSION</span>
+              <span>ACTIVE USER SESSION</span>
               <span className="badge badge-amber" style={{ fontSize: 10 }}>
-                {currentUser?.fullName || 'User'} &bull; {currentRole.toUpperCase()}
+                {currentUser?.fullName || 'User'} &bull; Paper {currentRole.toUpperCase()}
               </span>
             </div>
 
             <form onSubmit={handleUnlockAdmin} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
-                <label style={labelStyle}>ADMIN / OWNER PASSCODE</label>
+                <label style={labelStyle}>WEBSITE OWNER / DEVELOPER PASSCODE</label>
                 <div style={{ position: 'relative' }}>
                   <input
                     type="password"
-                    placeholder="Enter admin passcode (e.g. admin)"
+                    placeholder="Enter developer passcode"
                     value={adminPasscode}
                     onChange={e => {
                       setAdminPasscode(e.target.value);
@@ -298,14 +306,14 @@ export const SupabaseModal: React.FC<Props> = ({
                 </div>
                 {passcodeError && (
                   <div style={{ fontSize: 11, color: '#f43f5e', marginTop: 4 }}>
-                    Invalid admin passcode. Try 'admin' or switch to Owner profile.
+                    Incorrect developer passcode. Access restricted to the website developer.
                   </div>
                 )}
               </div>
 
               <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
                 <button type="submit" className="btn-primary" style={{ flex: 1, fontSize: 12 }}>
-                  <ShieldCheck size={14} /> Unlock Admin Vault
+                  <ShieldCheck size={14} /> Unlock Developer Vault
                 </button>
                 <button type="button" onClick={onClose} className="btn-secondary" style={{ fontSize: 12 }}>
                   Cancel
@@ -327,13 +335,13 @@ export const SupabaseModal: React.FC<Props> = ({
             <Database size={18} color="#10b981" />
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Supabase Cloud Setup &amp; Vault</h2>
+                <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Platform Infrastructure &amp; Database Vault</h2>
                 <span className="badge badge-cyan" style={{ fontSize: 9.5, padding: '1px 6px' }}>
-                  👑 Admin Mode
+                  WEBSITE OWNER / DEV
                 </span>
               </div>
               <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>
-                Restricted to {currentRole === 'owner' ? 'Project Owner' : 'Elevated Administrator'}
+                Configures global Supabase Cloud credentials &amp; schema migrations
               </p>
             </div>
           </div>
@@ -527,9 +535,9 @@ export const SupabaseModal: React.FC<Props> = ({
                       onClick={handleConnectDemo}
                       className="btn-secondary"
                       style={{ fontSize: 12 }}
-                      title="Use client-side sandbox without a real Supabase account"
+                      title="Use client-side sandbox for internal development and testing"
                     >
-                      <Cloud size={13} color="#38bdf8" /> Try Demo Sandbox
+                      <Cloud size={13} color="#38bdf8" /> [Dev] Test Sandbox
                     </button>
                   </div>
 

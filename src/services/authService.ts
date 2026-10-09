@@ -68,11 +68,17 @@ export function getStoredSession(): { user: UserProfile | null; rememberMe: bool
     }
   }
 
-  // Fallback: Default to Dr. Elena Rostova as authenticated owner
+  // If user explicitly signed out, preserve signed-out guest state
+  if (localStorage.getItem('teeex_signed_out') === 'true') {
+    return { user: null, rememberMe: false };
+  }
+
+  // Fallback: Default to Dr. Elena Rostova as authenticated owner for starter document
   return { user: DEMO_ACCOUNTS[0].profile, rememberMe: true };
 }
 
 export function saveSession(user: UserProfile, rememberMe: boolean): void {
+  localStorage.removeItem('teeex_signed_out');
   const json = JSON.stringify(user);
   localStorage.setItem(REMEMBER_ME_KEY, rememberMe ? 'true' : 'false');
 
@@ -88,6 +94,7 @@ export function saveSession(user: UserProfile, rememberMe: boolean): void {
 export function clearSession(): void {
   localStorage.removeItem(AUTH_STORAGE_KEY);
   sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  localStorage.setItem('teeex_signed_out', 'true');
 }
 
 export async function loginWithEmail(

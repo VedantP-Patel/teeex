@@ -17,12 +17,19 @@ import {
   requestPasswordReset,
   DEMO_ACCOUNTS
 } from '../../services/authService';
+import {
+  isPlatformDeveloper,
+  unlockPlatformDeveloper,
+  isDemoModeEnabled,
+  setDemoModeEnabled,
+} from '../../services/developerService';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   currentUser: UserProfile | null;
   onAuthSuccess: (user: UserProfile) => void;
+  onDeveloperStatusChanged?: () => void;
 }
 
 type AuthTab = 'signin' | 'signup' | 'forgot';
@@ -32,6 +39,7 @@ export const AuthModal: React.FC<Props> = ({
   onClose,
   currentUser: _currentUser,
   onAuthSuccess,
+  onDeveloperStatusChanged,
 }) => {
   const [activeTab, setActiveTab] = useState<AuthTab>('signin');
   const [email, setEmail] = useState('');
@@ -42,6 +50,29 @@ export const AuthModal: React.FC<Props> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Developer Clearance & Demo visibility
+  const [isDev, setIsDev] = useState(() => isPlatformDeveloper());
+  const [demoVisible, setDemoVisible] = useState(() => isDemoModeEnabled());
+  const [showDevPrompt, setShowDevPrompt] = useState(false);
+  const [devPasscode, setDevPasscode] = useState('');
+  const [devError, setDevError] = useState<string | null>(null);
+
+  const handleDevUnlock = (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = unlockPlatformDeveloper(devPasscode);
+    if (res.success) {
+      setIsDev(true);
+      setDemoVisible(true);
+      setDemoModeEnabled(true);
+      setShowDevPrompt(false);
+      setDevPasscode('');
+      setDevError(null);
+      onDeveloperStatusChanged?.();
+    } else {
+      setDevError(res.error || 'Invalid passcode');
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -392,43 +423,115 @@ export const AuthModal: React.FC<Props> = ({
             </form>
           )}
 
-          {/* Quick Demo Academic Switcher (Fast Role Testing) */}
-          <div style={demoBoxStyle}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>
-                INSTANT ROLE SWITCHER (DEVELOPER &amp; DEMO)
-              </span>
-              <span className="badge badge-cyan" style={{ fontSize: 10 }}>1-Click Role Switch</span>
+          {/* Developer Test Switcher (Strictly for Platform Developer / Website Owner) */}
+          {isDev && demoVisible && (
+            <div style={demoBoxStyle}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>
+                  DEVELOPER TEST ACCOUNTS
+                </span>
+                <span className="badge badge-cyan" style={{ fontSize: 10 }}>Dev Mode</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {DEMO_ACCOUNTS.map(demo => (
+                  <button
+                    key={demo.profile.id}
+                    type="button"
+                    onClick={() => handleQuickDemoLogin(demo)}
+                    style={demoBtnStyle}
+                    title={`Switch active user to ${demo.profile.fullName} (${demo.role})`}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ ...avatarMiniStyle, backgroundColor: demo.profile.avatarColor }}>
+                        {demo.profile.fullName.substring(0, 2).toUpperCase()}
+                      </div>
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {demo.profile.fullName}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                          {demo.profile.email}
+                        </div>
+                      </div>
+                    </div>
+                    <span className={`badge ${demo.role === 'owner' ? 'badge-cyan' : demo.role === 'editor' ? 'badge-emerald' : ''}`} style={{ fontSize: 10 }}>
+                      {demo.role.toUpperCase()}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {DEMO_ACCOUNTS.map(demo => (
-                <button
-                  key={demo.profile.id}
-                  type="button"
-                  onClick={() => handleQuickDemoLogin(demo)}
-                  style={demoBtnStyle}
-                  title={`Switch active user to ${demo.profile.fullName} (${demo.role})`}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ ...avatarMiniStyle, backgroundColor: demo.profile.avatarColor }}>
-                      {demo.profile.fullName.substring(0, 2).toUpperCase()}
-                    </div>
-                    <div style={{ textAlign: 'left' }}>
-                      <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {demo.profile.fullName}
-                      </div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                        {demo.profile.email}
-                      </div>
-                    </div>
-                  </div>
-                  <span className={`badge ${demo.role === 'owner' ? 'badge-cyan' : demo.role === 'editor' ? 'badge-emerald' : ''}`} style={{ fontSize: 10 }}>
-                    {demo.role.toUpperCase()}
-                  </span>
+          )}
+
+          {/* Discreet Developer Clearance Access at bottom */}
+          {!isDev && !showDevPrompt && (
+            <div style={{ marginTop: 14, textAlign: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setShowDevPrompt(true)}
+                className="btn-ghost"
+                style={{ fontSize: 10.5, color: 'var(--text-muted)', opacity: 0.6, padding: '3px 8px' }}
+                title="Website Developer Access"
+              >
+                Website Developer Clearance
+              </button>
+            </div>
+          )}
+
+          {!isDev && showDevPrompt && (
+            <form onSubmit={handleDevUnlock} style={{ marginTop: 12, padding: '10px 12px', borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                ENTER WEBSITE DEVELOPER PASSCODE
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  type="password"
+                  placeholder="Developer passcode"
+                  value={devPasscode}
+                  onChange={e => {
+                    setDevPasscode(e.target.value);
+                    setDevError(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    height: 32,
+                    padding: '0 8px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-subtle)',
+                    backgroundColor: 'var(--bg-surface-0)',
+                    color: 'var(--text-primary)',
+                    fontSize: 11.5,
+                  }}
+                  autoFocus
+                />
+                <button type="submit" className="btn-primary" style={{ height: 32, padding: '0 10px', fontSize: 11 }}>
+                  Unlock
                 </button>
-              ))}
+                <button type="button" onClick={() => setShowDevPrompt(false)} className="btn-secondary" style={{ height: 32, padding: '0 8px', fontSize: 11 }}>
+                  Cancel
+                </button>
+              </div>
+              {devError && (
+                <div style={{ fontSize: 10, color: '#f43f5e' }}>{devError}</div>
+              )}
+            </form>
+          )}
+
+          {isDev && !demoVisible && (
+            <div style={{ marginTop: 12, textAlign: 'center' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setDemoVisible(true);
+                  setDemoModeEnabled(true);
+                }}
+                className="btn-ghost"
+                style={{ fontSize: 10.5, color: 'var(--accent-cyan)' }}
+              >
+                + Show Developer Test Accounts
+              </button>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
