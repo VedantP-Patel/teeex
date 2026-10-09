@@ -17,7 +17,6 @@ import { ProjectsDashboardModal } from './components/modals/ProjectsDashboardMod
 import { DeveloperUnlockModal } from './components/modals/DeveloperUnlockModal';
 import { DoiImportModal } from './components/modals/DoiImportModal';
 import { AuditLogModal } from './components/modals/AuditLogModal';
-import { PresentationModal } from './components/modals/PresentationModal';
 import { EncryptionModal } from './components/modals/EncryptionModal';
 import {
   isPlatformDeveloper,
@@ -163,7 +162,12 @@ export function App() {
         color: currentUser.avatarColor || '#38bdf8',
       };
     }
-    return initial;
+    return {
+      ...initial,
+      name: 'Guest Author',
+      avatar: 'GA',
+      color: '#38bdf8',
+    };
   });
   // Co-Authors: Simulated peers only appear on the introductory sample demo project or when developer enabled
   const [peers, setPeers] = useState<Collaborator[]>(() => {
@@ -228,7 +232,6 @@ export function App() {
   const [isWordCountOpen, setIsWordCountOpen] = useState(false);
   const [isDoiModalOpen, setIsDoiModalOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
-  const [isPresentationModalOpen, setIsPresentationModalOpen] = useState(false);
   const [isEncryptionModalOpen, setIsEncryptionModalOpen] = useState(false);
 
   // Offline PWA & Airplane mode state
@@ -846,9 +849,6 @@ export function App() {
         isDevDemoActive={isDevDemoActive}
         onToggleDevDemoMode={handleToggleDevDemoMode}
         onOpenDoiModal={() => setIsDoiModalOpen(true)}
-        onOpenPresentationModal={() => setIsPresentationModalOpen(true)}
-        onOpenEncryptionModal={() => setIsEncryptionModalOpen(true)}
-        onOpenAuditModal={() => setIsAuditModalOpen(true)}
         isEncrypted={!!activeProject?.isEncrypted}
         isOffline={isOffline}
       />
@@ -1060,14 +1060,6 @@ export function App() {
         isOpen={isDoiModalOpen}
         onClose={() => setIsDoiModalOpen(false)}
         onAddBibtexEntry={handleAddBibtexEntry}
-      />
-
-      {/* Beamer Slide Deck Presentation Mode */}
-      <PresentationModal
-        isOpen={isPresentationModalOpen}
-        onClose={() => setIsPresentationModalOpen(false)}
-        latexCode={activeFile.content}
-        projectTitle={projectTitle}
       />
 
       {/* Client-Side E2EE Document Vault Modal */}

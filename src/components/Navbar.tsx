@@ -13,7 +13,6 @@ import {
   Share2,
   Image as ImageIcon,
   Cloud,
-  ShieldCheck,
   FolderArchive,
   ChevronDown,
   FolderKanban,
@@ -23,12 +22,11 @@ import {
   Edit3,
   Eye,
   Plus,
-  Code,
   Lock,
   BookMarked,
-  Presentation,
-  Clock,
-  WifiOff
+  WifiOff,
+  ShieldCheck,
+  Code
 } from 'lucide-react';
 import type { CompileState, Collaborator, Project, ProjectRole, UserProfile } from '../types/latex';
 
@@ -46,6 +44,7 @@ interface Props {
   onOpenSymbols: () => void;
   onOpenTemplates: () => void;
   onOpenImageUpload: () => void;
+  onOpenDoiModal?: () => void;
   onOpenSupabase: () => void;
   isCloudConnected: boolean;
   onExportPdf: () => void;
@@ -66,11 +65,6 @@ interface Props {
   onLockPlatformDev: () => void;
   isDevDemoActive: boolean;
   onToggleDevDemoMode: () => void;
-  // Upgrades & Features props
-  onOpenDoiModal?: () => void;
-  onOpenPresentationModal?: () => void;
-  onOpenEncryptionModal?: () => void;
-  onOpenAuditModal?: () => void;
   isEncrypted?: boolean;
   isOffline?: boolean;
 }
@@ -81,7 +75,7 @@ export const Navbar: React.FC<Props> = ({
   compileState,
   onCompile,
   peers,
-  selfUser,
+  selfUser: _selfUser,
   theme,
   onToggleTheme,
   onOpenShare,
@@ -89,6 +83,7 @@ export const Navbar: React.FC<Props> = ({
   onOpenSymbols,
   onOpenTemplates,
   onOpenImageUpload,
+  onOpenDoiModal,
   onOpenSupabase,
   isCloudConnected,
   onExportPdf,
@@ -106,17 +101,15 @@ export const Navbar: React.FC<Props> = ({
   onLockPlatformDev,
   isDevDemoActive,
   onToggleDevDemoMode,
-  onOpenDoiModal,
-  onOpenPresentationModal,
-  onOpenEncryptionModal,
-  onOpenAuditModal,
-  isEncrypted,
+  isEncrypted: _isEncrypted,
   isOffline,
 }) => {
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
+  const [isInsertDropdownOpen, setIsInsertDropdownOpen] = useState(false);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
 
   const projectDropdownRef = useRef<HTMLDivElement>(null);
+  const insertDropdownRef = useRef<HTMLDivElement>(null);
   const userDropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdowns on outside click
@@ -124,6 +117,9 @@ export const Navbar: React.FC<Props> = ({
     const handleClickOutside = (e: MouseEvent) => {
       if (projectDropdownRef.current && !projectDropdownRef.current.contains(e.target as Node)) {
         setIsProjectDropdownOpen(false);
+      }
+      if (insertDropdownRef.current && !insertDropdownRef.current.contains(e.target as Node)) {
+        setIsInsertDropdownOpen(false);
       }
       if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
         setIsUserDropdownOpen(false);
@@ -151,34 +147,48 @@ export const Navbar: React.FC<Props> = ({
 
   return (
     <header style={navStyle}>
-      {/* Brand & Project Switcher */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      {/* LEFT GROUP: Brand & Unified Project Title */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={logoMarkStyle}>
-            <span style={{ fontSize: 13, fontWeight: 900, color: '#000' }}>Tx</span>
+            <span style={{ fontSize: 12, fontWeight: 900, color: '#000' }}>Tx</span>
           </div>
-          <span style={{ fontWeight: 800, fontSize: 14, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
+          <span style={{ fontWeight: 800, fontSize: 13.5, letterSpacing: '-0.02em', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
             TEEEX<span style={{ color: '#38bdf8' }}>.</span>
           </span>
         </div>
 
-        <div style={{ width: 1, height: 18, backgroundColor: 'var(--border-subtle)' }} />
+        <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
 
-        {/* Project Switcher Dropdown */}
-        <div ref={projectDropdownRef} style={{ position: 'relative' }}>
-          <button
-            onClick={() => setIsProjectDropdownOpen(prev => !prev)}
-            style={projectSwitcherBtnStyle}
-            title="Switch project workspace"
-          >
-            <FolderKanban size={13} color="#38bdf8" />
-            <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}>
-              {projectTitle}
-            </span>
-            <ChevronDown size={12} color="var(--text-muted)" />
-          </button>
+        {/* Unified Project Pill: Folder Icon + Title Input + Dropdown Trigger */}
+        <div ref={projectDropdownRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <div style={projectTitlePillStyle}>
+            <FolderKanban size={13} color="#38bdf8" style={{ flexShrink: 0 }} />
+            <input
+              type="text"
+              value={projectTitle}
+              readOnly={currentRole === 'viewer'}
+              onChange={e => onTitleChange(e.target.value)}
+              style={{
+                ...cleanTitleInputStyle,
+                opacity: currentRole === 'viewer' ? 0.8 : 1,
+                cursor: currentRole === 'viewer' ? 'default' : 'text',
+              }}
+              placeholder="Untitled Document"
+              title="Click to rename document"
+            />
+            <button
+              type="button"
+              onClick={() => setIsProjectDropdownOpen(prev => !prev)}
+              style={chevronDropdownBtnStyle}
+              title="Switch workspace project"
+            >
+              <ChevronDown size={11} color="var(--text-muted)" />
+            </button>
+          </div>
 
+          {/* Project Switcher Dropdown Menu */}
           {isProjectDropdownOpen && (
             <div style={dropdownMenuStyle}>
               <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -236,25 +246,10 @@ export const Navbar: React.FC<Props> = ({
           )}
         </div>
 
-        {/* Project Name Editable Input */}
-        <input
-          type="text"
-          value={projectTitle}
-          readOnly={currentRole === 'viewer'}
-          onChange={e => onTitleChange(e.target.value)}
-          style={{
-            ...titleInputStyle,
-            opacity: currentRole === 'viewer' ? 0.8 : 1,
-            cursor: currentRole === 'viewer' ? 'default' : 'text',
-          }}
-          placeholder="Untitled LaTeX Document"
-        />
-
-        {/* Active Role Badge in Navbar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 9999, backgroundColor: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', fontSize: 11 }}>
+        {/* Compact Role Badge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 9999, backgroundColor: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', fontSize: 10.5, whiteSpace: 'nowrap' }}>
           {getRoleIcon(currentRole)}
           <span style={{
-            fontSize: 10.5,
             fontWeight: 600,
             color: currentRole === 'owner' ? '#38bdf8' : currentRole === 'editor' ? '#10b981' : '#f59e0b',
             textTransform: 'capitalize'
@@ -264,236 +259,173 @@ export const Navbar: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Middle: Live Compilation Status & Speed Pill */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      {/* MIDDLE GROUP: Compilation & Live Status Pill */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         {currentRole !== 'viewer' ? (
           <button
             onClick={onCompile}
             className="btn-primary"
-            style={{ padding: '5px 12px', fontSize: 12 }}
+            style={{ padding: '4px 10px', fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}
             title="Recompile LaTeX Document (Ctrl+Enter)"
           >
             {compileState.status === 'compiling' ? (
-              <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+              <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
             ) : (
-              <Play size={13} fill="currentColor" />
+              <Play size={11} fill="currentColor" />
             )}
-            Compile
+            <span>Compile</span>
             <span style={shortcutKbdStyle}>Ctrl+↵</span>
           </button>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', fontSize: 11, color: '#f59e0b', fontWeight: 600 }}>
-            <Eye size={12} /> Read-Only Mode
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 8px', borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', fontSize: 11, color: '#f59e0b', fontWeight: 600, whiteSpace: 'nowrap' }}>
+            <Eye size={11} /> Read-Only
           </div>
         )}
 
-        {/* Status Pill */}
+        {/* Unified Live Status Pill */}
         <div style={statusPillStyle}>
-          {compileState.status === 'compiling' && (
+          {compileState.status === 'compiling' ? (
             <>
-              <Loader2 size={12} color="#38bdf8" style={{ animation: 'spin 1s linear infinite' }} />
+              <Loader2 size={11} color="#38bdf8" style={{ animation: 'spin 1s linear infinite' }} />
               <span style={{ color: 'var(--text-secondary)' }}>Compiling...</span>
             </>
-          )}
-
-          {compileState.status === 'success' && (
+          ) : compileState.status === 'error' ? (
+            <>
+              <XCircle size={12} color="#f43f5e" />
+              <span style={{ color: '#f43f5e', fontWeight: 600 }}>{compileState.errorCount} Error{compileState.errorCount > 1 ? 's' : ''}</span>
+            </>
+          ) : (
             <>
               <div style={liveRadarDotStyle} />
-              <span style={{ color: '#10b981', fontWeight: 600 }}>Live Synced</span>
+              <span style={{ color: '#10b981', fontWeight: 600 }}>Live</span>
               <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>({compileState.durationMs}ms)</span>
             </>
           )}
 
-          {compileState.status === 'error' && (
-            <>
-              <XCircle size={13} color="#f43f5e" />
-              <span style={{ color: '#f43f5e', fontWeight: 600 }}>
-                {compileState.errorCount} {compileState.errorCount === 1 ? 'Error' : 'Errors'}
-              </span>
-            </>
+          {compileState.warningCount > 0 && compileState.status !== 'error' && (
+            <span style={{ color: '#f59e0b', fontSize: 10.5, display: 'inline-flex', alignItems: 'center', gap: 2, marginLeft: 2 }} title={`${compileState.warningCount} warnings`}>
+              <AlertTriangle size={10} /> {compileState.warningCount}
+            </span>
           )}
 
-          {compileState.warningCount > 0 && compileState.status !== 'error' && (
-            <span style={{ color: '#f59e0b', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3 }}>
-              <AlertTriangle size={11} /> {compileState.warningCount}
+          {/* Cloud Sync indicator dot/icon */}
+          {isCloudConnected && (
+            <span title="Cloud storage synchronized" style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 3, color: '#10b981' }}>
+              <Cloud size={11} />
+            </span>
+          )}
+
+          {/* Offline badge */}
+          {isOffline && (
+            <span title="Working offline (Cached in IndexedDB)" style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 3, color: '#f59e0b' }}>
+              <WifiOff size={11} />
             </span>
           )}
         </div>
       </div>
 
-      {/* Right Side: Tools, Collaboration, User Account */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        {/* Cloud Status: Website Developer has Vault access; Paper Authors see clean Cloud Sync badge */}
-        {isPlatformDev ? (
-          <>
+      {/* RIGHT GROUP: Consolidated Insert, Templates, Share, Export, Theme, User */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+        {/* + Insert Dropdown Menu */}
+        {currentRole !== 'viewer' && (
+          <div ref={insertDropdownRef} style={{ position: 'relative' }}>
             <button
-              onClick={onOpenSupabase}
+              onClick={() => setIsInsertDropdownOpen(prev => !prev)}
               className="btn-ghost"
-              style={{
-                ...toolBtnStyle,
-                color: '#38bdf8',
-                backgroundColor: 'rgba(56, 189, 248, 0.08)',
-                border: '1px solid rgba(56, 189, 248, 0.25)',
-              }}
-              title="Website Developer Cloud & Database Vault"
+              style={toolBtnStyle}
+              title="Insert figures, tables, formulas or citations"
             >
-              <ShieldCheck size={13} color="#38bdf8" />
-              <span>Dev Vault</span>
+              <Plus size={12} color="#38bdf8" />
+              <span>Insert</span>
+              <ChevronDown size={10} color="var(--text-muted)" />
             </button>
-            <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
-          </>
-        ) : isCloudConnected ? (
-          <>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '3px 8px',
-                fontSize: 11,
-                color: '#10b981',
-                borderRadius: 'var(--radius-sm)',
-                backgroundColor: 'rgba(16, 185, 129, 0.08)',
-              }}
-              title="Connected to Teeex Cloud Storage. All paper edits are safely synchronized."
-            >
-              <Cloud size={12} />
-              <span>Cloud Synced</span>
-            </div>
-            <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
-          </>
-        ) : null}
 
-        {/* Math & TikZ Library */}
-        <button onClick={onOpenSymbols} className="btn-ghost" title="LaTeX Symbols & Formulas Library" style={toolBtnStyle}>
-          <Hash size={13} color="#38bdf8" />
-          <span>Formulas</span>
-        </button>
+            {isInsertDropdownOpen && (
+              <div style={{ ...dropdownMenuStyle, width: 200, left: 0 }}>
+                <div style={{ padding: '4px 0' }}>
+                  <button
+                    onClick={() => { setIsInsertDropdownOpen(false); onOpenImageUpload(); }}
+                    style={dropdownItemStyle}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <ImageIcon size={13} color="#38bdf8" />
+                      <span>Figure &amp; Image</span>
+                    </div>
+                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\includegraphics</span>
+                  </button>
 
-        {/* Upload Figure Button */}
-        {currentRole !== 'viewer' && (
-          <button onClick={onOpenImageUpload} className="btn-ghost" title="Upload Figure & Insert \includegraphics" style={toolBtnStyle}>
-            <ImageIcon size={13} />
-            <span>Figure</span>
-          </button>
-        )}
+                  <button
+                    onClick={() => { setIsInsertDropdownOpen(false); onOpenTableBuilder(); }}
+                    style={dropdownItemStyle}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <Table size={13} color="#10b981" />
+                      <span>Table Builder</span>
+                    </div>
+                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\tabular</span>
+                  </button>
 
-        {/* Table Builder */}
-        {currentRole !== 'viewer' && (
-          <button onClick={onOpenTableBuilder} className="btn-ghost" title="Visual Table Builder" style={toolBtnStyle}>
-            <Table size={13} />
-            <span>Table</span>
-          </button>
+                  <button
+                    onClick={() => { setIsInsertDropdownOpen(false); onOpenSymbols(); }}
+                    style={dropdownItemStyle}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <Hash size={13} color="#a855f7" />
+                      <span>Math &amp; Formulas</span>
+                    </div>
+                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\equation</span>
+                  </button>
+
+                  {onOpenDoiModal && (
+                    <button
+                      onClick={() => { setIsInsertDropdownOpen(false); onOpenDoiModal(); }}
+                      style={dropdownItemStyle}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <BookMarked size={13} color="#f59e0b" />
+                        <span>DOI Citation</span>
+                      </div>
+                      <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\cite</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {/* Starter Templates */}
         <button onClick={onOpenTemplates} className="btn-ghost" title="Starter Templates" style={toolBtnStyle}>
-          <BookOpen size={13} />
+          <BookOpen size={12} />
           <span>Templates</span>
         </button>
 
-        {/* DOI BibTeX Citation Importer */}
-        {onOpenDoiModal && currentRole !== 'viewer' && (
-          <button onClick={onOpenDoiModal} className="btn-ghost" title="Import BibTeX citation via DOI lookup" style={toolBtnStyle}>
-            <BookMarked size={13} color="#38bdf8" />
-            <span>DOI Cite</span>
-          </button>
-        )}
+        <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
 
-        {/* Beamer Slide Presentation Mode */}
-        {onOpenPresentationModal && (
-          <button onClick={onOpenPresentationModal} className="btn-ghost" title="Beamer Slide Deck Presentation Mode" style={toolBtnStyle}>
-            <Presentation size={13} color="#a855f7" />
-            <span>Slides</span>
-          </button>
-        )}
-
-        {/* Client-Side E2EE Document Vault */}
-        {onOpenEncryptionModal && (
-          <button
-            onClick={onOpenEncryptionModal}
-            className="btn-ghost"
-            title={isEncrypted ? "Document Vault: AES-256-GCM Encrypted" : "Client-Side Document Vault Encryption"}
-            style={{
-              ...toolBtnStyle,
-              color: isEncrypted ? '#10b981' : undefined,
-              backgroundColor: isEncrypted ? 'rgba(16, 185, 129, 0.08)' : undefined,
-              border: isEncrypted ? '1px solid rgba(16, 185, 129, 0.25)' : undefined,
-            }}
-          >
-            <Lock size={13} color={isEncrypted ? '#10b981' : undefined} />
-            <span>{isEncrypted ? 'Vault: E2EE' : 'Vault'}</span>
-          </button>
-        )}
-
-        {/* Audit Log */}
-        {onOpenAuditModal && (
-          <button onClick={onOpenAuditModal} className="btn-ghost" title="Project Activity & Security Audit Trail" style={toolBtnStyle}>
-            <Clock size={13} />
-            <span>Audit</span>
-          </button>
-        )}
-
-        {/* Offline Status Badge */}
-        {isOffline && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '3px 8px',
-              fontSize: 11,
-              color: '#f59e0b',
-              borderRadius: 'var(--radius-sm)',
-              backgroundColor: 'rgba(245, 158, 11, 0.1)',
-              border: '1px solid rgba(245, 158, 11, 0.25)',
-            }}
-            title="Airplane / Offline Mode active. Edits are auto-cached locally in IndexedDB."
-          >
-            <WifiOff size={12} />
-            <span>Offline</span>
-          </div>
-        )}
-
-        {/* Collaborative Presence Pill */}
+        {/* Share Button / Co-authors */}
         <button
           onClick={onOpenShare}
           style={presenceButtonStyle}
-          title="Manage real-time collaboration room & permissions"
+          title="Share project & invite collaborators"
         >
-          <div style={{ display: 'flex', alignItems: 'center', marginLeft: -4 }}>
-            <div style={{ ...avatarMiniStyle, backgroundColor: selfUser.color, zIndex: 10 }}>
-              {selfUser.avatar}
-            </div>
-            {peers.slice(0, 2).map((p, idx) => (
-              <div
-                key={p.id}
-                style={{
-                  ...avatarMiniStyle,
-                  backgroundColor: p.color,
-                  marginLeft: -8,
-                  zIndex: 9 - idx,
-                }}
-              >
-                {p.avatar}
-              </div>
-            ))}
-          </div>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
-            {peers.length + 1}
-          </span>
-          <Share2 size={12} color="var(--text-secondary)" />
+          <Share2 size={12} color="#38bdf8" />
+          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>Share</span>
+          {peers.length > 0 && (
+            <span className="badge badge-cyan" style={{ fontSize: 9, padding: '0 4px', marginLeft: 2 }}>
+              {peers.length + 1}
+            </span>
+          )}
         </button>
 
         {/* Export PDF */}
-        <button onClick={onExportPdf} className="btn-secondary" title="Export Ready PDF Document" style={{ padding: '4px 9px', fontSize: 11.5 }}>
-          <Download size={12} />
+        <button onClick={onExportPdf} className="btn-secondary" title="Export PDF Document" style={compactBtnStyle}>
+          <Download size={11} />
           <span>PDF</span>
         </button>
 
-        {/* Export ZIP Package */}
-        <button onClick={onExportZip} className="btn-secondary" title="Download Complete .ZIP Project for arXiv / Overleaf" style={{ padding: '4px 9px', fontSize: 11.5 }}>
-          <FolderArchive size={12} color="#38bdf8" />
+        {/* Export ZIP */}
+        <button onClick={onExportZip} className="btn-secondary" title="Download .ZIP Package" style={compactBtnStyle}>
+          <FolderArchive size={11} color="#38bdf8" />
           <span>ZIP</span>
         </button>
 
@@ -501,15 +433,15 @@ export const Navbar: React.FC<Props> = ({
         <button
           onClick={onToggleTheme}
           className="btn-ghost"
-          style={{ padding: 5, borderRadius: 'var(--radius-sm)' }}
+          style={{ padding: 4, borderRadius: 'var(--radius-sm)', display: 'inline-flex', alignItems: 'center' }}
           title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
         >
-          {theme === 'dark' ? <Sun size={14} color="#f59e0b" /> : <Moon size={14} color="#38bdf8" />}
+          {theme === 'dark' ? <Sun size={13} color="#f59e0b" /> : <Moon size={13} color="#38bdf8" />}
         </button>
 
-        <div style={{ width: 1, height: 16, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+        <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
 
-        {/* User Account / Auth Dropdown */}
+        {/* User Account / Sign In */}
         <div ref={userDropdownRef} style={{ position: 'relative' }}>
           {currentUser ? (
             <button
@@ -518,33 +450,36 @@ export const Navbar: React.FC<Props> = ({
               title={`Signed in as ${currentUser.fullName}`}
             >
               <div style={{ ...avatarMiniStyle, backgroundColor: currentUser.avatarColor || '#38bdf8' }}>
-                {currentUser.fullName ? currentUser.fullName.substring(0, 2).toUpperCase() : 'ME'}
+                {currentUser.fullName ? currentUser.fullName.substring(0, 2).toUpperCase() : 'U'}
               </div>
-              <ChevronDown size={11} color="var(--text-muted)" />
+              <ChevronDown size={10} color="var(--text-muted)" />
             </button>
           ) : (
             <button
               onClick={onOpenAuth}
               className="btn-primary"
-              style={{ padding: '4px 10px', fontSize: 11 }}
+              style={{ padding: '3px 8px', fontSize: 11, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 }}
             >
-              <User size={12} /> Sign In
+              <User size={11} /> Sign In
             </button>
           )}
 
           {isUserDropdownOpen && currentUser && (
-            <div style={{ ...dropdownMenuStyle, left: 'auto', right: 0, width: 240 }}>
+            <div style={{ ...dropdownMenuStyle, left: 'auto', right: 0, width: 230 }}>
               {/* User Profile Card */}
-              <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-surface-0)' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+              <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-surface-0)' }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)' }}>
                   {currentUser.fullName}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', wordBreak: 'break-all' }}>
+                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', wordBreak: 'break-all' }}>
                   {currentUser.email}
                 </div>
-                <div style={{ marginTop: 6, display: 'inline-block' }}>
-                  <span className={`badge ${getRoleBadgeClass(currentRole)}`} style={{ fontSize: 9.5 }}>
+                <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span className={`badge ${getRoleBadgeClass(currentRole)}`} style={{ fontSize: 9 }}>
                     Project {currentRole === 'owner' ? 'Host' : currentRole}
+                  </span>
+                  <span title="AES-256 E2EE Automatic Protection" style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 9, color: '#10b981', marginLeft: 4 }}>
+                    <ShieldCheck size={11} color="#10b981" /> Auto-Protected
                   </span>
                 </div>
               </div>
@@ -555,7 +490,7 @@ export const Navbar: React.FC<Props> = ({
                   onClick={() => { setIsUserDropdownOpen(false); onOpenProjectsHub(); }}
                   style={dropdownItemStyle}
                 >
-                  <FolderKanban size={13} color="#38bdf8" />
+                  <FolderKanban size={12} color="#38bdf8" />
                   <span>Projects Hub</span>
                 </button>
 
@@ -563,39 +498,39 @@ export const Navbar: React.FC<Props> = ({
                   onClick={() => { setIsUserDropdownOpen(false); onOpenAuth(); }}
                   style={dropdownItemStyle}
                 >
-                  <User size={13} color="var(--text-secondary)" />
-                  <span>Switch Account / Sign In</span>
+                  <User size={12} color="var(--text-secondary)" />
+                  <span>Switch Account</span>
                 </button>
 
-                {/* Website Developer / Platform Owner section */}
+                {/* Website Developer section */}
                 {isPlatformDev ? (
                   <>
                     <div style={{ height: 1, backgroundColor: 'var(--border-subtle)', margin: '4px 0' }} />
-                    <div style={{ padding: '4px 12px', fontSize: 9.5, fontWeight: 700, color: 'var(--accent-cyan)', letterSpacing: '0.05em' }}>
+                    <div style={{ padding: '3px 12px', fontSize: 9, fontWeight: 700, color: 'var(--accent-cyan)', letterSpacing: '0.05em' }}>
                       WEBSITE OWNER / DEVELOPER
                     </div>
                     <button
                       onClick={() => { setIsUserDropdownOpen(false); onOpenSupabase(); }}
                       style={dropdownItemStyle}
                     >
-                      <Shield size={13} color="#38bdf8" />
+                      <Shield size={12} color="#38bdf8" />
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                        <span>Cloud &amp; Database Vault</span>
-                        <span className="badge badge-cyan" style={{ fontSize: 9, padding: '1px 5px' }}>Dev</span>
+                        <span>Cloud Database Vault</span>
+                        <span className="badge badge-cyan" style={{ fontSize: 8.5, padding: '1px 4px' }}>Dev</span>
                       </div>
                     </button>
                     <button
                       onClick={() => { onToggleDevDemoMode(); }}
                       style={dropdownItemStyle}
                     >
-                      <Code size={13} color={isDevDemoActive ? '#10b981' : 'var(--text-muted)'} />
+                      <Code size={12} color={isDevDemoActive ? '#10b981' : 'var(--text-muted)'} />
                       <span>Test Accounts: {isDevDemoActive ? 'Visible' : 'Hidden'}</span>
                     </button>
                     <button
                       onClick={() => { setIsUserDropdownOpen(false); onLockPlatformDev(); }}
                       style={{ ...dropdownItemStyle, color: 'var(--text-muted)' }}
                     >
-                      <Lock size={13} />
+                      <Lock size={12} />
                       <span>Lock Developer Mode</span>
                     </button>
                   </>
@@ -604,10 +539,10 @@ export const Navbar: React.FC<Props> = ({
                     <div style={{ height: 1, backgroundColor: 'var(--border-subtle)', margin: '4px 0' }} />
                     <button
                       onClick={() => { setIsUserDropdownOpen(false); onOpenDeveloperUnlock(); }}
-                      style={{ ...dropdownItemStyle, fontSize: 11, color: 'var(--text-muted)' }}
+                      style={{ ...dropdownItemStyle, fontSize: 10.5, color: 'var(--text-muted)' }}
                       title="Website Developer Access"
                     >
-                      <Lock size={12} />
+                      <Lock size={11} />
                       <span>Developer Access</span>
                     </button>
                   </>
@@ -619,7 +554,7 @@ export const Navbar: React.FC<Props> = ({
                   onClick={() => { setIsUserDropdownOpen(false); onSignOut(); }}
                   style={{ ...dropdownItemStyle, color: '#f43f5e' }}
                 >
-                  <LogOut size={13} color="#f43f5e" />
+                  <LogOut size={12} color="#f43f5e" />
                   <span>Sign Out</span>
                 </button>
               </div>
@@ -652,84 +587,96 @@ const logoMarkStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  boxShadow: '0 0 12px rgba(56, 189, 248, 0.4)',
+  boxShadow: '0 0 10px rgba(56, 189, 248, 0.35)',
 };
 
-const projectSwitcherBtnStyle: React.CSSProperties = {
+const projectTitlePillStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 6,
-  padding: '4px 8px',
+  gap: 4,
+  padding: '2px 6px',
   backgroundColor: 'var(--bg-surface-1)',
   border: '1px solid var(--border-subtle)',
   borderRadius: 'var(--radius-sm)',
-  color: 'var(--text-primary)',
-  fontSize: 12,
-  cursor: 'pointer',
   transition: 'border-color 0.15s ease',
 };
 
-const titleInputStyle: React.CSSProperties = {
+const cleanTitleInputStyle: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid transparent',
+  border: 'none',
+  outline: 'none',
   color: 'var(--text-primary)',
-  fontSize: 12.5,
+  fontSize: 11.5,
   fontWeight: 600,
-  padding: '3px 6px',
-  borderRadius: 'var(--radius-xs)',
-  width: 170,
+  padding: '1px 3px',
+  width: 155,
   textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const chevronDropdownBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: '1px 2px',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
 };
 
 const shortcutKbdStyle: React.CSSProperties = {
-  fontSize: 10,
+  fontSize: 9.5,
   backgroundColor: 'rgba(255, 255, 255, 0.2)',
   padding: '1px 4px',
   borderRadius: 3,
-  marginLeft: 4,
+  marginLeft: 3,
   fontWeight: 500,
+  whiteSpace: 'nowrap',
 };
 
 const statusPillStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 6,
-  padding: '3px 9px',
+  gap: 5,
+  padding: '3px 8px',
   backgroundColor: 'var(--bg-surface-1)',
   border: '1px solid var(--border-subtle)',
   borderRadius: 9999,
   fontSize: 11,
+  whiteSpace: 'nowrap',
 };
 
 const liveRadarDotStyle: React.CSSProperties = {
-  width: 7,
-  height: 7,
+  width: 6,
+  height: 6,
   borderRadius: '50%',
   backgroundColor: '#10b981',
   boxShadow: '0 0 0 0 rgba(16, 185, 129, 0.7)',
   animation: 'liveRadar 2s infinite',
+  flexShrink: 0,
 };
 
 const presenceButtonStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 6,
-  padding: '3px 8px',
+  gap: 5,
+  padding: '3px 7px',
   backgroundColor: 'var(--bg-surface-1)',
   border: '1px solid var(--border-subtle)',
-  borderRadius: 9999,
+  borderRadius: 'var(--radius-sm)',
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };
 
 const userProfileBtnStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 5,
+  gap: 4,
   padding: '2px 4px',
   backgroundColor: 'transparent',
   border: '1px solid transparent',
   borderRadius: 9999,
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };
 
 const avatarMiniStyle: React.CSSProperties = {
@@ -743,21 +690,34 @@ const avatarMiniStyle: React.CSSProperties = {
   fontWeight: 700,
   fontSize: 9,
   border: '1.5px solid var(--bg-surface-0)',
+  flexShrink: 0,
 };
 
 const toolBtnStyle: React.CSSProperties = {
-  padding: '4px 7px',
+  padding: '3px 7px',
   fontSize: 11,
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
+};
+
+const compactBtnStyle: React.CSSProperties = {
+  padding: '3px 7px',
+  fontSize: 11,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
 };
 
 const dropdownMenuStyle: React.CSSProperties = {
   position: 'absolute',
   top: 'calc(100% + 6px)',
   left: 0,
-  width: 260,
+  width: 250,
   backgroundColor: 'var(--bg-surface-1)',
   border: '1px solid var(--border-medium)',
   borderRadius: 'var(--radius-md)',
@@ -769,7 +729,7 @@ const dropdownMenuStyle: React.CSSProperties = {
 
 const dropdownItemStyle: React.CSSProperties = {
   width: '100%',
-  padding: '7px 12px',
+  padding: '6px 10px',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
@@ -777,10 +737,11 @@ const dropdownItemStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
   color: 'var(--text-primary)',
-  fontSize: 12,
+  fontSize: 11.5,
   cursor: 'pointer',
   textAlign: 'left',
   transition: 'background-color 0.12s ease',
+  whiteSpace: 'nowrap',
 };
 
 const dropdownFooterBtnStyle: React.CSSProperties = {
@@ -792,8 +753,9 @@ const dropdownFooterBtnStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
   color: '#38bdf8',
-  fontSize: 11.5,
+  fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
   borderRadius: 'var(--radius-xs)',
+  whiteSpace: 'nowrap',
 };

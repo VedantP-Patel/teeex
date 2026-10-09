@@ -30,7 +30,7 @@ export class CollaborationHub {
   constructor(roomId: string, initialUserName?: string) {
     this.roomId = roomId;
     const randomColor = PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)];
-    const savedName = localStorage.getItem('teeex_user_name') || initialUserName || `Author ${Math.floor(Math.random() * 900 + 100)}`;
+    const savedName = localStorage.getItem('teeex_user_name') || initialUserName || 'Guest Author';
     const userId = 'user_' + Math.random().toString(36).substring(2, 9);
 
     this.selfUser = {

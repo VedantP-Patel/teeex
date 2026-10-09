@@ -73,8 +73,8 @@ export function getStoredSession(): { user: UserProfile | null; rememberMe: bool
     return { user: null, rememberMe: false };
   }
 
-  // Fallback: Default to Dr. Elena Rostova as authenticated owner for starter document
-  return { user: DEMO_ACCOUNTS[0].profile, rememberMe: true };
+  // Default: Clean Guest session (no automatic demo account login)
+  return { user: null, rememberMe: false };
 }
 
 export function saveSession(user: UserProfile, rememberMe: boolean): void {

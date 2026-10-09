@@ -114,16 +114,16 @@ export function setDemoModeEnabled(enabled: boolean): void {
  * Determines whether simulated co-authors should appear for a given project.
  * Regular projects created by users only show real peers, not fake phantom co-authors.
  */
-export function areSimulatedPeersEnabled(projectId: string): boolean {
+export function areSimulatedPeersEnabled(_projectId?: string): boolean {
   try {
     const stored = localStorage.getItem(SIMULATED_PEERS_STORAGE_KEY);
     if (stored !== null) {
       return stored === 'true';
     }
-    // By default, simulated co-authors only exist on the initial sample demo project
-    return projectId === 'p1';
+    // By default, no simulated phantom peers. Only real connected collaborators appear
+    return false;
   } catch {
-    return projectId === 'p1';
+    return false;
   }
 }
 
