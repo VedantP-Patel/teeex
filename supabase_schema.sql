@@ -20,6 +20,10 @@ create table if not exists public.profiles (
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- Add columns if the table already exists from an older version
+alter table if exists public.profiles add column if not exists is_approved boolean default false;
+alter table if exists public.profiles add column if not exists is_admin boolean default false;
+
 -- Enable Row Level Security (RLS) on profiles
 alter table public.profiles enable row level security;
 
