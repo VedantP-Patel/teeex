@@ -487,36 +487,41 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     const secLine = findSourceLine(cleanHeading, rawLines, `\\${level}`);
     const tag = level === 'section' ? 'h2' : level === 'subsection' ? 'h3' : 'h4';
     const cls = level === 'section' ? 'latex-section' : level === 'subsection' ? 'latex-subsection' : 'latex-subsubsection';
-    return `<${tag} class="${cls} synctex-target" data-line="${secLine}" title="Click to jump to line ${secLine} in code">${headingText}</${tag}>`;
+    return `\n\n<${tag} class="${cls} synctex-target" data-line="${secLine}" title="Click to jump to line ${secLine} in code">${headingText}</${tag}>\n\n`;
   });
 
   // Format Lists
   bodyText = bodyText.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (_, content) => {
     const listLine = findSourceLine('\\begin{itemize', rawLines);
     const items = content.split('\\item').slice(1);
-    return `<ul class="latex-list synctex-target" data-line="${listLine}" title="Click to jump to line ${listLine} in code">` + items.map((it: string) => {
+    return `\n\n<ul class="latex-list synctex-target" data-line="${listLine}" title="Click to jump to line ${listLine} in code">` + items.map((it: string) => {
       const itLine = findSourceLine(it.trim().slice(0, 20), rawLines, '\\item');
       return `<li class="synctex-target" data-line="${itLine}" title="Click to jump to line ${itLine} in code">${parseInlineFormatting(it.trim())}</li>`;
-    }).join('') + '</ul>';
+    }).join('') + '</ul>\n\n';
   });
 
   bodyText = bodyText.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (_, content) => {
     const listLine = findSourceLine('\\begin{enumerate', rawLines);
     const items = content.split('\\item').slice(1);
-    return `<ol class="latex-list synctex-target" data-line="${listLine}" title="Click to jump to line ${listLine} in code">` + items.map((it: string) => {
+    return `\n\n<ol class="latex-list synctex-target" data-line="${listLine}" title="Click to jump to line ${listLine} in code">` + items.map((it: string) => {
       const itLine = findSourceLine(it.trim().slice(0, 20), rawLines, '\\item');
       return `<li class="synctex-target" data-line="${itLine}" title="Click to jump to line ${itLine} in code">${parseInlineFormatting(it.trim())}</li>`;
-    }).join('') + '</ol>';
+    }).join('') + '</ol>\n\n';
   });
 
   // Format Abstract
   bodyText = bodyText.replace(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/g, (_, abs) => {
     const absLine = findSourceLine('\\begin{abstract}', rawLines);
-    return `<div class="latex-abstract synctex-target" data-line="${absLine}" title="Click to jump to line ${absLine} in code"><div class="latex-abstract-title">ABSTRACT</div><p class="synctex-target" data-line="${absLine}">${parseInlineFormatting(abs.trim())}</p></div>`;
+    return `\n\n<div class="latex-abstract synctex-target" data-line="${absLine}" title="Click to jump to line ${absLine} in code"><div class="latex-abstract-title">ABSTRACT</div><p class="synctex-target" data-line="${absLine}">${parseInlineFormatting(abs.trim())}</p></div>\n\n`;
   });
 
   // Inline Formatting
   bodyText = parseInlineFormatting(bodyText);
+
+  // Separate any text immediately following block tags with double newlines
+  bodyText = bodyText
+    .replace(/(<\/(?:h2|h3|h4|div|ul|ol|table)>)\s*([^\n<\s])/g, '$1\n\n$2')
+    .replace(/([^\n>\s])\s*(<(?:h2|h3|h4|div|ul|ol|table)[\s>])/g, '$1\n\n$2');
 
   // Paragraph wrapping with accurate data-line anchors
   const paragraphs = bodyText
@@ -524,15 +529,16 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     .map(p => p.trim())
     .filter(p => p.length > 0)
     .map(p => {
-      if (p.startsWith('<h') || p.startsWith('<div') || p.startsWith('<ul') || p.startsWith('<ol') || p.startsWith('<table')) {
+      // If block starts with a recognized container or heading tag, keep it as is
+      if (/^<(?:h2|h3|h4|div|ul|ol|table)[\s>]/.test(p)) {
         return p;
       }
-      const cleanSnippet = p.replace(/<[^>]+>/g, '').trim().slice(0, 25);
-      const pLine = cleanSnippet ? findSourceLine(cleanSnippet.slice(0, 15), rawLines) : 1;
+      const cleanSnippet = p.replace(/<[^>]+>/g, '').trim().slice(0, 30);
+      const pLine = cleanSnippet ? findSourceLine(cleanSnippet.slice(0, 18), rawLines) : 1;
       return `<p class="latex-paragraph synctex-target" data-line="${pLine}" title="Click to jump to line ${pLine} in code">${p}</p>`;
     });
 
-  return paragraphs.join('\n');
+  return paragraphs.join('\n\n');
 }
 
 function parseInlineFormatting(text: string): string {

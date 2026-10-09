@@ -94,31 +94,46 @@ export const Editor: React.FC<Props> = ({
 
   // Scroll to target line if triggered externally (SyncTeX)
   useEffect(() => {
-    if (targetLine && textareaRef.current) {
-      const textarea = textareaRef.current;
-      const targetCharPos = lines.slice(0, targetLine - 1).join('\n').length + 1;
-      textarea.focus();
-      textarea.setSelectionRange(targetCharPos, targetCharPos);
-
-      // Accurate scroll calculation
-      const lineHeight = 21;
-      const newScrollTop = Math.max(0, (targetLine - 5) * lineHeight);
-      textarea.scrollTop = newScrollTop;
-      setScrollTop(newScrollTop);
-      if (gutterRef.current) {
-        gutterRef.current.scrollTop = newScrollTop;
+    if (targetLine) {
+      if (editorMode !== 'code') {
+        setEditorMode('code');
       }
 
-      // Flash highlight line for 3 seconds
-      setHighlightedLine(targetLine);
+      // Allow DOM to update if mode switched
+      const timerId = setTimeout(() => {
+        if (!textareaRef.current) return;
+        const textarea = textareaRef.current;
+        const targetCharPos = targetLine === 1 ? 0 : lines.slice(0, targetLine - 1).join('\n').length + 1;
+        const lineContent = lines[targetLine - 1] || '';
+        const lineEndPos = targetCharPos + lineContent.length;
+
+        textarea.focus();
+        textarea.setSelectionRange(targetCharPos, lineEndPos);
+
+        // Accurate scroll calculation
+        const lineHeight = 21;
+        const newScrollTop = Math.max(0, (targetLine - 5) * lineHeight);
+        textarea.scrollTop = newScrollTop;
+        setScrollTop(newScrollTop);
+        if (gutterRef.current) {
+          gutterRef.current.scrollTop = newScrollTop;
+        }
+
+        // Flash highlight line for 3 seconds
+        setHighlightedLine(targetLine);
+      }, editorMode !== 'code' ? 50 : 0);
+
       const timer = setTimeout(() => {
         setHighlightedLine(null);
       }, 3000);
 
       onClearTargetLine();
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timerId);
+        clearTimeout(timer);
+      };
     }
-  }, [targetLine, lines, onClearTargetLine]);
+  }, [targetLine, lines, onClearTargetLine, editorMode]);
 
   // Handle key events: Tab, Ctrl+Enter, auto-close brackets
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
