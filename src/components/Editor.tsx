@@ -17,7 +17,8 @@ import {
   ArrowRight,
   Tag,
   Edit3,
-  Palette
+  Palette,
+  FileText
 } from 'lucide-react';
 import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile, TrackedChange } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
@@ -396,25 +397,30 @@ export const Editor: React.FC<Props> = ({
       )}
 
       {/* Editor Sub-Header Toolbar */}
-      <div style={editorToolbarStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={editorToolbarStyle} className="editor-toolbar no-scrollbar">
+        {/* Left Controls: Sidebar toggle, Code/Visual switcher, File Badge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
           {/* Sidebar Toggle Button */}
           {onToggleSidebar && (
             <button
               type="button"
               onClick={onToggleSidebar}
-              className="btn-ghost"
               style={{
-                padding: '3px 6px',
-                display: 'flex',
+                height: 24,
+                padding: '0 6px',
+                display: 'inline-flex',
                 alignItems: 'center',
+                justifyContent: 'center',
                 color: isSidebarOpen ? 'var(--text-secondary)' : '#38bdf8',
-                backgroundColor: isSidebarOpen ? 'transparent' : 'rgba(56, 189, 248, 0.12)',
-                borderRadius: 'var(--radius-xs)',
+                backgroundColor: isSidebarOpen ? 'var(--bg-surface-1)' : 'rgba(56, 189, 248, 0.12)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 5,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
               }}
               title={isSidebarOpen ? 'Collapse files sidebar (maximizes editor & preview)' : 'Expand files sidebar'}
             >
-              {isSidebarOpen ? <PanelLeftClose size={13} /> : <PanelLeftOpen size={13} />}
+              {isSidebarOpen ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}
             </button>
           )}
 
@@ -432,7 +438,7 @@ export const Editor: React.FC<Props> = ({
               }}
               title="Code Editor: Raw LaTeX source with syntax highlighting"
             >
-              <CodeIcon size={12} />
+              <CodeIcon size={11} />
               <span>Code</span>
             </button>
             <button
@@ -447,102 +453,168 @@ export const Editor: React.FC<Props> = ({
               }}
               title="Visual Editor: Interactive rich-text LaTeX WYSIWYG editor"
             >
-              <Eye size={12} />
+              <Eye size={11} />
               <span>Visual</span>
             </button>
           </div>
 
-          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-secondary)' }}>
-            {fileName}
-          </span>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>&bull; {lines.length} lines</span>
+          {/* Active File Pill */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '0 7px',
+              backgroundColor: 'var(--bg-surface-1)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 5,
+              height: 24,
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+          >
+            <FileText size={11} color="#38bdf8" />
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+              {fileName}
+            </span>
+            <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
+              • {lines.length} lines
+            </span>
+          </div>
+
           {role === 'viewer' && (
-            <span className="badge" style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', fontSize: 10 }}>
+            <span
+              style={{
+                fontSize: 9.5,
+                fontWeight: 600,
+                padding: '2px 6px',
+                borderRadius: 4,
+                backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                color: '#f59e0b',
+                border: '1px solid rgba(245, 158, 11, 0.25)',
+                whiteSpace: 'nowrap',
+              }}
+            >
               Read-Only
             </span>
           )}
         </div>
 
-        {/* Quick Formatting Snippets & Comment action (shown in Code mode) */}
+        {/* Right Controls: Quick Formatting Snippets, Edit/Suggest, Sync Preview, Syntax Theme */}
         {editorMode === 'code' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
             {role !== 'viewer' && (
-              <>
+              <div style={formatGroupStyle}>
                 <button
+                  type="button"
                   onClick={() => insertSnippet('\\textbf{', '}')}
-                  className="btn-ghost"
-                  style={toolBtnStyle}
+                  className="format-toolbar-btn"
+                  style={formatBtnStyle}
                   title="Bold (\textbf{})"
                 >
-                  <Bold size={13} />
+                  <Bold size={11} />
                 </button>
 
-              <button
-                onClick={() => insertSnippet('\\textit{', '}')}
-                className="btn-ghost"
-                style={toolBtnStyle}
-                title="Italic (\textit{})"
-              >
-                <Italic size={13} />
-              </button>
+                <div style={formatDividerStyle} />
 
-              <button
-                onClick={() => insertSnippet('\\begin{equation}\n  ', '\n\\end{equation}')}
-                className="btn-ghost"
-                style={toolBtnStyle}
-                title="Display Equation"
-              >
-                <Sigma size={13} />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => insertSnippet('\\textit{', '}')}
+                  className="format-toolbar-btn"
+                  style={formatBtnStyle}
+                  title="Italic (\textit{})"
+                >
+                  <Italic size={11} />
+                </button>
 
-              <button
-                onClick={() => insertSnippet('\\frac{', '}{}')}
-                className="btn-ghost"
-                style={toolBtnStyle}
-                title="Fraction (\frac{}{})"
-              >
-                <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>a/b</span>
-              </button>
+                <div style={formatDividerStyle} />
 
-              <button
-                onClick={() => insertSnippet('\\cite{', '}')}
-                className="btn-ghost"
-                style={toolBtnStyle}
-                title="Citation (\cite{})"
-              >
-                <Quote size={13} />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => insertSnippet('\\begin{equation}\n  ', '\n\\end{equation}')}
+                  className="format-toolbar-btn"
+                  style={formatBtnStyle}
+                  title="Display Equation"
+                >
+                  <Sigma size={11} />
+                </button>
 
-              <button
-                onClick={() => insertSnippet('\\begin{itemize}\n  \\item ', '\n\\end{itemize}')}
-                className="btn-ghost"
-                style={toolBtnStyle}
-                title="Itemize List"
-              >
-                <List size={13} />
-              </button>
+                <div style={formatDividerStyle} />
 
-              <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
-            </>
-          )}
+                <button
+                  type="button"
+                  onClick={() => insertSnippet('\\frac{', '}{}')}
+                  className="format-toolbar-btn"
+                  style={formatBtnStyle}
+                  title="Fraction (\frac{}{})"
+                >
+                  <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>a/b</span>
+                </button>
+
+                <div style={formatDividerStyle} />
+
+                <button
+                  type="button"
+                  onClick={() => insertSnippet('\\cite{', '}')}
+                  className="format-toolbar-btn"
+                  style={formatBtnStyle}
+                  title="Citation (\cite{})"
+                >
+                  <Quote size={11} />
+                </button>
+
+                <div style={formatDividerStyle} />
+
+                <button
+                  type="button"
+                  onClick={() => insertSnippet('\\begin{itemize}\n  \\item ', '\n\\end{itemize}')}
+                  className="format-toolbar-btn"
+                  style={formatBtnStyle}
+                  title="Itemize List"
+                >
+                  <List size={11} />
+                </button>
+              </div>
+            )}
 
             {/* Suggestion / Track Changes Mode Switch */}
             <button
               type="button"
               onClick={() => setSuggestionMode(!suggestionMode)}
-              className="btn-ghost"
               style={{
-                ...toolBtnStyle,
-                color: suggestionMode ? '#10b981' : 'var(--text-muted)',
-                backgroundColor: suggestionMode ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
-                border: suggestionMode ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid transparent',
+                height: 24,
+                padding: '0 8px',
+                fontSize: 10.5,
+                fontWeight: 500,
+                borderRadius: 5,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+                cursor: 'pointer',
+                color: suggestionMode ? '#10b981' : 'var(--text-secondary)',
+                backgroundColor: suggestionMode ? 'rgba(16, 185, 129, 0.12)' : 'var(--bg-surface-1)',
+                border: suggestionMode ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border-subtle)',
+                transition: 'all 0.15s ease',
               }}
               title={suggestionMode ? 'Switch to Direct Edit mode' : 'Switch to Suggestion / Track Changes mode'}
             >
-              <Edit3 size={12} />
-              <span style={{ fontSize: 10 }}>{suggestionMode ? 'Suggesting' : 'Edit'}</span>
+              <Edit3 size={11} />
+              <span style={{ whiteSpace: 'nowrap' }}>{suggestionMode ? 'Suggesting' : 'Edit'}</span>
               {trackedChanges.length > 0 && (
-                <span className="badge badge-emerald" style={{ fontSize: 9, padding: '0 4px', marginLeft: 3 }}>
+                <span
+                  style={{
+                    fontSize: 8.5,
+                    fontWeight: 700,
+                    padding: '0 4px',
+                    borderRadius: 999,
+                    backgroundColor: '#10b981',
+                    color: '#fff',
+                    marginLeft: 2,
+                    lineHeight: '13px',
+                  }}
+                >
                   {trackedChanges.length}
                 </span>
               )}
@@ -553,19 +625,27 @@ export const Editor: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={() => onForwardSync(currentCursorLine)}
-                className="btn-ghost"
                 style={{
-                  ...toolBtnStyle,
+                  height: 24,
+                  padding: '0 8px',
+                  fontSize: 10.5,
+                  fontWeight: 500,
                   color: '#38bdf8',
-                  backgroundColor: 'rgba(56, 189, 248, 0.08)',
-                  display: 'flex',
+                  backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                  borderRadius: 5,
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 3,
+                  gap: 4,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
                 }}
-                title="Forward Sync: Center and pulse preview on line"
+                title="Forward Sync: Center and pulse preview on current cursor line"
               >
-                <ArrowRight size={12} />
-                <span style={{ fontSize: 10 }}>Sync Preview</span>
+                <ArrowRight size={11} />
+                <span style={{ whiteSpace: 'nowrap' }}>Sync Preview</span>
               </button>
             )}
 
@@ -574,25 +654,30 @@ export const Editor: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
-                className="btn-ghost"
                 style={{
-                  ...toolBtnStyle,
-                  padding: '2px 7px',
+                  height: 24,
+                  padding: '0 8px',
                   fontSize: 10.5,
-                  display: 'flex',
+                  fontWeight: 500,
+                  display: 'inline-flex',
                   alignItems: 'center',
                   gap: 5,
-                  backgroundColor: isThemeMenuOpen ? 'var(--bg-surface-2)' : 'rgba(56, 189, 248, 0.08)',
-                  borderRadius: 'var(--radius-xs)',
-                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                  backgroundColor: isThemeMenuOpen ? 'var(--bg-surface-elevated)' : 'var(--bg-surface-1)',
+                  borderRadius: 5,
+                  border: '1px solid var(--border-medium)',
+                  color: 'var(--text-primary)',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
                 }}
                 title="Syntax Highlight Theme (Antigravity Neon, VS Code, Monokai, Dracula, Normal)"
               >
-                <Palette size={12} color="#38bdf8" />
-                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                <Palette size={11} color="#38bdf8" />
+                <span style={{ fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
                   {SYNTAX_THEMES[syntaxTheme].badge}
                 </span>
-                <span style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                <span style={{ display: 'flex', gap: 2.5, alignItems: 'center', marginLeft: 2 }}>
                   {SYNTAX_THEMES[syntaxTheme].previewColors.map((c, i) => (
                     <span
                       key={i}
@@ -602,6 +687,7 @@ export const Editor: React.FC<Props> = ({
                         borderRadius: '50%',
                         backgroundColor: c,
                         display: 'inline-block',
+                        flexShrink: 0,
                       }}
                     />
                   ))}
@@ -1085,33 +1171,70 @@ export const Editor: React.FC<Props> = ({
 };
 
 const segmentedControlStyle: React.CSSProperties = {
-  display: 'flex',
+  display: 'inline-flex',
   alignItems: 'center',
   backgroundColor: 'var(--bg-surface-2)',
-  borderRadius: 'var(--radius-sm)',
+  borderRadius: 5,
   padding: 2,
   border: '1px solid var(--border-subtle)',
+  height: 24,
+  boxSizing: 'border-box',
+  flexShrink: 0,
 };
 
 const segmentedBtnStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
-  padding: '3px 8px',
-  borderRadius: 3,
-  fontSize: 11,
+  padding: '0 8px',
+  height: '100%',
+  borderRadius: 3.5,
+  fontSize: 10.5,
   fontWeight: 600,
   color: 'var(--text-muted)',
   cursor: 'pointer',
-  display: 'flex',
+  display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
+  whiteSpace: 'nowrap',
   transition: 'all 0.15s ease',
 };
 
 const activeSegmentedBtnStyle: React.CSSProperties = {
   backgroundColor: 'var(--bg-surface-0)',
   color: 'var(--text-primary)',
-  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
+  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.25)',
+};
+
+const formatGroupStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  backgroundColor: 'var(--bg-surface-1)',
+  border: '1px solid var(--border-subtle)',
+  borderRadius: 5,
+  height: 24,
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
+};
+
+const formatBtnStyle: React.CSSProperties = {
+  height: '100%',
+  padding: '0 7px',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: 'var(--text-secondary)',
+  cursor: 'pointer',
+  background: 'none',
+  border: 'none',
+  transition: 'all 0.15s ease',
+};
+
+const formatDividerStyle: React.CSSProperties = {
+  width: 1,
+  height: 12,
+  backgroundColor: 'var(--border-subtle)',
+  flexShrink: 0,
 };
 
 const viewerNoticeStyle: React.CSSProperties = {
@@ -1133,6 +1256,7 @@ const editorContainerStyle: React.CSSProperties = {
   flexDirection: 'column',
   backgroundColor: 'var(--bg-app)',
   overflow: 'hidden',
+  transition: 'background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 const editorToolbarStyle: React.CSSProperties = {
@@ -1142,14 +1266,25 @@ const editorToolbarStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  padding: '0 12px',
+  padding: '0 10px',
   flexShrink: 0,
+  overflowX: 'auto',
+  overflowY: 'hidden',
+  whiteSpace: 'nowrap',
+  gap: 8,
+  transition: 'background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 const toolBtnStyle: React.CSSProperties = {
-  padding: '4px 6px',
-  borderRadius: 'var(--radius-xs)',
+  height: 24,
+  padding: '0 7px',
+  borderRadius: 5,
   color: 'var(--text-secondary)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
 };
 
 const editorBodyStyle: React.CSSProperties = {

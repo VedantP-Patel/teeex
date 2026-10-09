@@ -81,11 +81,7 @@ export function App() {
   }, [theme]);
 
   const toggleTheme = () => {
-    document.documentElement.classList.add('theme-transitioning');
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
-    setTimeout(() => {
-      document.documentElement.classList.remove('theme-transitioning');
-    }, 600);
   };
 
   // Auth & Session State
@@ -970,10 +966,11 @@ export function App() {
             height: '100%',
             display: 'flex',
             flexDirection: 'column',
-            backgroundColor: 'var(--bg-app)',
-            transition: 'background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
+            backgroundColor: theme === 'light' ? '#f1f5f9' : '#080a0f',
+            transition: 'background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
           }}>
             <PreviewPane
+              theme={theme}
               renderedHtml={renderedHtml}
               parsedDoc={parsedDoc}
               onJumpToLine={setTargetLine}

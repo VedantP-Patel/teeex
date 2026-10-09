@@ -25,6 +25,7 @@ interface Props {
   onFormatChange?: (format: PaperFormatId) => void;
   isTwoColumn?: boolean;
   onToggleTwoColumn?: () => void;
+  theme?: 'dark' | 'light';
 }
 
 export const PreviewPane: React.FC<Props> = ({
@@ -38,6 +39,7 @@ export const PreviewPane: React.FC<Props> = ({
   onFormatChange,
   isTwoColumn: isTwoColumnProp,
   onToggleTwoColumn,
+  theme = 'dark',
 }) => {
   const [zoom, setZoom] = useState(78);
   const [localColumnOverride, setLocalColumnOverride] = useState<boolean | null>(null);
@@ -263,8 +265,16 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
     }
   };
 
+  const viewportBg = theme === 'light' ? '#f1f5f9' : '#080a0f';
+
   return (
-    <div style={previewContainerStyle} className="preview-container">
+    <div
+      style={{
+        ...previewContainerStyle,
+        backgroundColor: viewportBg,
+      }}
+      className={`preview-container ${theme}`}
+    >
       {/* Top Toolbar */}
       <div style={previewToolbarStyle} className="preview-toolbar no-scrollbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
@@ -463,7 +473,13 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
       </div>
 
       {/* Paper Sheet View Container (PDF Surrounding Area) */}
-      <div style={sheetViewportStyle} className="sheet-viewport">
+      <div
+        style={{
+          ...sheetViewportStyle,
+          backgroundColor: viewportBg,
+        }}
+        className={`sheet-viewport ${theme}`}
+      >
         <div
           ref={sheetRef}
           onClick={handlePreviewInteraction}
@@ -554,10 +570,9 @@ const previewContainerStyle: React.CSSProperties = {
   height: '100%',
   display: 'flex',
   flexDirection: 'column',
-  backgroundColor: 'var(--bg-app)',
   borderLeft: '1px solid var(--border-subtle)',
   overflow: 'hidden',
-  transition: 'background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1), border-color 0.4s cubic-bezier(0.25, 1, 0.5, 1)',
+  transition: 'background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 const previewToolbarStyle: React.CSSProperties = {
@@ -573,7 +588,7 @@ const previewToolbarStyle: React.CSSProperties = {
   overflowY: 'hidden',
   whiteSpace: 'nowrap',
   gap: 8,
-  transition: 'background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1), border-color 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
+  transition: 'background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 const sheetViewportStyle: React.CSSProperties = {
@@ -584,8 +599,7 @@ const sheetViewportStyle: React.CSSProperties = {
   display: 'flex',
   justifyContent: 'center',
   alignItems: 'flex-start',
-  backgroundColor: 'var(--bg-app)',
-  transition: 'background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
+  transition: 'background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 const paperSheetStyle: React.CSSProperties = {
