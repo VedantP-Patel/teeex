@@ -15,10 +15,12 @@ import {
   Grid,
   ChevronLeft,
   ChevronRight,
-  FileText
+  FileText,
+  Printer
 } from 'lucide-react';
 import type { ParsedDocument } from '../types/latex';
 import { PAPER_FORMATS, type PaperFormatId } from '../services/paperFormats';
+import { paginateByHeuristic, paginateByDom } from '../services/domPaginator';
 
 interface Props {
   renderedHtml: string;
@@ -31,118 +33,23 @@ interface Props {
   onFormatChange?: (format: PaperFormatId) => void;
   isTwoColumn?: boolean;
   onToggleTwoColumn?: () => void;
+  onExportPdf?: () => void;
 }
 
 /**
- * Splits rendered LaTeX HTML into discrete pages respecting explicit page breaks (\newpage, \begin{titlepage})
- * and physical A4 page capacities for pixel-perfect preview and print-to-PDF parity.
+ * Compute the academic header height for the first page (title + authors + date).
+ * Used to reduce available content space on page 1.
  */
-function paginateHtmlIntoPages(
-  renderedHtml: string,
-  isTwoCol: boolean,
-  hasTitlePage: boolean
-): string[] {
-  if (!renderedHtml) return [''];
-
-  const explicitChunks = renderedHtml.split(/<div class="latex-page-break"[^>]*><\/div>/);
-  const finalPages: string[] = [];
-
-  for (let cIdx = 0; cIdx < explicitChunks.length; cIdx++) {
-    const chunk = explicitChunks[cIdx].trim();
-    if (!chunk) continue;
-
-    if (chunk.includes('latex-titlepage')) {
-      finalPages.push(chunk);
-      continue;
-    }
-
-    // Split chunk into top-level HTML element blocks
-    const blockRegex = /<(?:div|h[1-6]|p|ul|ol|table)[\s>][\s\S]*?<\/(?:div|h[1-6]|p|ul|ol|table)>/gi;
-    const blocks: string[] = [];
-    let match: RegExpExecArray | null;
-    let lastIndex = 0;
-
-    while ((match = blockRegex.exec(chunk)) !== null) {
-      const between = chunk.substring(lastIndex, match.index).trim();
-      if (between) blocks.push(between);
-      blocks.push(match[0]);
-      lastIndex = blockRegex.lastIndex;
-    }
-    const remainder = chunk.substring(lastIndex).trim();
-    if (remainder) blocks.push(remainder);
-
-    if (blocks.length === 0) {
-      finalPages.push(chunk);
-      continue;
-    }
-
-    const isFirstPage = finalPages.length === 0 && !hasTitlePage;
-    const baseCapacity = isTwoCol ? 1600 : 880;
-    let currentCapacity = isFirstPage ? (baseCapacity - 220) : baseCapacity;
-
-    let currentPageBlocks: string[] = [];
-    let currentHeight = 0;
-
-    for (const block of blocks) {
-      let blockHeight = 25;
-      if (block.startsWith('<h2')) {
-        blockHeight = 65;
-      } else if (block.startsWith('<h3')) {
-        blockHeight = 45;
-      } else if (block.startsWith('<h4')) {
-        blockHeight = 35;
-      } else if (block.includes('latex-figure-container')) {
-        blockHeight = 240;
-      } else if (block.includes('latex-math-display')) {
-        blockHeight = 70;
-      } else if (block.includes('latex-abstract')) {
-        blockHeight = 140;
-      } else if (block.includes('latex-floating-table') || block.startsWith('<table') || block.includes('table-container')) {
-        const rows = (block.match(/<tr/g) || []).length;
-        blockHeight = 55 + rows * 28;
-      } else if (block.includes('latex-minipage-row')) {
-        blockHeight = 220;
-      } else if (block.includes('latex-toc')) {
-        const items = (block.match(/latex-toc-item/g) || []).length;
-        blockHeight = 50 + items * 24;
-      } else if (block.includes('latex-algorithm')) {
-        const lines = (block.match(/latex-alg-line/g) || []).length;
-        blockHeight = 50 + lines * 22;
-      } else if (block.includes('latex-theorem') || block.includes('latex-proof')) {
-        blockHeight = 90;
-      } else if (block.includes('latex-verbatim')) {
-        const lines = (block.match(/\n/g) || []).length;
-        blockHeight = 45 + lines * 19;
-      } else if (block.includes('latex-tcolorbox') || block.includes('latex-quote')) {
-        blockHeight = 85;
-      } else if (block.includes('latex-vspace')) {
-        const hMatch = block.match(/height:\s*([0-9.]+)px/);
-        blockHeight = hMatch ? Math.max(0, parseFloat(hMatch[1])) : 18;
-      } else if (block.startsWith('<ul') || block.startsWith('<ol') || block.startsWith('<dl')) {
-        const items = (block.match(/<(?:li|dt)/g) || []).length;
-        blockHeight = 35 + items * 24;
-      } else {
-        const textLen = block.replace(/<[^>]+>/g, '').length;
-        blockHeight = Math.max(26, Math.ceil(textLen / 70) * 19);
-      }
-
-      if (currentHeight + blockHeight > currentCapacity && currentPageBlocks.length > 0) {
-        finalPages.push(currentPageBlocks.join('\n'));
-        currentPageBlocks = [block];
-        currentHeight = blockHeight;
-        currentCapacity = baseCapacity;
-      } else {
-        currentPageBlocks.push(block);
-        currentHeight += blockHeight;
-      }
-    }
-
-    if (currentPageBlocks.length > 0) {
-      finalPages.push(currentPageBlocks.join('\n'));
-    }
+function estimateAcademicHeaderHeight(parsedDoc: ParsedDocument): number {
+  let h = 0;
+  if (!parsedDoc.hasTitlePage) {
+    h += 32; // meta header
+    h += 28; // title H1
+    if (parsedDoc.authors.length > 0) h += 22;
+    if (parsedDoc.date) h += 18;
+    h += 24; // bottom border + margin
   }
-
-  return finalPages.length > 0 ? finalPages : [renderedHtml];
+  return h;
 }
 
 export const PreviewPane: React.FC<Props> = ({
@@ -156,6 +63,7 @@ export const PreviewPane: React.FC<Props> = ({
   onFormatChange,
   isTwoColumn: isTwoColumnProp,
   onToggleTwoColumn,
+  onExportPdf,
 }) => {
   const [zoom, setZoom] = useState(78);
   const [localColumnOverride, setLocalColumnOverride] = useState<boolean | null>(null);
@@ -184,16 +92,69 @@ export const PreviewPane: React.FC<Props> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  const pages = useMemo(() => {
-    if (previewMode === 'flow') {
-      return [renderedHtml];
+  // Use heuristic pagination as fast initial render, then update with DOM-measured pagination
+  const [domPages, setDomPages] = useState<string[] | null>(null);
+  const domPaginationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const heuristicPages = useMemo(() => {
+    if (previewMode === 'flow') return [renderedHtml];
+    return paginateByHeuristic(renderedHtml, isTwoCol, !!parsedDoc.hasTitlePage, estimateAcademicHeaderHeight(parsedDoc));
+  }, [renderedHtml, isTwoCol, parsedDoc, previewMode]);
+
+  // DOM-based precise pagination: runs after initial render with a small debounce
+  useEffect(() => {
+    if (previewMode !== 'sheet' || !renderedHtml) {
+      setDomPages(null);
+      return;
     }
-    return paginateHtmlIntoPages(renderedHtml, isTwoCol, !!parsedDoc.hasTitlePage);
-  }, [renderedHtml, isTwoCol, parsedDoc.hasTitlePage, previewMode]);
+
+    // Reset DOM pages when content changes (show heuristic pages immediately)
+    setDomPages(null);
+
+    // Debounce to avoid thrashing while user types
+    if (domPaginationTimerRef.current) {
+      clearTimeout(domPaginationTimerRef.current);
+    }
+
+    domPaginationTimerRef.current = setTimeout(() => {
+      try {
+        const headerHeight = estimateAcademicHeaderHeight(parsedDoc);
+        // A4 at 96dpi = 1122px. Subtract padding (18mm*2 = ~136px) and header+footer (~72px)
+        const paddingPx = 136; // 18mm top + 18mm bottom ≈ 136px
+        const headerFooterPx = 32 + (parsedDoc.hasTitlePage ? 0 : headerHeight);
+        const contentHeight = 1122 - paddingPx - headerFooterPx - 32; // extra safety margin
+
+        const result = paginateByDom({
+          html: renderedHtml,
+          pageContentHeight: contentHeight,
+          isTwoCol,
+          hasAcademicHeader: !parsedDoc.hasTitlePage,
+          academicHeaderHeight: headerHeight,
+          padding: currentFormatConfig.padding,
+          fontFamily: currentFormatConfig.fontFamily,
+          fontSize: currentFormatConfig.fontSize,
+          lineHeight: currentFormatConfig.lineHeight,
+          columnGap: currentFormatConfig.columnGap,
+        });
+        setDomPages(result);
+      } catch (e) {
+        console.warn('[Teeex] DOM pagination failed, using heuristic fallback:', e);
+        setDomPages(null);
+      }
+    }, 300); // 300ms debounce
+
+    return () => {
+      if (domPaginationTimerRef.current) clearTimeout(domPaginationTimerRef.current);
+    };
+  }, [renderedHtml, isTwoCol, parsedDoc, previewMode, currentFormatConfig]);
+
+  // Use DOM pages when available, otherwise heuristic
+  const pages = domPages || heuristicPages;
 
   const handleTogglePreviewMode = (mode: 'sheet' | 'flow') => {
     setPreviewMode(mode);
     localStorage.setItem('teeex_preview_mode', mode);
+    setDomPages(null);
   };
 
   useEffect(() => {
@@ -854,6 +815,33 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
               <Maximize2 size={10} />
             </button>
           </div>
+
+          {/* Export PDF Button */}
+          {onExportPdf && (
+            <button
+              type="button"
+              onClick={onExportPdf}
+              style={{
+                padding: '2px 8px',
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: '#38bdf8',
+                backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
+                borderRadius: 5,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                cursor: 'pointer',
+                height: 24,
+                transition: 'all 0.15s ease',
+              }}
+              title="Export publication-quality A4 PDF"
+            >
+              <Printer size={11} color="#38bdf8" />
+              <span>PDF</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -993,7 +981,8 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
                   className="latex-paper-page"
                   style={{
                     width: '210mm',
-                    minHeight: '297mm',
+                    height: '297mm',
+                    maxHeight: '297mm',
                     boxSizing: 'border-box',
                     backgroundColor: 'var(--paper-bg)',
                     color: 'var(--paper-text)',
@@ -1004,6 +993,7 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
                     position: 'relative',
                     display: 'flex',
                     flexDirection: 'column',
+                    overflow: 'hidden',
                   }}
                 >
                   {/* Printable 1-Inch Margin Boundaries */}
@@ -1105,6 +1095,8 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
                   <div
                     style={{
                       ...paperBodyStyle,
+                      flex: 1,
+                      minHeight: 0,
                       columnCount: (isTwoCol && !isTitlePage) ? 2 : 1,
                       columnGap: isTwoCol ? currentFormatConfig.columnGap : 'normal',
                       columnRule: isTwoCol && activeFormat === 'ieee' ? '1px solid #cbd5e1' : 'none',

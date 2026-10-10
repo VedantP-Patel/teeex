@@ -91,6 +91,7 @@ export interface ParsedDocument {
   documentClass: string;
   hasTitlePage?: boolean;
   titlePageContent?: string;
+  hasParskip?: boolean;
 }
 
 export interface Template {

@@ -1412,6 +1412,7 @@ export function App() {
               onFormatChange={setPaperFormat}
               isTwoColumn={isTwoColumn}
               onToggleTwoColumn={handleToggleTwoColumn}
+              onExportPdf={handleExportPdf}
             />
           </div>
         </div>

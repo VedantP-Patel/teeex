@@ -27,20 +27,21 @@ export function renderKatexCached(latex: string, displayMode: boolean): string {
 
 /**
  * Converts standard LaTeX dimension strings into browser-compatible CSS dimensions.
- * Handles: 0.48\textwidth, 0.5\columnwidth, \linewidth, 5cm, 40mm, 2in, 120pt, 100px.
+ * Handles: 0.48\textwidth, 0.5\columnwidth, \linewidth, 5cm, 40mm, 2in, 120pt, 100px,
+ * \baselineskip multipliers, \bigskipamount, \medskipamount, \smallskipamount, \fill.
  */
-export function parseLatexDimensionToCss(dim: string): string {
-  if (!dim) return '100%';
+export function parseLatexDimensionToCss(dim: string, fallback: string = '100%'): string {
+  if (!dim) return fallback;
   const clean = dim.trim().replace(/[{}]/g, '');
-  if (!clean) return '100%';
+  if (!clean) return fallback;
 
   const isNeg = clean.startsWith('-');
   const unsigned = isNeg ? clean.slice(1).trim() : clean;
 
-  // Match relative widths: e.g. 0.48\textwidth, 0.5\columnwidth, \linewidth, \textwidth
-  const relMatch = unsigned.match(/^([0-9.]*)\s*\\(textwidth|columnwidth|linewidth|paperwidth|pagewidth)$/i);
-  if (relMatch) {
-    const factor = relMatch[1] ? parseFloat(relMatch[1]) : 1.0;
+  // Relative width commands: \textwidth, \linewidth, \columnwidth, etc.
+  const relWidthMatch = unsigned.match(/^([0-9.]*)\s*\\(textwidth|columnwidth|linewidth|paperwidth|pagewidth)$/i);
+  if (relWidthMatch) {
+    const factor = relWidthMatch[1] ? parseFloat(relWidthMatch[1]) : 1.0;
     if (!isNaN(factor)) {
       const val = Math.round(factor * 1000) / 10;
       return isNeg ? `-${val}%` : `${val}%`;
@@ -48,17 +49,49 @@ export function parseLatexDimensionToCss(dim: string): string {
     return isNeg ? '-100%' : '100%';
   }
 
-  // Explicit units: cm, mm, in, pt, em, ex, px
-  const unitMatch = unsigned.match(/^([0-9.]+)\s*(cm|mm|in|pt|em|ex|px)$/i);
+  // Relative height commands: \textheight, \paperheight
+  const relHeightMatch = unsigned.match(/^([0-9.]*)\s*\\(textheight|paperheight)$/i);
+  if (relHeightMatch) {
+    const factor = relHeightMatch[1] ? parseFloat(relHeightMatch[1]) : 1.0;
+    if (!isNaN(factor)) {
+      const val = Math.round(factor * 1000) / 10;
+      return isNeg ? `-${val}vh` : `${val}vh`;
+    }
+    return isNeg ? '-100vh' : '100vh';
+  }
+
+  // Baselineskip multiplier: e.g. \baselineskip, 1.5\baselineskip, 2\baselineskip, 0.5\baselineskip
+  const baseLineMatch = unsigned.match(/^([0-9.]*)\s*\\baselineskip$/i);
+  if (baseLineMatch) {
+    const factor = baseLineMatch[1] ? parseFloat(baseLineMatch[1]) : 1.0;
+    const emVal = Math.round(factor * 1.25 * 100) / 100;
+    return isNeg ? `-${emVal}em` : `${emVal}em`;
+  }
+
+  // Common LaTeX vertical glue/skips
+  if (unsigned === '\\fill' || unsigned.startsWith('\\stretch')) {
+    return '100%';
+  }
+  if (unsigned.includes('\\bigskipamount')) return isNeg ? '-18px' : '18px';
+  if (unsigned.includes('\\medskipamount')) return isNeg ? '-10px' : '10px';
+  if (unsigned.includes('\\smallskipamount')) return isNeg ? '-5px' : '5px';
+  if (unsigned.includes('\\parskip')) return isNeg ? '-6px' : '6px';
+
+  // Explicit units: cm, mm, in, pt, em, ex, px, pc
+  const unitMatch = unsigned.match(/^([0-9.]+)\s*(cm|mm|in|pt|em|ex|px|pc)$/i);
   if (unitMatch) {
     const val = parseFloat(unitMatch[1]);
     const unit = unitMatch[2].toLowerCase();
     if (!isNaN(val)) {
+      if (unit === 'pc') {
+        const pxVal = Math.round(val * 16);
+        return isNeg ? `-${pxVal}px` : `${pxVal}px`;
+      }
       return isNeg ? `-${val}${unit}` : `${val}${unit}`;
     }
   }
 
-  // Pure number fallback
+  // Pure number fallback (treated as px)
   const numMatch = unsigned.match(/^([0-9.]+)$/);
   if (numMatch) {
     return isNeg ? `-${numMatch[1]}px` : `${numMatch[1]}px`;
@@ -68,7 +101,74 @@ export function parseLatexDimensionToCss(dim: string): string {
     return isNeg ? '-100%' : '100%';
   }
 
-  return '100%';
+  return fallback;
+}
+
+/**
+ * Scans ahead in `str` from `startIndex` skipping whitespace and comments,
+ * and extracts a balanced braced group `{...}`.
+ * Returns the content inside the braces and the index immediately after the closing `}`.
+ */
+export function extractBalancedBracedGroup(str: string, startIndex: number = 0): { content: string; endIndex: number } | null {
+  let i = startIndex;
+  while (i < str.length && /\s/.test(str[i])) i++;
+  if (i >= str.length || str[i] !== '{') return null;
+
+  i++; // skip opening '{'
+  let depth = 1;
+  const startContent = i;
+
+  while (i < str.length && depth > 0) {
+    const ch = str[i];
+    if (ch === '\\') {
+      i += 2;
+      continue;
+    }
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+    i++;
+  }
+
+  if (depth === 0) {
+    return {
+      content: str.substring(startContent, i - 1),
+      endIndex: i,
+    };
+  }
+  return null;
+}
+
+/**
+ * Scans ahead in `str` from `startIndex` skipping whitespace,
+ * and extracts an optional bracketed group `[...]`.
+ */
+export function extractOptionalBracket(str: string, startIndex: number = 0): { content: string; endIndex: number } | null {
+  let i = startIndex;
+  while (i < str.length && /\s/.test(str[i])) i++;
+  if (i >= str.length || str[i] !== '[') return null;
+
+  i++; // skip '['
+  let depth = 1;
+  const startContent = i;
+
+  while (i < str.length && depth > 0) {
+    const ch = str[i];
+    if (ch === '\\') {
+      i += 2;
+      continue;
+    }
+    if (ch === '[') depth++;
+    else if (ch === ']') depth--;
+    i++;
+  }
+
+  if (depth === 0) {
+    return {
+      content: str.substring(startContent, i - 1),
+      endIndex: i,
+    };
+  }
+  return null;
 }
 
 /**
@@ -100,7 +200,10 @@ export interface ColSpecItem {
 }
 
 export function parseColSpec(rawSpec: string): ColSpecItem[] {
-  const spec = expandColSpec(rawSpec.replace(/^\{|\}$/g, '').trim());
+  let spec = expandColSpec(rawSpec.replace(/^\{|\}$/g, '').trim());
+  // Expand common alias columntypes e.g. Y -> >{\centering}X, Z -> >{\raggedleft}X
+  spec = spec.replace(/Y/g, '>{\\centering}X').replace(/Z/g, '>{\\raggedleft}X');
+
   const cols: ColSpecItem[] = [];
   let pendingBorderLeft = false;
 
@@ -127,15 +230,15 @@ export function parseColSpec(rawSpec: string): ColSpecItem[] {
       i++;
     } else if (ch === 'p' || ch === 'm' || ch === 'b') {
       i++;
+      while (i < spec.length && /\s/.test(spec[i])) i++;
       let widthStr = '';
       if (spec[i] === '{') {
-        const closeIdx = spec.indexOf('}', i);
-        if (closeIdx !== -1) {
-          widthStr = spec.substring(i + 1, closeIdx);
-          i = closeIdx + 1;
+        const braced = extractBalancedBracedGroup(spec, i);
+        if (braced) {
+          widthStr = braced.content;
+          i = braced.endIndex;
         } else {
-          widthStr = spec.substring(i + 1);
-          i = spec.length;
+          i++;
         }
       }
       const cssWidth = widthStr ? parseLatexDimensionToCss(widthStr) : undefined;
@@ -145,25 +248,29 @@ export function parseColSpec(rawSpec: string): ColSpecItem[] {
         borderLeft: pendingBorderLeft,
       });
       pendingBorderLeft = false;
-    } else if (ch === '>') {
-      // Lookahead for formatting commands inside >{...} e.g. >{\centering\arraybackslash}X
+    } else if (ch === 'X') {
+      cols.push({ align: 'left', isX: true, borderLeft: pendingBorderLeft });
+      pendingBorderLeft = false;
       i++;
+    } else if (ch === '>') {
+      i++;
+      while (i < spec.length && /\s/.test(spec[i])) i++;
       let formatCmd = '';
       if (spec[i] === '{') {
-        let depth = 1;
-        const startIdx = i + 1;
-        i++;
-        while (i < spec.length && depth > 0) {
-          if (spec[i] === '{') depth++;
-          else if (spec[i] === '}') depth--;
+        const braced = extractBalancedBracedGroup(spec, i);
+        if (braced) {
+          formatCmd = braced.content;
+          i = braced.endIndex;
+        } else {
           i++;
         }
-        formatCmd = spec.substring(startIdx, i - 1);
       }
+      while (i < spec.length && /\s/.test(spec[i])) i++;
+
       let alignOverride: 'left' | 'center' | 'right' | undefined;
-      if (formatCmd.includes('centering')) alignOverride = 'center';
-      else if (formatCmd.includes('raggedleft')) alignOverride = 'right';
-      else if (formatCmd.includes('raggedright')) alignOverride = 'left';
+      if (/centering|Centering/i.test(formatCmd)) alignOverride = 'center';
+      else if (/raggedleft/i.test(formatCmd)) alignOverride = 'right';
+      else if (/raggedright/i.test(formatCmd)) alignOverride = 'left';
 
       if (i < spec.length) {
         const nextCol = spec[i];
@@ -182,28 +289,41 @@ export function parseColSpec(rawSpec: string): ColSpecItem[] {
           });
           pendingBorderLeft = false;
           i++;
+        } else if (nextCol === 'p' || nextCol === 'm' || nextCol === 'b') {
+          i++;
+          while (i < spec.length && /\s/.test(spec[i])) i++;
+          let widthStr = '';
+          if (spec[i] === '{') {
+            const braced = extractBalancedBracedGroup(spec, i);
+            if (braced) {
+              widthStr = braced.content;
+              i = braced.endIndex;
+            } else {
+              i++;
+            }
+          }
+          const cssWidth = widthStr ? parseLatexDimensionToCss(widthStr) : undefined;
+          cols.push({
+            align: alignOverride || (nextCol === 'p' ? 'left' : 'center'),
+            width: cssWidth,
+            borderLeft: pendingBorderLeft,
+          });
+          pendingBorderLeft = false;
         }
       }
-    } else if (ch === 'X') {
-      cols.push({ align: 'left', isX: true, borderLeft: pendingBorderLeft });
-      pendingBorderLeft = false;
-      i++;
     } else if (ch === '@' || ch === '!') {
       i++;
+      while (i < spec.length && /\s/.test(spec[i])) i++;
       if (spec[i] === '{') {
-        let depth = 1;
-        i++;
-        while (i < spec.length && depth > 0) {
-          if (spec[i] === '{') depth++;
-          else if (spec[i] === '}') depth--;
-          i++;
-        }
+        const braced = extractBalancedBracedGroup(spec, i);
+        if (braced) i = braced.endIndex;
+        else i++;
       }
+    } else if (ch === 'S') {
+      cols.push({ align: 'right', borderLeft: pendingBorderLeft });
+      pendingBorderLeft = false;
+      i++;
     } else {
-      if (ch === 'S') {
-        cols.push({ align: 'right', borderLeft: pendingBorderLeft });
-        pendingBorderLeft = false;
-      }
       i++;
     }
   }
@@ -251,12 +371,12 @@ export function splitLatexRowCells(rowText: string): string[] {
 /**
  * Robust LaTeX Tabular environment parser.
  * Supports:
- * - Alignment specs: l, c, r, p{width}, | borders, *{n}{spec}
+ * - Alignment specs: l, c, r, p{width}, | borders, *{n}{spec}, X (tabularx)
  * - Booktabs: \toprule, \midrule, \bottomrule
  * - Standard rules: \hline, \hline\hline, \cline{i-j}
  * - Multi-column: \multicolumn{num}{spec}{content}
  * - Multi-row: \multirow{num}{width}{content}
- * - Automatic <thead> and <tbody> generation
+ * - Auto-expanding X columns with proportional widths
  */
 export function parseTabularEnvironment(
   tableContent: string,
@@ -267,9 +387,12 @@ export function parseTabularEnvironment(
 ): string {
   const cols = parseColSpec(colSpecRaw);
   const isBooktabs = /\\(?:toprule|midrule|bottomrule)/.test(tableContent);
-  const hasXColumns = cols.some(c => c.isX);
+  const numX = cols.filter(c => c.isX).length;
+  const hasXColumns = numX > 0;
   const isTabularx = !!tableWidthRaw || hasXColumns;
-  const tableWidthCss = tableWidthRaw ? parseLatexDimensionToCss(tableWidthRaw) : (hasXColumns ? '100%' : '');
+  const tableWidthCss = tableWidthRaw
+    ? parseLatexDimensionToCss(tableWidthRaw, '100%')
+    : (hasXColumns ? '100%' : '');
 
   const rawRows = tableContent
     .split(/\\\\(?:\s*\[[^\]]*\])?/)
@@ -288,6 +411,13 @@ export function parseTabularEnvironment(
     const hasMidRule = rowRaw.includes('\\midrule');
     const hasBottomRule = rowRaw.includes('\\bottomrule');
     const hasHline = rowRaw.includes('\\hline');
+
+    // Detect \cline{i-j} on this row
+    const clineMatches = Array.from(rowRaw.matchAll(/\\cline\{(\d+)\s*-\s*(\d+)\}/g));
+    const activeClines = clineMatches.map(m => ({
+      from: parseInt(m[1], 10),
+      to: parseInt(m[2], 10),
+    }));
 
     const cleanRow = rowRaw
       .replace(/\\(?:toprule|midrule|bottomrule|hline)/g, '')
@@ -314,33 +444,60 @@ export function parseTabularEnvironment(
       const isXCol = cols[cIdx]?.isX || false;
 
       // Detect \multicolumn{num}{spec}{content}
-      const mcMatch = cellText.match(/\\multicolumn\{(\d+)\}\{([^}]+)\}\{([\s\S]*)\}/);
-      if (mcMatch) {
-        colspan = parseInt(mcMatch[1], 10) || 1;
-        const mcSpec = mcMatch[2];
-        if (mcSpec.includes('c')) align = 'center';
-        else if (mcSpec.includes('r')) align = 'right';
-        else if (mcSpec.includes('l')) align = 'left';
-        borderLeft = mcSpec.startsWith('|');
-        borderRight = mcSpec.endsWith('|');
-        cellText = mcMatch[3];
+      if (cellText.includes('\\multicolumn')) {
+        const mcMatch = cellText.match(/\\multicolumn\{(\d+)\}\{([^}]+)\}\{([\s\S]*)\}/);
+        if (mcMatch) {
+          colspan = parseInt(mcMatch[1], 10) || 1;
+          const mcSpec = mcMatch[2];
+          if (mcSpec.includes('c')) align = 'center';
+          else if (mcSpec.includes('r')) align = 'right';
+          else if (mcSpec.includes('l')) align = 'left';
+          borderLeft = mcSpec.startsWith('|');
+          borderRight = mcSpec.endsWith('|');
+          cellText = mcMatch[3];
+        }
       }
 
       // Detect \multirow{num}{width}{content}
       let rowspanAttr = '';
-      const mrMatch = cellText.match(/\\multirow\{(\d+)\}(?:\{[^}]*\})?\{([\s\S]*)\}/);
-      if (mrMatch) {
-        const rspan = parseInt(mrMatch[1], 10) || 1;
-        rowspanAttr = ` rowspan="${rspan}"`;
-        cellText = mrMatch[2];
+      if (cellText.includes('\\multirow')) {
+        const mrMatch = cellText.match(/\\multirow\{(\d+)\}(?:\{[^}]*\})?\{([\s\S]*)\}/);
+        if (mrMatch) {
+          const rspan = parseInt(mrMatch[1], 10) || 1;
+          rowspanAttr = ` rowspan="${rspan}"`;
+          cellText = mrMatch[2];
+        }
       }
 
       const styleParts: string[] = [];
       styleParts.push(`text-align: ${align};`);
+
+      // Borders
       if (borderLeft) styleParts.push('border-left: 1px solid #cbd5e1;');
       if (borderRight) styleParts.push('border-right: 1px solid #cbd5e1;');
-      if (colWidth) styleParts.push(`width: ${colWidth}; min-width: ${colWidth};`);
-      if (isXCol) styleParts.push('word-wrap: break-word; overflow-wrap: break-word; white-space: normal;');
+
+      // Check if this column falls under a \cline
+      const colNum = cIdx + 1;
+      const hasCline = activeClines.some(cl => colNum >= cl.from && colNum <= cl.to);
+      if (hasCline) {
+        styleParts.push('border-bottom: 1px solid #0f172a;');
+      }
+
+      // Column widths & Tabularx auto-expansion
+      if (isXCol) {
+        if (numX > 0 && cols.length === numX) {
+          const pct = (100 / numX).toFixed(2);
+          styleParts.push(`width: ${pct}%;`);
+        } else if (numX > 0) {
+          const pct = (100 / numX).toFixed(2);
+          styleParts.push(`width: ${pct}%; min-width: 60px;`);
+        }
+        styleParts.push('word-break: break-word; overflow-wrap: break-word; white-space: normal;');
+      } else if (colWidth) {
+        styleParts.push(`width: ${colWidth}; min-width: ${colWidth};`);
+      } else if (hasXColumns && !colWidth) {
+        styleParts.push('white-space: nowrap; width: 1%;');
+      }
 
       const classParts: string[] = [];
       if (isXCol) classParts.push('col-is-x');
@@ -369,7 +526,9 @@ export function parseTabularEnvironment(
   if (isBooktabs) tableClasses.push('table-booktabs');
   if (isTabularx) tableClasses.push('table-tabularx');
 
-  const containerStyle = tableWidthCss ? ` style="width: 100%; max-width: 100%;"` : '';
+  const containerStyle = tableWidthCss
+    ? ` style="width: 100%; max-width: 100%; display: flex; justify-content: center;"`
+    : ' style="display: flex; justify-content: center;"';
   const tableStyle = tableWidthCss ? ` style="width: ${tableWidthCss}; max-width: 100%;"` : '';
 
   return `
@@ -380,6 +539,114 @@ export function parseTabularEnvironment(
       </table>
     </div>
   `;
+}
+
+/**
+ * Accurately parses a \begin{tabularx} / \begin{tabulary} / \begin{tabular*} block from string,
+ * correctly handling balanced braces for {width} and {colspec}, plus optional [pos] arguments.
+ */
+export function parseTabularxBlock(
+  fullStr: string,
+  matchIndex: number,
+  envName: string
+): { width: string; colSpec: string; content: string; fullMatchLength: number } | null {
+  const beginToken = `\\begin{${envName}}`;
+  const beginStarToken = `\\begin{${envName}*}`;
+  let tokenLen = beginToken.length;
+  if (fullStr.substring(matchIndex).startsWith(beginStarToken)) {
+    tokenLen = beginStarToken.length;
+  } else if (!fullStr.substring(matchIndex).startsWith(beginToken)) {
+    return null;
+  }
+
+  let pos = matchIndex + tokenLen;
+
+  // Optional pos e.g. [t]
+  const optPos1 = extractOptionalBracket(fullStr, pos);
+  if (optPos1) pos = optPos1.endIndex;
+
+  // Mandatory width {width}
+  const widthGroup = extractBalancedBracedGroup(fullStr, pos);
+  if (!widthGroup) return null;
+  const width = widthGroup.content;
+  pos = widthGroup.endIndex;
+
+  // Optional pos e.g. [c]
+  const optPos2 = extractOptionalBracket(fullStr, pos);
+  if (optPos2) pos = optPos2.endIndex;
+
+  // Mandatory colSpec {colspec}
+  const colSpecGroup = extractBalancedBracedGroup(fullStr, pos);
+  if (!colSpecGroup) return null;
+  const colSpec = colSpecGroup.content;
+  pos = colSpecGroup.endIndex;
+
+  // Find matching \end{envName} or \end{envName*}
+  const endToken = `\\end{${envName}}`;
+  const endStarToken = `\\end{${envName}*}`;
+  let endIdx = fullStr.indexOf(endToken, pos);
+  let endLen = endToken.length;
+  const starIdx = fullStr.indexOf(endStarToken, pos);
+  if (starIdx !== -1 && (endIdx === -1 || starIdx < endIdx)) {
+    endIdx = starIdx;
+    endLen = endStarToken.length;
+  }
+
+  if (endIdx === -1) return null;
+
+  const content = fullStr.substring(pos, endIdx);
+  const fullMatchLength = (endIdx + endLen) - matchIndex;
+
+  return { width, colSpec, content, fullMatchLength };
+}
+
+/**
+ * Accurately parses a standard \begin{tabular} / \begin{tablular} block from string,
+ * correctly handling balanced braces for {colspec} and optional [pos].
+ */
+export function parseStandardTabularBlock(
+  fullStr: string,
+  matchIndex: number,
+  envName: string
+): { colSpec: string; content: string; fullMatchLength: number } | null {
+  const beginToken = `\\begin{${envName}}`;
+  const beginStarToken = `\\begin{${envName}*}`;
+  let tokenLen = beginToken.length;
+  if (fullStr.substring(matchIndex).startsWith(beginStarToken)) {
+    tokenLen = beginStarToken.length;
+  } else if (!fullStr.substring(matchIndex).startsWith(beginToken)) {
+    return null;
+  }
+
+  let pos = matchIndex + tokenLen;
+
+  // Optional pos e.g. [t]
+  const optPos = extractOptionalBracket(fullStr, pos);
+  if (optPos) pos = optPos.endIndex;
+
+  // Mandatory colSpec {colspec}
+  const colSpecGroup = extractBalancedBracedGroup(fullStr, pos);
+  if (!colSpecGroup) return null;
+  const colSpec = colSpecGroup.content;
+  pos = colSpecGroup.endIndex;
+
+  // Find matching \end{envName}
+  const endToken = `\\end{${envName}}`;
+  const endStarToken = `\\end{${envName}*}`;
+  let endIdx = fullStr.indexOf(endToken, pos);
+  let endLen = endToken.length;
+  const starIdx = fullStr.indexOf(endStarToken, pos);
+  if (starIdx !== -1 && (endIdx === -1 || starIdx < endIdx)) {
+    endIdx = starIdx;
+    endLen = endStarToken.length;
+  }
+
+  if (endIdx === -1) return null;
+
+  const content = fullStr.substring(pos, endIdx);
+  const fullMatchLength = (endIdx + endLen) - matchIndex;
+
+  return { colSpec, content, fullMatchLength };
 }
 
 /**
@@ -952,6 +1219,7 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
     documentClass,
     hasTitlePage,
     titlePageContent,
+    hasParskip: /\\usepackage(?:\s*\[[^\]]*\])?\s*\{parskip\}/i.test(code) || /\\setlength\s*\{\s*\\parindent\s*\}\s*\{\s*0(?:pt|mm|cm|in|px)?\s*\}/i.test(code),
   };
 }
 
@@ -1023,6 +1291,11 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
       return target ? target.content : orig;
     });
   }
+
+  // Detect parskip and parindent in preamble
+  const hasParskipPackage = /\\usepackage(?:\s*\[[^\]]*\])?\s*\{parskip\}/i.test(cleanCode);
+  const hasParindentZero = /\\setlength\s*\{\s*\\parindent\s*\}\s*\{\s*0(?:pt|mm|cm|in|px)?\s*\}/i.test(cleanCode);
+  const isDocumentUnindented = hasParskipPackage || hasParindentZero;
 
   // Extract Document Body
   const bodyMatch = cleanCode.match(/\\begin\{document\}([\s\S]*?)\\end\{document\}/);
@@ -1110,8 +1383,13 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     return stashToken(html);
   });
 
-  // 1C. Inline Math ($ ... $) - Stashed to protect '&' and '_' from table/tag processors
-  bodyText = bodyText.replace(/(?<!\\)\$([^\$\n]+?)(?<!\\)\$/g, (_, math) => {
+  // 1C. Inline Math ($ ... $) and \( ... \) — Stashed to protect '&' and '_' from table/tag processors
+  bodyText = bodyText.replace(/((?<!\\))\$([^$\n]+?)((?<!\\))\$/g, (_, _pre, math) => {
+    const rendered = renderKatexCached(math.trim(), false);
+    return stashToken(`<span class="latex-math-inline">${rendered}</span>`);
+  });
+
+  bodyText = bodyText.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => {
     const rendered = renderKatexCached(math.trim(), false);
     return stashToken(`<span class="latex-math-inline">${rendered}</span>`);
   });
@@ -1120,20 +1398,63 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   // STAGE 2: DOCUMENT STRUCTURE & TITLEPAGE
   // --------------------------------------------------------------------------
 
+  // \maketitle: Renders the document title/author/date from parsed preamble data
+  const titleMatch2 = cleanCode.match(/\\title\{([\s\S]*?)\}/);
+  const authorMatch2 = cleanCode.match(/\\author\{([\s\S]*?)\}/);
+  const dateMatch2 = cleanCode.match(/\\date\{([\s\S]*?)\}/);
+
+  if (titleMatch2 || authorMatch2) {
+    bodyText = bodyText.replace(/\\maketitle\b/g, () => {
+      const docTitle = titleMatch2 ? cleanLatexInline(titleMatch2[1]).trim() : '';
+      const docAuthors = authorMatch2
+        ? authorMatch2[1]
+            .split(/\\and|\\\\|\s*,\s*/)
+            .map(a => cleanLatexInline(a).trim())
+            .filter(a => a.length > 0)
+        : [];
+      const docDate = dateMatch2
+        ? cleanLatexInline(dateMatch2[1]).trim().replace(/\\today/g, new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }))
+        : '';
+      const titleLine = rawLines.findIndex(l => l.includes('\\title{'));
+      return `
+        <div class="latex-maketitle synctex-target" data-line="${titleLine + 1}" title="Click to jump to title">
+          ${docTitle ? `<h1 class="latex-maketitle-title">${escapeHtml(docTitle)}</h1>` : ''}
+          ${docAuthors.length > 0 ? `<div class="latex-maketitle-authors">${docAuthors.map(a => `<span class="latex-maketitle-author">${escapeHtml(a)}</span>`).join('')}</div>` : ''}
+          ${docDate ? `<div class="latex-maketitle-date">${escapeHtml(docDate)}</div>` : ''}
+        </div>
+      `;
+    });
+  } else {
+    bodyText = bodyText.replace(/\\maketitle\b/g, '');
+  }
+
   // Titlepage
-  bodyText = bodyText.replace(/\\begin\{(?:titlepage|title)\}([\s\S]*?)\\end\{(?:titlepage|title)\}/g, (_, content) => {
+  bodyText = bodyText.replace(/\\begin\{(?:titlepage|title)\}([\s\S]*?)\\end\{(?:titlepage|title)\}/g, (_: string, content: string) => {
     const tpLine = findSourceLine('titlepage', rawLines, '\\begin{titlepage');
     let parsedTp = content
-      .replace(/\\centering/g, '')
-      .replace(/\\vspace\*?\{[^}]+\}/g, '<div style="height: 18px;"></div>')
-      .replace(/\\vfill/g, '<div style="flex: 1; min-height: 24px;"></div>')
-      .replace(/\\today/g, new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }))
-      .replace(/\\Huge\{?([^}\\]+)\}?/g, '<div style="font-size: 24px; font-weight: 800; line-height: 1.3; margin-bottom: 12px; color: var(--paper-text);">$1</div>')
-      .replace(/\\huge\{?([^}\\]+)\}?/g, '<div style="font-size: 20px; font-weight: 700; line-height: 1.3; margin-bottom: 10px; color: var(--paper-text);">$1</div>')
-      .replace(/\\LARGE\{?([^}\\]+)\}?/g, '<div style="font-size: 18px; font-weight: 700; line-height: 1.3; margin-bottom: 8px; color: var(--paper-text);">$1</div>')
-      .replace(/\\Large\{?([^}\\]+)\}?/g, '<div style="font-size: 16px; font-weight: 600; line-height: 1.35; margin-bottom: 8px; color: var(--paper-text);">$1</div>')
-      .replace(/\\large\{?([^}\\]+)\}?/g, '<div style="font-size: 14px; font-weight: 500; line-height: 1.4; margin-bottom: 6px; color: var(--paper-text);">$1</div>')
-      .replace(/\\par/g, '<div style="height: 6px;"></div>')
+      .replace(/\\centering\b/g, '')
+      .replace(/\\raggedright\b/g, '')
+      .replace(/\\raggedleft\b/g, '')
+      .replace(/\\vspace\*?\{([^}]+)\}/g, (_: string, dim: string) => {
+        const isNeg = dim.trim().startsWith('-');
+        const cssDim = parseLatexDimensionToCss(dim.trim().replace(/^-/, ''), '18px');
+        if (isNeg) {
+          return `<div class="latex-vspace latex-vspace-neg" style="margin-top: -${cssDim}; height: 0; display: block;"></div>`;
+        }
+        return `<div class="latex-vspace" style="height: ${cssDim}; min-height: ${cssDim}; display: block;"></div>`;
+      })
+      .replace(/\\vspace\*?\b/g, '')
+      .replace(/\\vfill\b/g, '<div class="latex-vfill" style="flex: 1; min-height: 24px; display: block;"></div>')
+      .replace(/\\today\b/g, new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }))
+      .replace(/\\Huge\{?([^}\\\n]+)\}?/g, '<div style="font-size: 24px; font-weight: 800; line-height: 1.3; margin-bottom: 12px; color: var(--paper-text);">$1</div>')
+      .replace(/\\huge\{?([^}\\\n]+)\}?/g, '<div style="font-size: 20px; font-weight: 700; line-height: 1.3; margin-bottom: 10px; color: var(--paper-text);">$1</div>')
+      .replace(/\\LARGE\{?([^}\\\n]+)\}?/g, '<div style="font-size: 18px; font-weight: 700; line-height: 1.3; margin-bottom: 8px; color: var(--paper-text);">$1</div>')
+      .replace(/\\Large\{?([^}\\\n]+)\}?/g, '<div style="font-size: 16px; font-weight: 600; line-height: 1.35; margin-bottom: 8px; color: var(--paper-text);">$1</div>')
+      .replace(/\\large\{?([^}\\\n]+)\}?/g, '<div style="font-size: 14px; font-weight: 500; line-height: 1.4; margin-bottom: 6px; color: var(--paper-text);">$1</div>')
+      .replace(/\\normalsize\b/g, '')
+      .replace(/\\small\b/g, '')
+      .replace(/\\footnotesize\b/g, '')
+      .replace(/\\par\b/g, '<div style="height: 6px;"></div>')
       .replace(/\\\\/g, '<br/>');
 
     parsedTp = parseInlineFormatting(parsedTp);
@@ -1226,23 +1547,30 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
 
     let tabularHtml = '';
 
-    // 1. Check for tabularx, tabulary, tabular*
-    const tabularxMatch = tableBody.match(/\\begin\{(tabularx|tabulary|tabular\*)\*?\}(?:\[[^\]]*\])?\{([^}]+)\}(?:(?:\[[^\]]*\])?\{([^}]+)\})?([\s\S]*?)\\end\{\1\*?\}/);
-    if (tabularxMatch) {
-      const width = tabularxMatch[3] ? tabularxMatch[2] : '100%';
-      const colSpec = tabularxMatch[3] ? tabularxMatch[3] : tabularxMatch[2];
-      const tabContent = tabularxMatch[4];
-      tabularHtml = parseTabularEnvironment(tabContent, colSpec, rawLines, tabLine, width);
-    } else {
-      // 2. Check for standard tabular, tablular
-      const tabularMatch = tableBody.match(/\\begin\{(tabular|tablular)\*?\}(?:\[[^\]]*\])?\{([^}]+)\}([\s\S]*?)\\end\{(?:tabular|tablular)\*?\}/);
-      if (tabularMatch) {
-        const colSpec = tabularMatch[2];
-        const tabContent = tabularMatch[3];
-        tabularHtml = parseTabularEnvironment(tabContent, colSpec, rawLines, tabLine);
-      } else {
-        tabularHtml = parseInlineFormatting(tableBody.replace(/\\caption(?:\[.*?\])?\{[^}]+\}/g, '').replace(/\\label\{[^}]+\}/g, '').replace(/\\centering/g, ''));
+    // Check for tabularx, tabulary, tabular* inside tableBody
+    const txMatch = tableBody.match(/\\begin\{(tabularx|tabulary|tabular\*)\*?\}/);
+    if (txMatch) {
+      const envName = txMatch[1];
+      const parsedTx = parseTabularxBlock(tableBody, txMatch.index!, envName);
+      if (parsedTx) {
+        tabularHtml = parseTabularEnvironment(parsedTx.content, parsedTx.colSpec, rawLines, tabLine, parsedTx.width);
       }
+    }
+
+    if (!tabularHtml) {
+      // Check for standard tabular or tablular inside tableBody
+      const stdMatch = tableBody.match(/\\begin\{(tabular|tablular)\*?\}/);
+      if (stdMatch) {
+        const envName = stdMatch[1];
+        const parsedStd = parseStandardTabularBlock(tableBody, stdMatch.index!, envName);
+        if (parsedStd) {
+          tabularHtml = parseTabularEnvironment(parsedStd.content, parsedStd.colSpec, rawLines, tabLine);
+        }
+      }
+    }
+
+    if (!tabularHtml) {
+      tabularHtml = parseInlineFormatting(tableBody.replace(/\\caption(?:\[.*?\])?\{[^}]+\}/g, '').replace(/\\label\{[^}]+\}/g, '').replace(/\\centering/g, ''));
     }
 
     const captionHtml = caption ? `
@@ -1259,19 +1587,45 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     `;
   });
 
-  // Standalone tabularx, tabulary, tabular* outside of \begin{table}
-  bodyText = bodyText.replace(/\\begin\{(tabularx|tabulary|tabular\*)\*?\}(?:\[[^\]]*\])?\{([^}]+)\}(?:(?:\[[^\]]*\])?\{([^}]+)\})?([\s\S]*?)\\end\{\1\*?\}/g, (_, envName, arg1, arg2, content) => {
-    const tabLine = findSourceLine(envName, rawLines, `\\begin{${envName}`);
-    const width = arg2 ? arg1 : '100%';
-    const colSpec = arg2 ? arg2 : arg1;
-    return parseTabularEnvironment(content, colSpec, rawLines, tabLine, width);
-  });
+  // Standalone tabularx, tabulary, tabular* outside \begin{table}
+  let txSearchIdx = 0;
+  while (true) {
+    const txRegex = /\\begin\{(tabularx|tabulary|tabular\*)\*?\}/g;
+    txRegex.lastIndex = txSearchIdx;
+    const match = txRegex.exec(bodyText);
+    if (!match) break;
 
-  // Standalone \begin{tabular} or \begin{tablular} outside of \begin{table}
-  bodyText = bodyText.replace(/\\begin\{(tabular|tablular)\*?\}(?:\[[^\]]*\])?\{([^}]+)\}([\s\S]*?)\\end\{(?:tabular|tablular)\*?\}/g, (_, envName, colSpec, content) => {
-    const tabLine = findSourceLine(envName, rawLines, `\\begin{${envName}`);
-    return parseTabularEnvironment(content, colSpec, rawLines, tabLine);
-  });
+    const envName = match[1];
+    const parsedTx = parseTabularxBlock(bodyText, match.index, envName);
+    if (parsedTx) {
+      const tabLine = findSourceLine(envName, rawLines, `\\begin{${envName}`);
+      const rendered = parseTabularEnvironment(parsedTx.content, parsedTx.colSpec, rawLines, tabLine, parsedTx.width);
+      bodyText = bodyText.substring(0, match.index) + rendered + bodyText.substring(match.index + parsedTx.fullMatchLength);
+      txSearchIdx = match.index + rendered.length;
+    } else {
+      txSearchIdx = match.index + match[0].length;
+    }
+  }
+
+  // Standalone tabular, tablular outside \begin{table}
+  let stdSearchIdx = 0;
+  while (true) {
+    const stdRegex = /\\begin\{(tabular|tablular)\*?\}/g;
+    stdRegex.lastIndex = stdSearchIdx;
+    const match = stdRegex.exec(bodyText);
+    if (!match) break;
+
+    const envName = match[1];
+    const parsedStd = parseStandardTabularBlock(bodyText, match.index, envName);
+    if (parsedStd) {
+      const tabLine = findSourceLine(envName, rawLines, `\\begin{${envName}`);
+      const rendered = parseTabularEnvironment(parsedStd.content, parsedStd.colSpec, rawLines, tabLine);
+      bodyText = bodyText.substring(0, match.index) + rendered + bodyText.substring(match.index + parsedStd.fullMatchLength);
+      stdSearchIdx = match.index + rendered.length;
+    } else {
+      stdSearchIdx = match.index + match[0].length;
+    }
+  }
 
   // --------------------------------------------------------------------------
   // STAGE 3B: VERTICAL SPACING & FILLERS
@@ -1279,7 +1633,7 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   // --------------------------------------------------------------------------
   bodyText = bodyText.replace(/\\vspace\*?\{([^}]+)\}/g, (_, dim) => {
     const isNeg = dim.trim().startsWith('-');
-    const cssDim = parseLatexDimensionToCss(dim.trim().replace(/^-/, ''));
+    const cssDim = parseLatexDimensionToCss(dim.trim().replace(/^-/, ''), '18px');
     if (isNeg) {
       return `\n\n<div class="latex-vspace latex-vspace-neg" style="margin-top: -${cssDim}; height: 0; display: block;"></div>\n\n`;
     }
@@ -1292,7 +1646,7 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   bodyText = bodyText.replace(/\\vfill\b/g, '\n\n<div class="latex-vfill" style="flex: 1; min-height: 20px; display: block;"></div>\n\n');
   bodyText = bodyText.replace(/\\vskip\s*([0-9.-]+(?:cm|mm|in|pt|em|ex|px))\b/g, (_, dim) => {
     const isNeg = dim.trim().startsWith('-');
-    const cssDim = parseLatexDimensionToCss(dim.trim().replace(/^-/, ''));
+    const cssDim = parseLatexDimensionToCss(dim.trim().replace(/^-/, ''), '18px');
     if (isNeg) {
       return `\n\n<div class="latex-vspace latex-vspace-neg" style="margin-top: -${cssDim}; height: 0; display: block;"></div>\n\n`;
     }
@@ -1547,13 +1901,36 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
 
   // --------------------------------------------------------------------------
   // STAGE 9: HEADINGS WITH SYNCTEX JUMP TARGETS
+  // Section numbering counter
   // --------------------------------------------------------------------------
-  bodyText = bodyText.replace(/\\(section|subsection|subsubsection)\*?\{([^}]+)\}/g, (_, level, headingText) => {
+  let sectionNum = 0, subsectionNum = 0, subsubsectionNum = 0;
+
+  bodyText = bodyText.replace(/\\(section|subsection|subsubsection)(\*?)\{([^}]+)\}/g, (_, level, star, headingText) => {
+    const isStarred = star === '*';
+    let numPrefix = '';
+
+    if (!isStarred) {
+      if (level === 'section') {
+        sectionNum++;
+        subsectionNum = 0;
+        subsubsectionNum = 0;
+        numPrefix = `${sectionNum}. `;
+      } else if (level === 'subsection') {
+        subsectionNum++;
+        subsubsectionNum = 0;
+        numPrefix = `${sectionNum}.${subsectionNum} `;
+      } else if (level === 'subsubsection') {
+        subsubsectionNum++;
+        numPrefix = `${sectionNum}.${subsectionNum}.${subsubsectionNum} `;
+      }
+    }
+
     const cleanHeading = cleanLatexInline(headingText).trim();
     const secLine = findSourceLine(cleanHeading, rawLines, `\\${level}`);
     const tag = level === 'section' ? 'h2' : level === 'subsection' ? 'h3' : 'h4';
     const cls = level === 'section' ? 'latex-section' : level === 'subsection' ? 'latex-subsection' : 'latex-subsubsection';
-    return `\n\n<${tag} class="${cls} synctex-target" data-line="${secLine}" title="Click to jump to line ${secLine} in code">${headingText}</${tag}>\n\n`;
+    const renderedHeading = parseInlineFormatting(headingText);
+    return `\n\n<${tag} class="${cls} synctex-target" data-line="${secLine}" title="Click to jump to line ${secLine} in code">${numPrefix}${renderedHeading}</${tag}>\n\n`;
   });
 
   // --------------------------------------------------------------------------
@@ -1591,6 +1968,26 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     .replace(/([^\n>\s])\s*(<(?:h2|h3|h4|div|ul|ol|dl|blockquote|table|pre)[\s>])/g, '$1\n\n$2');
 
   // Paragraph wrapping with accurate data-line anchors and indentation awareness
+  // Also handle \par as paragraph separator, \\newline as <br>
+  bodyText = bodyText.replace(/\\par\b/g, '\n\n');
+  bodyText = bodyText.replace(/\\(?:newline|linebreak)\b/g, '<br/>');
+
+  // Font size commands in running text
+  bodyText = bodyText
+    .replace(/\{?\\Huge\s+([^}\n]+)\}?/g, '<span style="font-size: 2em; font-weight: 800;">$1</span>')
+    .replace(/\{?\\huge\s+([^}\n]+)\}?/g, '<span style="font-size: 1.7em; font-weight: 700;">$1</span>')
+    .replace(/\{?\\LARGE\s+([^}\n]+)\}?/g, '<span style="font-size: 1.5em; font-weight: 700;">$1</span>')
+    .replace(/\{?\\Large\s+([^}\n]+)\}?/g, '<span style="font-size: 1.3em; font-weight: 600;">$1</span>')
+    .replace(/\{?\\large\s+([^}\n]+)\}?/g, '<span style="font-size: 1.1em;">$1</span>')
+    .replace(/\\normalsize\b/g, '')
+    .replace(/\\small\b/g, '')
+    .replace(/\\footnotesize\b/g, '')
+    .replace(/\\scriptsize\b/g, '')
+    .replace(/\\tiny\b/g, '')
+    .replace(/\\centering\b/g, '')
+    .replace(/\\raggedright\b/g, '')
+    .replace(/\\raggedleft\b/g, '');
+
   const paragraphs = bodyText
     .split(/\n\s*\n/)
     .map(p => p.trim())
@@ -1604,14 +2001,17 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
       const pStyles: string[] = [];
 
       let cleanContent = p;
-      if (/^\\noindent\b/.test(cleanContent)) {
+      if (/^\\noindent\b/.test(cleanContent) || cleanContent.startsWith('<span class="latex-noindent"></span>') || cleanContent.startsWith('<span class="latex-noindent"')) {
         pClass += ' latex-noindent';
         pStyles.push('text-indent: 0 !important;');
-        cleanContent = cleanContent.replace(/^\\noindent\s*/, '');
-      } else if (/^\\indent\b/.test(cleanContent)) {
+        cleanContent = cleanContent.replace(/^\\noindent\s*/, '').replace(/^<span class="latex-noindent"[^>]*><\/span>\s*/, '');
+      } else if (/^\\indent\b/.test(cleanContent) || cleanContent.startsWith('<span class="latex-indent"')) {
         pClass += ' latex-force-indent';
         pStyles.push('text-indent: 1.5em !important;');
-        cleanContent = cleanContent.replace(/^\\indent\s*/, '');
+        cleanContent = cleanContent.replace(/^\\indent\s*/, '').replace(/^<span class="latex-indent"[^>]*><\/span>\s*/, '');
+      } else if (isDocumentUnindented) {
+        pClass += ' latex-noindent';
+        pStyles.push('text-indent: 0 !important;');
       }
 
       const cleanSnippet = cleanContent.replace(/<[^>]+>/g, '').trim().slice(0, 30);
@@ -1622,6 +2022,9 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     });
 
   let finalHtml = paragraphs.join('\n\n');
+  if (isDocumentUnindented) {
+    finalHtml = `<div class="latex-parskip-active">${finalHtml}</div>`;
+  }
 
   // --------------------------------------------------------------------------
   // STAGE 12: UN-STASH TOKENS (Math & Verbatim Injection)
@@ -1638,11 +2041,11 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
  * Handles \textbf, \textit, \underline, \texttt, \textsc, \textsf, \textsl,
  * \sout, \textcolor, \colorbox, \rule, \hrule, \cite, \ref, \eqref, \autoref,
  * \indent, \noindent, \hspace, \quad, \qquad, \enspace, \hfill,
- * smart quotes, em-dash, and en-dash.
+ * font size commands, smart quotes, em-dash, and en-dash.
  */
 function parseInlineFormatting(text: string): string {
   return text
-    // Font styles
+    // Font styles — handle both \cmd{content} and {\cmd content} forms
     .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
     .replace(/\\textit\{([^}]+)\}/g, '<em>$1</em>')
     .replace(/\\underline\{([^}]+)\}/g, '<u>$1</u>')
@@ -1651,9 +2054,30 @@ function parseInlineFormatting(text: string): string {
     .replace(/\\textsc\{([^}]+)\}/g, '<span style="font-variant: small-caps;">$1</span>')
     .replace(/\\textsf\{([^}]+)\}/g, '<span style="font-family: var(--font-sans, sans-serif);">$1</span>')
     .replace(/\\textsl\{([^}]+)\}/g, '<span style="font-style: oblique;">$1</span>')
+    .replace(/\\textrm\{([^}]+)\}/g, '<span style="font-family: serif;">$1</span>')
+    .replace(/\\textmd\{([^}]+)\}/g, '<span style="font-weight: normal;">$1</span>')
+    .replace(/\\textup\{([^}]+)\}/g, '<span style="font-style: normal;">$1</span>')
     .replace(/\\(?:sout|st)\{([^}]+)\}/g, '<del>$1</del>')
     .replace(/\\textsuperscript\{([^}]+)\}/g, '<sup>$1</sup>')
     .replace(/\\textsubscript\{([^}]+)\}/g, '<sub>$1</sub>')
+    // {\bfseries ...} and {\itshape ...} forms
+    .replace(/\{\\bfseries\s+([^}]+)\}/g, '<strong>$1</strong>')
+    .replace(/\{\\itshape\s+([^}]+)\}/g, '<em>$1</em>')
+    .replace(/\{\\ttfamily\s+([^}]+)\}/g, '<code class="latex-code">$1</code>')
+    .replace(/\{\\scshape\s+([^}]+)\}/g, '<span style="font-variant: small-caps;">$1</span>')
+    .replace(/\{\\sffamily\s+([^}]+)\}/g, '<span style="font-family: sans-serif;">$1</span>')
+    .replace(/\{\\slshape\s+([^}]+)\}/g, '<span style="font-style: oblique;">$1</span>')
+    // Font sizes in inline context
+    .replace(/\\Huge\{([^}]+)\}/g, '<span style="font-size: 2em; font-weight: 800;">$1</span>')
+    .replace(/\\huge\{([^}]+)\}/g, '<span style="font-size: 1.7em; font-weight: 700;">$1</span>')
+    .replace(/\\LARGE\{([^}]+)\}/g, '<span style="font-size: 1.5em; font-weight: 700;">$1</span>')
+    .replace(/\\Large\{([^}]+)\}/g, '<span style="font-size: 1.3em; font-weight: 600;">$1</span>')
+    .replace(/\\large\{([^}]+)\}/g, '<span style="font-size: 1.1em;">$1</span>')
+    .replace(/\\normalsize\{([^}]+)\}/g, '$1')
+    .replace(/\\small\{([^}]+)\}/g, '<span style="font-size: 0.9em;">$1</span>')
+    .replace(/\\footnotesize\{([^}]+)\}/g, '<span style="font-size: 0.8em;">$1</span>')
+    .replace(/\\scriptsize\{([^}]+)\}/g, '<span style="font-size: 0.75em;">$1</span>')
+    .replace(/\\tiny\{([^}]+)\}/g, '<span style="font-size: 0.65em;">$1</span>')
 
     // Horizontal Spacing, Indentation & Fillers
     .replace(/\\indent\b/g, '<span class="latex-indent" style="display: inline-block; width: 1.5em;"></span>')
@@ -1663,16 +2087,27 @@ function parseInlineFormatting(text: string): string {
     .replace(/\\qquad\b/g, '<span class="latex-space-qquad" style="display: inline-block; width: 2em;"></span>')
     .replace(/\\enspace\b/g, '<span class="latex-space-enspace" style="display: inline-block; width: 0.5em;"></span>')
     .replace(/\\thinspace\b/g, '&thinsp;')
+    .replace(/\\medspace\b/g, '&ensp;')
+    .replace(/\\thickspace\b/g, '&emsp;')
     .replace(/\\hfill\b/g, '<span class="latex-hfill" style="display: inline-block; flex: 1; min-width: 12px;"></span>')
+    .replace(/\\newline\b/g, '<br/>')
+    .replace(/\\\\/g, '<br/>')
 
     // Colors
     .replace(/\\textcolor\{([^}]+)\}\{([^}]+)\}/g, (_, color, body) => `<span style="color: ${color};">${body}</span>`)
     .replace(/\\colorbox\{([^}]+)\}\{([^}]+)\}/g, (_, color, body) => `<span style="background-color: ${color}; padding: 1px 4px; border-radius: 2px;">${body}</span>`)
+    .replace(/\\color\{([^}]+)\}/g, '') // drop standalone \color{} declarations
 
     // Citations & Cross-references
-    .replace(/\\(?:cite|citep|citet)\{([^}]+)\}/g, '<span class="latex-citation">[$1]</span>')
+    .replace(/\\(?:cite|citep|citet|citealp|citealt)\{([^}]+)\}/g, '<span class="latex-citation">[$1]</span>')
     .replace(/\\eqref\{([^}]+)\}/g, '(<span class="latex-ref">$1</span>)')
-    .replace(/\\(?:autoref|ref)\{([^}]+)\}/g, '<span class="latex-ref">$1</span>')
+    .replace(/\\(?:autoref|cref|Cref|ref)\{([^}]+)\}/g, '<span class="latex-ref">$1</span>')
+    .replace(/\\pageref\{([^}]+)\}/g, '<span class="latex-ref">p. $1</span>')
+    .replace(/\\label\{([^}]+)\}/g, '') // labels are rendered as IDs on containers
+
+    // URL and hyperlinks
+    .replace(/\\url\{([^}]+)\}/g, '<a href="$1" class="latex-url" target="_blank" rel="noopener">$1</a>')
+    .replace(/\\href\{([^}]+)\}\{([^}]+)\}/g, '<a href="$1" class="latex-url" target="_blank" rel="noopener">$2</a>')
 
     // Rules & Dividers
     .replace(/\\rule(?:\[[^\]]*\])?\{([^}]+)\}\{([^}]+)\}/g, (_, w, h) => {
@@ -1683,21 +2118,38 @@ function parseInlineFormatting(text: string): string {
     .replace(/\\hrule\b/g, '<hr class="latex-hrule" />')
     .replace(/\\hrulefill\b/g, '<span class="latex-hrulefill"></span>')
     .replace(/\\dotfill\b/g, '<span class="latex-dotfill"></span>')
+    .replace(/\\linewidth\b/g, '100%')
+    .replace(/\\textwidth\b/g, '100%')
 
     // Smart Quotes & Dashes
     .replace(/``([^']+)''/g, '&ldquo;$1&rdquo;')
-    .replace(/`([^']*)'/g, '&lsquo;$1&rsquo;')
+    .replace(/`([^']*)'(?!')/g, '&lsquo;$1&rsquo;')
     .replace(/---/g, '&mdash;')
-    .replace(/--/g, '&ndash;')
+    .replace(/--(?!-)/g, '&ndash;')
 
-    // LaTeX Escaped Characters
+    // LaTeX Special Characters
     .replace(/\\%/g, '%')
     .replace(/\\_/g, '_')
     .replace(/\\&/g, '&amp;')
     .replace(/\\#/g, '#')
-    .replace(/\\~/g, '&sim;')
+    .replace(/\\\$/g, '\$')
+    .replace(/\\~/g, '&nbsp;')
+    .replace(/\\\^\{\}/g, '^')
+    .replace(/\\`\{([a-zA-Z])\}/g, '\u0060$1')
+    .replace(/\\\'\{([a-zA-Z])\}/g, '$1\u0301')
+    .replace(/\\\^\{([a-zA-Z])\}/g, '$1\u0302')
+    .replace(/\\"\{([a-zA-Z])\}/g, '$1\u0308')
     .replace(/\\backslash\b/g, '\\')
-    .replace(/\\maketitle/g, '');
+    .replace(/\\LaTeX\b/g, '<span class="latex-logo">L<sup>A</sup>T<sub>E</sub>X</span>')
+    .replace(/\\TeX\b/g, '<span class="latex-logo">T<sub>E</sub>X</span>')
+    .replace(/\\today\b/g, new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }))
+    .replace(/\\dots\b|\\ldots\b/g, '&hellip;')
+    .replace(/\\cdots\b/g, '&middot;&middot;&middot;')
+    .replace(/\\vdots\b/g, '&#8942;')
+    .replace(/\\ddots\b/g, '&#8945;')
+    .replace(/\\maketitle\b/g, '') // already handled above
+    .replace(/\\par\b/g, '<br/><br/>')
+    .replace(/\{\}/g, ''); // empty group
 }
 
 export function cleanLatexInline(text: string): string {
