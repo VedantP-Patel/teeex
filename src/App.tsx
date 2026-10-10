@@ -1,23 +1,29 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
 import { PreviewPane } from './components/PreviewPane';
 import { DiagnosticsDock } from './components/DiagnosticsDock';
-import { SymbolPaletteModal } from './components/modals/SymbolPaletteModal';
-import { TableBuilderModal } from './components/modals/TableBuilderModal';
-import { ShareModal } from './components/modals/ShareModal';
-import { TemplateModal } from './components/modals/TemplateModal';
-import { ImageUploadModal } from './components/modals/ImageUploadModal';
-import { SupabaseModal } from './components/modals/SupabaseModal';
-import { VersionHistoryModal, type Checkpoint } from './components/modals/VersionHistoryModal';
-import { WordCountModal } from './components/modals/WordCountModal';
-import { AuthModal } from './components/modals/AuthModal';
-import { ProjectsDashboardModal } from './components/modals/ProjectsDashboardModal';
-import { DeveloperUnlockModal } from './components/modals/DeveloperUnlockModal';
-import { DoiImportModal } from './components/modals/DoiImportModal';
-import { AuditLogModal } from './components/modals/AuditLogModal';
-import { EncryptionModal } from './components/modals/EncryptionModal';
+import type { Checkpoint } from './components/modals/VersionHistoryModal';
+
+// Performance: Lazy-loaded modal dialogs for zero initial bundle overhead
+const SymbolPaletteModal = lazy(() => import('./components/modals/SymbolPaletteModal').then(m => ({ default: m.SymbolPaletteModal })));
+const TableBuilderModal = lazy(() => import('./components/modals/TableBuilderModal').then(m => ({ default: m.TableBuilderModal })));
+const ShareModal = lazy(() => import('./components/modals/ShareModal').then(m => ({ default: m.ShareModal })));
+const TemplateModal = lazy(() => import('./components/modals/TemplateModal').then(m => ({ default: m.TemplateModal })));
+const ImageUploadModal = lazy(() => import('./components/modals/ImageUploadModal').then(m => ({ default: m.ImageUploadModal })));
+const SupabaseModal = lazy(() => import('./components/modals/SupabaseModal').then(m => ({ default: m.SupabaseModal })));
+const VersionHistoryModal = lazy(() => import('./components/modals/VersionHistoryModal').then(m => ({ default: m.VersionHistoryModal })));
+const WordCountModal = lazy(() => import('./components/modals/WordCountModal').then(m => ({ default: m.WordCountModal })));
+const AuthModal = lazy(() => import('./components/modals/AuthModal').then(m => ({ default: m.AuthModal })));
+const ProjectsDashboardModal = lazy(() => import('./components/modals/ProjectsDashboardModal').then(m => ({ default: m.ProjectsDashboardModal })));
+const DeveloperUnlockModal = lazy(() => import('./components/modals/DeveloperUnlockModal').then(m => ({ default: m.DeveloperUnlockModal })));
+const DoiImportModal = lazy(() => import('./components/modals/DoiImportModal').then(m => ({ default: m.DoiImportModal })));
+const AuditLogModal = lazy(() => import('./components/modals/AuditLogModal').then(m => ({ default: m.AuditLogModal })));
+const EncryptionModal = lazy(() => import('./components/modals/EncryptionModal').then(m => ({ default: m.EncryptionModal })));
+const AdminUsersModal = lazy(() => import('./components/modals/AdminUsersModal').then(m => ({ default: m.AdminUsersModal })));
+const CommandPaletteModal = lazy(() => import('./components/modals/CommandPaletteModal').then(m => ({ default: m.CommandPaletteModal })));
+import { formatLatexCode } from './services/latexFormatter';
 import {
   isPlatformDeveloper,
   lockPlatformDeveloper,
@@ -69,7 +75,6 @@ import {
   deleteProject,
   updateProject
 } from './services/projectsService';
-import { AdminUsersModal } from './components/modals/AdminUsersModal';
 
 export function App() {
   // Theme State
@@ -281,6 +286,7 @@ export function App() {
   const [isDoiModalOpen, setIsDoiModalOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isEncryptionModalOpen, setIsEncryptionModalOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   // Offline PWA & Airplane mode state
   const [isOffline, setIsOffline] = useState<boolean>(() => !navigator.onLine);
@@ -653,6 +659,27 @@ export function App() {
     setTimeout(() => triggerCompile(), 50);
   };
 
+  // Pure deterministic LaTeX formatting
+  const handleFormatDocument = useCallback(() => {
+    if (!activeFile || !activeFile.name.endsWith('.tex')) return;
+    const formatted = formatLatexCode(activeFile.content);
+    if (formatted !== activeFile.content) {
+      handleCodeChange(formatted);
+    }
+  }, [activeFile]);
+
+  // Global Shortcut: Universal Command Palette (Ctrl+K / Cmd+K)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Review Comment Handlers
   const handleAddComment = (line: number, text: string) => {
     const newComment: ReviewComment = {
@@ -983,7 +1010,7 @@ export function App() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDraggingSplit) return;
-      const sidebarWidth = 220;
+      const sidebarWidth = isSidebarOpen ? 210 : 0;
       const availableWidth = window.innerWidth - sidebarWidth;
       const mouseRelativeX = e.clientX - sidebarWidth;
       const newPercent = Math.min(78, Math.max(22, (mouseRelativeX / availableWidth) * 100));
@@ -1003,7 +1030,7 @@ export function App() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDraggingSplit]);
+  }, [isDraggingSplit, isSidebarOpen]);
 
   if (!currentUser) {
     return (
@@ -1031,6 +1058,7 @@ export function App() {
         selfUser={selfUser}
         theme={theme}
         onToggleTheme={toggleTheme}
+        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         onOpenShare={() => setIsShareOpen(true)}
         onOpenTableBuilder={() => setIsTableBuilderOpen(true)}
         onOpenSymbols={() => {
@@ -1130,12 +1158,15 @@ export function App() {
                 setSymbolsInitialTab('snippets');
                 setIsSymbolsOpen(true);
               }}
+              onFormatDocument={handleFormatDocument}
+              onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
             />
           </div>
 
-          {/* Draggable Divider */}
+          {/* Draggable Divider with Double-Click Snap Presets */}
           <div
             onMouseDown={handleMouseDownSplit}
+            onDoubleClick={() => setSplitPercent(prev => prev === 50 ? 70 : prev === 70 ? 30 : 50)}
             style={{
               width: 5,
               cursor: 'col-resize',
@@ -1144,7 +1175,7 @@ export function App() {
               transition: isDraggingSplit ? 'none' : 'background 0.2s ease',
               position: 'relative',
             }}
-            title="Drag to resize Editor and Preview panels"
+            title="Drag to resize panels • Double-click to cycle 50/50, 70/30, 30/70"
           />
 
           {/* Right Split: Publication Preview Pane with SyncTeX */}
@@ -1179,143 +1210,205 @@ export function App() {
         rawLogs={compileState.rawLogs}
       />
 
-      {/* Modals */}
-      <ImageUploadModal
-        isOpen={isImageUploadOpen}
-        onClose={() => setIsImageUploadOpen(false)}
-        onAddImageFile={handleAddImageFile}
-        onInsertLatex={handleInsertCode}
-      />
+      {/* Modals: Lazy-loaded on demand with Suspense */}
+      <Suspense fallback={null}>
+        {isImageUploadOpen && (
+          <ImageUploadModal
+            isOpen={isImageUploadOpen}
+            onClose={() => setIsImageUploadOpen(false)}
+            onAddImageFile={handleAddImageFile}
+            onInsertLatex={handleInsertCode}
+          />
+        )}
 
-      <SupabaseModal
-        isOpen={isSupabaseOpen}
-        onClose={() => {
-          setIsSupabaseOpen(false);
-          setIsCloudConnected(isSupabaseConnected());
-        }}
-        onSyncWithCloud={() => setIsCloudConnected(true)}
-        projects={projects}
-        onProjectsUpdated={setProjects}
-        currentRole={currentRole}
-        currentUser={currentUser}
-        onDeveloperStatusChanged={handleDeveloperStatusChanged}
-      />
+        {isSupabaseOpen && (
+          <SupabaseModal
+            isOpen={isSupabaseOpen}
+            onClose={() => {
+              setIsSupabaseOpen(false);
+              setIsCloudConnected(isSupabaseConnected());
+            }}
+            onSyncWithCloud={() => setIsCloudConnected(true)}
+            projects={projects}
+            onProjectsUpdated={setProjects}
+            currentRole={currentRole}
+            currentUser={currentUser}
+            onDeveloperStatusChanged={handleDeveloperStatusChanged}
+          />
+        )}
 
-      <SymbolPaletteModal
-        isOpen={isSymbolsOpen}
-        onClose={() => setIsSymbolsOpen(false)}
-        onInsert={handleInsertCode}
-        onAddPreambleMacro={handleAddPreambleMacro}
-        initialTab={symbolsInitialTab}
-      />
+        {isSymbolsOpen && (
+          <SymbolPaletteModal
+            isOpen={isSymbolsOpen}
+            onClose={() => setIsSymbolsOpen(false)}
+            onInsert={handleInsertCode}
+            onAddPreambleMacro={handleAddPreambleMacro}
+            initialTab={symbolsInitialTab}
+          />
+        )}
 
-      <TableBuilderModal
-        isOpen={isTableBuilderOpen}
-        onClose={() => setIsTableBuilderOpen(false)}
-        onInsert={handleInsertCode}
-      />
+        {isTableBuilderOpen && (
+          <TableBuilderModal
+            isOpen={isTableBuilderOpen}
+            onClose={() => setIsTableBuilderOpen(false)}
+            onInsert={handleInsertCode}
+          />
+        )}
 
-      <VersionHistoryModal
-        isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
-        checkpoints={checkpoints}
-        currentFiles={files}
-        onCreateCheckpoint={handleCreateCheckpoint}
-        onRestoreCheckpoint={handleRestoreCheckpoint}
-        onRestoreSingleFile={handleRestoreSingleFile}
-      />
+        {isHistoryOpen && (
+          <VersionHistoryModal
+            isOpen={isHistoryOpen}
+            onClose={() => setIsHistoryOpen(false)}
+            checkpoints={checkpoints}
+            currentFiles={files}
+            onCreateCheckpoint={handleCreateCheckpoint}
+            onRestoreCheckpoint={handleRestoreCheckpoint}
+            onRestoreSingleFile={handleRestoreSingleFile}
+          />
+        )}
 
-      <WordCountModal
-        isOpen={isWordCountOpen}
-        onClose={() => setIsWordCountOpen(false)}
-        wordCount={wordCount}
-        equationCount={equationCount}
-        parsedDoc={parsedDoc}
-        activeCode={activeFile.content}
-      />
+        {isWordCountOpen && (
+          <WordCountModal
+            isOpen={isWordCountOpen}
+            onClose={() => setIsWordCountOpen(false)}
+            wordCount={wordCount}
+            equationCount={equationCount}
+            parsedDoc={parsedDoc}
+            activeCode={activeFile.content}
+          />
+        )}
 
-      <ShareModal
-        isOpen={isShareOpen}
-        onClose={() => setIsShareOpen(false)}
-        roomId={roomId}
-        peers={peers}
-        selfUser={selfUser}
-        currentUser={currentUser}
-        projectMembers={activeProject?.members || []}
-        onInviteMember={handleInviteMember}
-        onUpdateMemberRole={handleUpdateMemberRole}
-        onRemoveMember={handleRemoveMember}
-        currentRole={currentRole}
-      />
+        {isShareOpen && (
+          <ShareModal
+            isOpen={isShareOpen}
+            onClose={() => setIsShareOpen(false)}
+            roomId={roomId}
+            peers={peers}
+            selfUser={selfUser}
+            currentUser={currentUser}
+            projectMembers={activeProject?.members || []}
+            onInviteMember={handleInviteMember}
+            onUpdateMemberRole={handleUpdateMemberRole}
+            onRemoveMember={handleRemoveMember}
+            currentRole={currentRole}
+          />
+        )}
 
-      <TemplateModal
-        isOpen={isTemplatesOpen}
-        onClose={() => setIsTemplatesOpen(false)}
-        onSelectTemplate={handleSelectTemplate}
-      />
+        {isTemplatesOpen && (
+          <TemplateModal
+            isOpen={isTemplatesOpen}
+            onClose={() => setIsTemplatesOpen(false)}
+            onSelectTemplate={handleSelectTemplate}
+          />
+        )}
 
-      {/* Authentication Modal */}
-      <AuthModal
-        isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
-        currentUser={currentUser}
-        onAuthSuccess={handleAuthSuccess}
-        onDeveloperStatusChanged={handleDeveloperStatusChanged}
-      />
+        {/* Authentication Modal */}
+        {isAuthOpen && (
+          <AuthModal
+            isOpen={isAuthOpen}
+            onClose={() => setIsAuthOpen(false)}
+            currentUser={currentUser}
+            onAuthSuccess={handleAuthSuccess}
+            onDeveloperStatusChanged={handleDeveloperStatusChanged}
+          />
+        )}
 
-      {/* Website Developer & Platform Owner Access Modal */}
-      <DeveloperUnlockModal
-        isOpen={isDevUnlockOpen}
-        onClose={() => setIsDevUnlockOpen(false)}
-        onDeveloperStatusChanged={handleDeveloperStatusChanged}
-        onOpenVault={() => setIsSupabaseOpen(true)}
-      />
+        {/* Website Developer & Platform Owner Access Modal */}
+        {isDevUnlockOpen && (
+          <DeveloperUnlockModal
+            isOpen={isDevUnlockOpen}
+            onClose={() => setIsDevUnlockOpen(false)}
+            onDeveloperStatusChanged={handleDeveloperStatusChanged}
+            onOpenVault={() => setIsSupabaseOpen(true)}
+          />
+        )}
 
-      {/* Multi-Project Hub Dashboard */}
-      <ProjectsDashboardModal
-        isOpen={isProjectsHubOpen}
-        onClose={() => setIsProjectsHubOpen(false)}
-        projects={projects}
-        activeProjectId={activeProjectId}
-        onSelectProject={handleSelectProject}
-        onCreateProject={handleCreateProject}
-        onDuplicateProject={handleDuplicateProject}
-        onToggleArchiveProject={handleToggleArchiveProject}
-        onDeleteProject={handleDeleteProject}
-        currentUser={currentUser}
-      />
+        {/* Multi-Project Hub Dashboard */}
+        {isProjectsHubOpen && (
+          <ProjectsDashboardModal
+            isOpen={isProjectsHubOpen}
+            onClose={() => setIsProjectsHubOpen(false)}
+            projects={projects}
+            activeProjectId={activeProjectId}
+            onSelectProject={handleSelectProject}
+            onCreateProject={handleCreateProject}
+            onDuplicateProject={handleDuplicateProject}
+            onToggleArchiveProject={handleToggleArchiveProject}
+            onDeleteProject={handleDeleteProject}
+            currentUser={currentUser}
+          />
+        )}
 
-      {/* DOI 1-Click BibTeX Citation Importer */}
-      <DoiImportModal
-        isOpen={isDoiModalOpen}
-        onClose={() => setIsDoiModalOpen(false)}
-        onAddBibtexEntry={handleAddBibtexEntry}
-      />
+        {/* DOI 1-Click BibTeX Citation Importer */}
+        {isDoiModalOpen && (
+          <DoiImportModal
+            isOpen={isDoiModalOpen}
+            onClose={() => setIsDoiModalOpen(false)}
+            onAddBibtexEntry={handleAddBibtexEntry}
+          />
+        )}
 
-      {/* Client-Side E2EE Document Vault Modal */}
-      <EncryptionModal
-        isOpen={isEncryptionModalOpen}
-        onClose={() => setIsEncryptionModalOpen(false)}
-        isEncrypted={!!activeProject?.isEncrypted}
-        encryptionSalt={activeProject?.encryptionSalt}
-        files={files}
-        onToggleEncryption={handleToggleEncryption}
-      />
+        {/* Client-Side E2EE Document Vault Modal */}
+        {isEncryptionModalOpen && (
+          <EncryptionModal
+            isOpen={isEncryptionModalOpen}
+            onClose={() => setIsEncryptionModalOpen(false)}
+            isEncrypted={!!activeProject?.isEncrypted}
+            encryptionSalt={activeProject?.encryptionSalt}
+            files={files}
+            onToggleEncryption={handleToggleEncryption}
+          />
+        )}
 
-      {/* Security & Activity Audit Log Modal */}
-      <AuditLogModal
-        isOpen={isAuditModalOpen}
-        onClose={() => setIsAuditModalOpen(false)}
-        projectId={activeProjectId}
-        projectTitle={projectTitle}
-      />
+        {/* Security & Activity Audit Log Modal */}
+        {isAuditModalOpen && (
+          <AuditLogModal
+            isOpen={isAuditModalOpen}
+            onClose={() => setIsAuditModalOpen(false)}
+            projectId={activeProjectId}
+            projectTitle={projectTitle}
+          />
+        )}
 
-      {/* Admin Users Dashboard */}
-      <AdminUsersModal
-        isOpen={isAdminUsersOpen}
-        onClose={() => setIsAdminUsersOpen(false)}
-        currentUser={currentUser}
-      />
+        {/* Admin Users Dashboard */}
+        {isAdminUsersOpen && (
+          <AdminUsersModal
+            isOpen={isAdminUsersOpen}
+            onClose={() => setIsAdminUsersOpen(false)}
+            currentUser={currentUser}
+          />
+        )}
+
+        {/* Universal Command Palette */}
+        {isCommandPaletteOpen && (
+          <CommandPaletteModal
+            isOpen={isCommandPaletteOpen}
+            onClose={() => setIsCommandPaletteOpen(false)}
+            files={files}
+            onSelectFile={handleSelectFile}
+            onCompile={triggerCompile}
+            onFormatDocument={handleFormatDocument}
+            onToggleTwoColumn={handleToggleTwoColumn}
+            isTwoColumn={isTwoColumn}
+            activeFormat={paperFormat}
+            onSelectFormat={setPaperFormat}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onExportPdf={handleExportPdf}
+            onExportZip={handleExportZip}
+            onOpenWordCount={() => setIsWordCountOpen(true)}
+            onOpenHistory={() => setIsHistoryOpen(true)}
+            onOpenProjectsHub={() => setIsProjectsHubOpen(true)}
+            onOpenSymbols={() => {
+              setSymbolsInitialTab('symbols');
+              setIsSymbolsOpen(true);
+            }}
+            onOpenTableBuilder={() => setIsTableBuilderOpen(true)}
+            sections={parsedDoc.sections}
+            onJumpToLine={setTargetLine}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

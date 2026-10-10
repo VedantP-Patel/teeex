@@ -26,7 +26,8 @@ import {
   BookMarked,
   WifiOff,
   ShieldCheck,
-  Code
+  Code,
+  Search
 } from 'lucide-react';
 import type { CompileState, Collaborator, Project, ProjectRole, UserProfile } from '../types/latex';
 
@@ -35,6 +36,7 @@ interface Props {
   onTitleChange: (title: string) => void;
   compileState: CompileState;
   onCompile: () => void;
+  onOpenCommandPalette?: () => void;
   peers: Collaborator[];
   selfUser: Collaborator;
   theme: 'dark' | 'light';
@@ -75,6 +77,7 @@ export const Navbar: React.FC<Props> = ({
   onTitleChange,
   compileState,
   onCompile,
+  onOpenCommandPalette,
   peers,
   selfUser: _selfUser,
   theme,
@@ -334,6 +337,45 @@ export const Navbar: React.FC<Props> = ({
             </span>
           )}
         </div>
+
+        {/* Command Palette Trigger Pill (Cmd+K / Ctrl+K) */}
+        {onOpenCommandPalette && (
+          <button
+            onClick={onOpenCommandPalette}
+            className="btn-ghost"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '3px 8px',
+              borderRadius: 5,
+              fontSize: 11,
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border-subtle)',
+              backgroundColor: 'var(--bg-surface-1)',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+            title="Open Universal Command Palette (Ctrl+K / ⌘K)"
+          >
+            <Search size={11} color="var(--text-muted)" />
+            <span style={{ fontSize: 10.5, fontWeight: 500 }}>Commands</span>
+            <kbd
+              style={{
+                fontSize: 9,
+                fontFamily: 'var(--font-mono)',
+                padding: '1px 4px',
+                borderRadius: 3,
+                backgroundColor: 'var(--bg-surface-2)',
+                border: '1px solid var(--border-subtle)',
+                color: 'var(--text-muted)',
+                lineHeight: 1,
+              }}
+            >
+              ⌘K
+            </kbd>
+          </button>
+        )}
       </div>
 
       {/* RIGHT GROUP: Consolidated Insert, Templates, Share, Export, Theme, User */}

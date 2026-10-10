@@ -63,6 +63,8 @@ interface Props {
   onRejectTrackedChange?: (changeId: string) => void;
   onAddTrackedChange?: (change: Omit<TrackedChange, 'id' | 'status' | 'timestamp'>) => void;
   onOpenSnippets?: () => void;
+  onFormatDocument?: () => void;
+  onOpenCommandPalette?: () => void;
 }
 
 export const Editor: React.FC<Props> = ({
@@ -93,6 +95,8 @@ export const Editor: React.FC<Props> = ({
   onRejectTrackedChange,
   onAddTrackedChange: _onAddTrackedChange,
   onOpenSnippets,
+  onFormatDocument,
+  onOpenCommandPalette,
 }) => {
   const [editorMode, setEditorMode] = useState<'code' | 'visual'>(() => {
     return (localStorage.getItem('teeex_editor_mode') as 'code' | 'visual') || 'code';
@@ -496,6 +500,20 @@ export const Editor: React.FC<Props> = ({
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       onCompileShortcut();
+      return;
+    }
+
+    // Format Document (Shift+Alt+F)
+    if (e.shiftKey && e.altKey && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault();
+      onFormatDocument?.();
+      return;
+    }
+
+    // Command Palette (Cmd+K / Ctrl+K)
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      onOpenCommandPalette?.();
       return;
     }
 
@@ -1107,6 +1125,21 @@ export const Editor: React.FC<Props> = ({
                       title="LaTeX Snippets & Macro Manager (Matrices, Algorithms, TikZ, \newcommand)"
                     >
                       <Layers size={11} />
+                    </button>
+                  </>
+                )}
+
+                {onFormatDocument && (
+                  <>
+                    <div style={formatDividerStyle} />
+                    <button
+                      type="button"
+                      onClick={onFormatDocument}
+                      className="format-toolbar-btn"
+                      style={{ ...formatBtnStyle, color: '#38bdf8' }}
+                      title="Format LaTeX Code (Shift+Alt+F)"
+                    >
+                      <CodeIcon size={11} />
                     </button>
                   </>
                 )}

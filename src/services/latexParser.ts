@@ -1,6 +1,28 @@
 import katex from 'katex';
 import type { Diagnostic, ParsedDocument, ProjectFile, LatexLabel } from '../types/latex';
 
+// High-speed KaTeX formula LRU cache (eliminates redundant formula typesetting during editing)
+const katexFormulaCache = new Map<string, string>();
+const MAX_KATEX_CACHE = 2500;
+
+export function renderKatexCached(latex: string, displayMode: boolean): string {
+  const key = `${displayMode ? 'D' : 'I'}:${latex}`;
+  const existing = katexFormulaCache.get(key);
+  if (existing !== undefined) return existing;
+
+  try {
+    const rendered = katex.renderToString(latex, { displayMode, throwOnError: false });
+    if (katexFormulaCache.size >= MAX_KATEX_CACHE) {
+      const oldestKeys = Array.from(katexFormulaCache.keys()).slice(0, 500);
+      for (const k of oldestKeys) katexFormulaCache.delete(k);
+    }
+    katexFormulaCache.set(key, rendered);
+    return rendered;
+  } catch {
+    return `<span class="latex-math-error">[Math Rendering Error]</span>`;
+  }
+}
+
 /**
  * High-speed LaTeX Diagnostic Linter
  * Scans code for syntax errors, unclosed environments, unescaped characters,
@@ -436,29 +458,20 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   // Render Math: Display math blocks \[ ... \] or \begin{equation} ... \end{equation}
   bodyText = bodyText.replace(/\\begin\{equation\*?\}([\s\S]*?)\\end\{equation\*?\}/g, (_, math) => {
     const eqLine = findSourceLine(math.trim().slice(0, 20), rawLines, '\\begin{equation');
-    try {
-      return `<div class="latex-math-display synctex-target" data-line="${eqLine}" title="Click to jump to line ${eqLine} in code">${katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })}</div>`;
-    } catch {
-      return `<div class="latex-math-error synctex-target" data-line="${eqLine}">[Math Rendering Error: ${escapeHtml(math)}]</div>`;
-    }
+    const rendered = renderKatexCached(math.trim(), true);
+    return `<div class="latex-math-display synctex-target" data-line="${eqLine}" title="Click to jump to line ${eqLine} in code">${rendered}</div>`;
   });
 
   bodyText = bodyText.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => {
     const eqLine = findSourceLine(math.trim().slice(0, 20), rawLines, '\\[');
-    try {
-      return `<div class="latex-math-display synctex-target" data-line="${eqLine}" title="Click to jump to line ${eqLine} in code">${katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })}</div>`;
-    } catch {
-      return `<div class="latex-math-error synctex-target" data-line="${eqLine}">[Math Rendering Error: ${escapeHtml(math)}]</div>`;
-    }
+    const rendered = renderKatexCached(math.trim(), true);
+    return `<div class="latex-math-display synctex-target" data-line="${eqLine}" title="Click to jump to line ${eqLine} in code">${rendered}</div>`;
   });
 
   // Render Inline math: $ ... $
   bodyText = bodyText.replace(/(?<!\\)\$([^\$\n]+?)(?<!\\)\$/g, (_, math) => {
-    try {
-      return `<span class="latex-math-inline">${katex.renderToString(math.trim(), { displayMode: false, throwOnError: false })}</span>`;
-    } catch {
-      return `<span class="latex-math-error">${escapeHtml(math)}</span>`;
-    }
+    const rendered = renderKatexCached(math.trim(), false);
+    return `<span class="latex-math-inline">${rendered}</span>`;
   });
 
   // Format Tables: \begin{tabular}{...} ... \end{tabular}
