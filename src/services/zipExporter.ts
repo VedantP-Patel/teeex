@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import type { ProjectFile } from '../types/latex';
+import { dataUrlToUint8Array } from './virtualFileSystem';
 
 /**
  * Packages all LaTeX files, bibliographies, and uploaded images into a clean .zip bundle
@@ -10,11 +11,8 @@ export async function exportProjectAsZip(projectTitle: string, files: ProjectFil
 
   for (const file of files) {
     if (file.type === 'image' && file.dataUrl) {
-      // Decode base64 dataUrl into binary
-      const base64Data = file.dataUrl.split(',')[1];
-      if (base64Data) {
-        zip.file(file.name, base64Data, { base64: true });
-      }
+      const buffer = dataUrlToUint8Array(file.dataUrl);
+      zip.file(file.name, buffer, { binary: true });
     } else {
       zip.file(file.name, file.content);
     }

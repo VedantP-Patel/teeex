@@ -89,6 +89,8 @@ export interface ParsedDocument {
   }>;
   isTwoColumn: boolean;
   documentClass: string;
+  hasTitlePage?: boolean;
+  titlePageContent?: string;
 }
 
 export interface Template {

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ZoomIn,
@@ -31,6 +31,100 @@ interface Props {
   onFormatChange?: (format: PaperFormatId) => void;
   isTwoColumn?: boolean;
   onToggleTwoColumn?: () => void;
+}
+
+/**
+ * Splits rendered LaTeX HTML into discrete pages respecting explicit page breaks (\newpage, \begin{titlepage})
+ * and physical A4 page capacities for pixel-perfect preview and print-to-PDF parity.
+ */
+function paginateHtmlIntoPages(
+  renderedHtml: string,
+  isTwoCol: boolean,
+  hasTitlePage: boolean
+): string[] {
+  if (!renderedHtml) return [''];
+
+  const explicitChunks = renderedHtml.split(/<div class="latex-page-break"[^>]*><\/div>/);
+  const finalPages: string[] = [];
+
+  for (let cIdx = 0; cIdx < explicitChunks.length; cIdx++) {
+    const chunk = explicitChunks[cIdx].trim();
+    if (!chunk) continue;
+
+    if (chunk.includes('latex-titlepage')) {
+      finalPages.push(chunk);
+      continue;
+    }
+
+    // Split chunk into top-level HTML element blocks
+    const blockRegex = /<(?:div|h[1-6]|p|ul|ol|table)[\s>][\s\S]*?<\/(?:div|h[1-6]|p|ul|ol|table)>/gi;
+    const blocks: string[] = [];
+    let match: RegExpExecArray | null;
+    let lastIndex = 0;
+
+    while ((match = blockRegex.exec(chunk)) !== null) {
+      const between = chunk.substring(lastIndex, match.index).trim();
+      if (between) blocks.push(between);
+      blocks.push(match[0]);
+      lastIndex = blockRegex.lastIndex;
+    }
+    const remainder = chunk.substring(lastIndex).trim();
+    if (remainder) blocks.push(remainder);
+
+    if (blocks.length === 0) {
+      finalPages.push(chunk);
+      continue;
+    }
+
+    const isFirstPage = finalPages.length === 0 && !hasTitlePage;
+    const baseCapacity = isTwoCol ? 1600 : 880;
+    let currentCapacity = isFirstPage ? (baseCapacity - 220) : baseCapacity;
+
+    let currentPageBlocks: string[] = [];
+    let currentHeight = 0;
+
+    for (const block of blocks) {
+      let blockHeight = 25;
+      if (block.startsWith('<h2')) {
+        blockHeight = 65;
+      } else if (block.startsWith('<h3')) {
+        blockHeight = 45;
+      } else if (block.startsWith('<h4')) {
+        blockHeight = 35;
+      } else if (block.includes('latex-figure-container')) {
+        blockHeight = 240;
+      } else if (block.includes('latex-math-display')) {
+        blockHeight = 70;
+      } else if (block.includes('latex-abstract')) {
+        blockHeight = 140;
+      } else if (block.startsWith('<table') || block.includes('table-container')) {
+        const rows = (block.match(/<tr/g) || []).length;
+        blockHeight = 50 + rows * 28;
+      } else if (block.startsWith('<ul') || block.startsWith('<ol')) {
+        const items = (block.match(/<li/g) || []).length;
+        blockHeight = 35 + items * 24;
+      } else {
+        const textLen = block.replace(/<[^>]+>/g, '').length;
+        blockHeight = Math.max(26, Math.ceil(textLen / 70) * 19);
+      }
+
+      if (currentHeight + blockHeight > currentCapacity && currentPageBlocks.length > 0) {
+        finalPages.push(currentPageBlocks.join('\n'));
+        currentPageBlocks = [block];
+        currentHeight = blockHeight;
+        currentCapacity = baseCapacity;
+      } else {
+        currentPageBlocks.push(block);
+        currentHeight += blockHeight;
+      }
+    }
+
+    if (currentPageBlocks.length > 0) {
+      finalPages.push(currentPageBlocks.join('\n'));
+    }
+  }
+
+  return finalPages.length > 0 ? finalPages : [renderedHtml];
 }
 
 export const PreviewPane: React.FC<Props> = ({
@@ -72,23 +166,42 @@ export const PreviewPane: React.FC<Props> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
+  const pages = useMemo(() => {
+    if (previewMode === 'flow') {
+      return [renderedHtml];
+    }
+    return paginateHtmlIntoPages(renderedHtml, isTwoCol, !!parsedDoc.hasTitlePage);
+  }, [renderedHtml, isTwoCol, parsedDoc.hasTitlePage, previewMode]);
+
   const handleTogglePreviewMode = (mode: 'sheet' | 'flow') => {
     setPreviewMode(mode);
     localStorage.setItem('teeex_preview_mode', mode);
   };
 
   useEffect(() => {
-    if (sheetRef.current) {
+    if (previewMode === 'sheet') {
+      setTotalPages(Math.max(1, pages.length));
+      if (currentPage > pages.length) {
+        setCurrentPage(Math.max(1, pages.length));
+      }
+    } else if (sheetRef.current) {
       const pageHeight = 1122;
       const h = sheetRef.current.scrollHeight;
-      const pages = Math.max(1, Math.ceil(h / pageHeight));
-      setTotalPages(pages);
+      const calculatedPages = Math.max(1, Math.ceil(h / pageHeight));
+      setTotalPages(calculatedPages);
     }
-  }, [renderedHtml, activeFormat, isTwoCol, zoom]);
+  }, [previewMode, pages.length, currentPage, renderedHtml, activeFormat, isTwoCol, zoom]);
 
   const scrollToPage = (pageNum: number) => {
     setCurrentPage(pageNum);
     if (viewportRef.current) {
+      if (previewMode === 'sheet') {
+        const pageEl = viewportRef.current.querySelector<HTMLElement>(`[data-page-index="${pageNum - 1}"]`);
+        if (pageEl) {
+          pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+      }
       const pageHeight = 1122 * (zoom / 100);
       viewportRef.current.scrollTo({
         top: (pageNum - 1) * pageHeight,
@@ -99,6 +212,24 @@ export const PreviewPane: React.FC<Props> = ({
 
   const handleViewportScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const top = e.currentTarget.scrollTop;
+    if (previewMode === 'sheet' && viewportRef.current) {
+      const pageEls = Array.from(viewportRef.current.querySelectorAll<HTMLElement>('.latex-paper-page'));
+      if (pageEls.length > 0) {
+        const viewportTop = viewportRef.current.getBoundingClientRect().top;
+        let activeIdx = 0;
+        for (let i = 0; i < pageEls.length; i++) {
+          const rect = pageEls[i].getBoundingClientRect();
+          if (rect.top - viewportTop <= 150) {
+            activeIdx = i;
+          }
+        }
+        const p = activeIdx + 1;
+        if (p !== currentPage) {
+          setCurrentPage(p);
+        }
+        return;
+      }
+    }
     const pageHeight = 1122 * (zoom / 100);
     const p = Math.min(totalPages, Math.max(1, Math.floor(top / pageHeight) + 1));
     if (p !== currentPage) {
@@ -711,106 +842,261 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
             fontFamily: currentFormatConfig.fontFamily,
             fontSize: currentFormatConfig.fontSize,
             lineHeight: currentFormatConfig.lineHeight,
-            padding: currentFormatConfig.padding,
+            padding: previewMode === 'sheet' ? 0 : currentFormatConfig.padding,
+            backgroundColor: previewMode === 'sheet' ? 'transparent' : 'var(--paper-bg)',
+            boxShadow: previewMode === 'sheet' ? 'none' : (previewMode === 'flow' ? '0 4px 16px rgba(0,0,0,0.2)' : '0 18px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05)'),
             maxWidth: previewMode === 'flow' ? '860px' : currentFormatConfig.maxWidth,
             width: previewMode === 'flow' ? '100%' : '210mm',
-            boxShadow: previewMode === 'flow' ? '0 4px 16px rgba(0,0,0,0.2)' : '0 18px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05)',
             transform: `scale(${zoom / 100})`,
             transformOrigin: 'top center',
           }}
           className={`latex-paper-sheet format-${activeFormat} ${previewMode === 'sheet' ? 'preview-mode-sheet' : 'preview-mode-flow'}`}
         >
-          {/* Printable 1-Inch Margin Boundaries */}
-          {previewMode === 'sheet' && showMarginGuides && (
-            <div
-              style={{
-                position: 'absolute',
-                top: '18mm',
-                left: '18mm',
-                right: '18mm',
-                bottom: '18mm',
-                border: '1px dashed rgba(56, 189, 248, 0.45)',
-                pointerEvents: 'none',
-                zIndex: 20,
-              }}
-            >
-              <span style={{
-                position: 'absolute',
-                top: 2,
-                right: 4,
-                fontSize: 8,
-                fontFamily: 'monospace',
-                color: '#38bdf8',
-                opacity: 0.8,
-                fontWeight: 600,
-              }}>
-                1-Inch Margin Guide
-              </span>
-            </div>
-          )}
+          {previewMode === 'flow' ? (
+            <>
+              {/* Printable 1-Inch Margin Boundaries */}
+              {showMarginGuides && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '18mm',
+                    left: '18mm',
+                    right: '18mm',
+                    bottom: '18mm',
+                    border: '1px dashed rgba(56, 189, 248, 0.45)',
+                    pointerEvents: 'none',
+                    zIndex: 20,
+                  }}
+                >
+                  <span style={{
+                    position: 'absolute',
+                    top: 2,
+                    right: 4,
+                    fontSize: 8,
+                    fontFamily: 'monospace',
+                    color: '#38bdf8',
+                    opacity: 0.8,
+                    fontWeight: 600,
+                  }}>
+                    1-Inch Margin Guide
+                  </span>
+                </div>
+              )}
 
-          {/* Format Metadata Header */}
-          <div className="paper-meta-header synctex-target" data-line="1">
-            <span>{currentFormatConfig.headerMeta}</span>
-            <span style={{ fontWeight: 700 }}>{currentFormatConfig.badge}</span>
-          </div>
-
-          {/* Academic Header (Title & Authors) */}
-          <div style={academicHeaderStyle}>
-            <h1
-              style={{ ...paperTitleStyle, cursor: 'pointer' }}
-              className="synctex-target"
-              data-line={parsedDoc.titleLine || 1}
-              title={`Click to jump to line ${parsedDoc.titleLine || 1} in code`}
-            >
-              {parsedDoc.title}
-            </h1>
-            <div
-              style={{ ...paperAuthorBlockStyle, cursor: 'pointer' }}
-              className="synctex-target"
-              data-line={parsedDoc.authorLine || 1}
-              title={`Click to jump to line ${parsedDoc.authorLine || 1} in code`}
-            >
-              {parsedDoc.authors.map((auth, idx) => (
-                <span key={idx} style={paperAuthorNameStyle}>
-                  {auth}
-                </span>
-              ))}
-            </div>
-            {parsedDoc.date && (
-              <div
-                style={{ ...paperDateStyle, cursor: 'pointer' }}
-                className="synctex-target"
-                data-line={parsedDoc.dateLine || 1}
-                title={`Click to jump to line ${parsedDoc.dateLine || 1} in code`}
-              >
-                {parsedDoc.date}
+              {/* Format Metadata Header */}
+              <div className="paper-meta-header synctex-target" data-line="1">
+                <span>{currentFormatConfig.headerMeta}</span>
+                <span style={{ fontWeight: 700 }}>{currentFormatConfig.badge}</span>
               </div>
-            )}
-          </div>
 
-          {/* Body Content with 2-Column or 1-Column styling */}
-          <div
-            style={{
-              ...paperBodyStyle,
-              columnCount: isTwoCol ? 2 : 1,
-              columnGap: isTwoCol ? currentFormatConfig.columnGap : 'normal',
-              columnRule: isTwoCol && activeFormat === 'ieee' ? '1px solid #cbd5e1' : 'none',
-            }}
-            className="paper-body"
-            dangerouslySetInnerHTML={{ __html: renderedHtml }}
-          />
+              {/* Academic Header (Title & Authors) */}
+              {!parsedDoc.hasTitlePage && (
+                <div style={academicHeaderStyle}>
+                  <h1
+                    style={{ ...paperTitleStyle, cursor: 'pointer' }}
+                    className="synctex-target"
+                    data-line={parsedDoc.titleLine || 1}
+                    title={`Click to jump to line ${parsedDoc.titleLine || 1} in code`}
+                  >
+                    {parsedDoc.title}
+                  </h1>
+                  <div
+                    style={{ ...paperAuthorBlockStyle, cursor: 'pointer' }}
+                    className="synctex-target"
+                    data-line={parsedDoc.authorLine || 1}
+                    title={`Click to jump to line ${parsedDoc.authorLine || 1} in code`}
+                  >
+                    {parsedDoc.authors.map((auth, idx) => (
+                      <span key={idx} style={paperAuthorNameStyle}>
+                        {auth}
+                      </span>
+                    ))}
+                  </div>
+                  {parsedDoc.date && (
+                    <div
+                      style={{ ...paperDateStyle, cursor: 'pointer' }}
+                      className="synctex-target"
+                      data-line={parsedDoc.dateLine || 1}
+                      title={`Click to jump to line ${parsedDoc.dateLine || 1} in code`}
+                    >
+                      {parsedDoc.date}
+                    </div>
+                  )}
+                </div>
+              )}
 
-          {/* Academic Footnote / Page Number */}
-          <div
-            style={{ ...paperFooterStyle, cursor: 'pointer' }}
-            className="synctex-target"
-            data-line="1"
-            title="Click to jump to document preamble"
-          >
-            <span>{currentFormatConfig.footerMeta}</span>
-            <span>Page {currentPage} of {totalPages}</span>
-          </div>
+              {/* Body Content with 2-Column or 1-Column styling */}
+              <div
+                style={{
+                  ...paperBodyStyle,
+                  columnCount: isTwoCol ? 2 : 1,
+                  columnGap: isTwoCol ? currentFormatConfig.columnGap : 'normal',
+                  columnRule: isTwoCol && activeFormat === 'ieee' ? '1px solid #cbd5e1' : 'none',
+                }}
+                className="paper-body"
+                dangerouslySetInnerHTML={{ __html: renderedHtml }}
+              />
+
+              {/* Academic Footnote / Page Number */}
+              <div
+                style={{ ...paperFooterStyle, cursor: 'pointer' }}
+                className="synctex-target"
+                data-line="1"
+                title="Click to jump to document preamble"
+              >
+                <span>{currentFormatConfig.footerMeta}</span>
+                <span>Page {currentPage} of {totalPages}</span>
+              </div>
+            </>
+          ) : (
+            /* Discrete Page Sheets */
+            pages.map((pageHtml, pIdx) => {
+              const isTitlePage = pageHtml.includes('latex-titlepage');
+              const isFirstPage = pIdx === 0 && !parsedDoc.hasTitlePage;
+
+              return (
+                <div
+                  key={pIdx}
+                  data-page-index={pIdx}
+                  className="latex-paper-page"
+                  style={{
+                    width: '210mm',
+                    minHeight: '297mm',
+                    boxSizing: 'border-box',
+                    backgroundColor: 'var(--paper-bg)',
+                    color: 'var(--paper-text)',
+                    boxShadow: '0 18px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05)',
+                    borderRadius: 2,
+                    padding: isTitlePage ? '30px 20px' : currentFormatConfig.padding,
+                    marginBottom: pIdx === pages.length - 1 ? 0 : 32,
+                    position: 'relative',
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }}
+                >
+                  {/* Printable 1-Inch Margin Boundaries */}
+                  {showMarginGuides && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '18mm',
+                        left: '18mm',
+                        right: '18mm',
+                        bottom: '18mm',
+                        border: '1px dashed rgba(56, 189, 248, 0.45)',
+                        pointerEvents: 'none',
+                        zIndex: 20,
+                      }}
+                    >
+                      <span style={{
+                        position: 'absolute',
+                        top: 2,
+                        right: 4,
+                        fontSize: 8,
+                        fontFamily: 'monospace',
+                        color: '#38bdf8',
+                        opacity: 0.8,
+                        fontWeight: 600,
+                      }}>
+                        1-Inch Margin Guide
+                      </span>
+                    </div>
+                  )}
+
+                  {/* UI Page Badge Pill Tag (Removed during PDF export) */}
+                  <div
+                    className="latex-page-pill-tag no-print"
+                    style={{
+                      position: 'absolute',
+                      top: -20,
+                      right: 0,
+                      fontSize: 9.5,
+                      fontWeight: 600,
+                      fontFamily: 'var(--font-mono)',
+                      color: 'var(--text-muted)',
+                      backgroundColor: 'var(--bg-surface-1)',
+                      padding: '1px 8px',
+                      borderRadius: '6px 6px 0 0',
+                      border: '1px solid var(--border-subtle)',
+                      borderBottom: 'none',
+                      userSelect: 'none',
+                    }}
+                  >
+                    Page {pIdx + 1} of {pages.length}
+                  </div>
+
+                  {/* Format Metadata Header (omitted on titlepage) */}
+                  {!isTitlePage && (
+                    <div className="paper-meta-header synctex-target" data-line="1">
+                      <span>{pIdx === 0 ? currentFormatConfig.headerMeta : (parsedDoc.title || currentFormatConfig.headerMeta)}</span>
+                      <span style={{ fontWeight: 700 }}>{currentFormatConfig.badge}</span>
+                    </div>
+                  )}
+
+                  {/* Academic Header (Title & Authors) only on the primary first page if no dedicated title page */}
+                  {isFirstPage && (
+                    <div style={academicHeaderStyle}>
+                      <h1
+                        style={{ ...paperTitleStyle, cursor: 'pointer' }}
+                        className="synctex-target"
+                        data-line={parsedDoc.titleLine || 1}
+                        title={`Click to jump to line ${parsedDoc.titleLine || 1} in code`}
+                      >
+                        {parsedDoc.title}
+                      </h1>
+                      <div
+                        style={{ ...paperAuthorBlockStyle, cursor: 'pointer' }}
+                        className="synctex-target"
+                        data-line={parsedDoc.authorLine || 1}
+                        title={`Click to jump to line ${parsedDoc.authorLine || 1} in code`}
+                      >
+                        {parsedDoc.authors.map((auth, idx) => (
+                          <span key={idx} style={paperAuthorNameStyle}>
+                            {auth}
+                          </span>
+                        ))}
+                      </div>
+                      {parsedDoc.date && (
+                        <div
+                          style={{ ...paperDateStyle, cursor: 'pointer' }}
+                          className="synctex-target"
+                          data-line={parsedDoc.dateLine || 1}
+                          title={`Click to jump to line ${parsedDoc.dateLine || 1} in code`}
+                        >
+                          {parsedDoc.date}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Body Content with 2-Column or 1-Column styling */}
+                  <div
+                    style={{
+                      ...paperBodyStyle,
+                      columnCount: (isTwoCol && !isTitlePage) ? 2 : 1,
+                      columnGap: isTwoCol ? currentFormatConfig.columnGap : 'normal',
+                      columnRule: isTwoCol && activeFormat === 'ieee' ? '1px solid #cbd5e1' : 'none',
+                    }}
+                    className="paper-body"
+                    dangerouslySetInnerHTML={{ __html: pageHtml }}
+                  />
+
+                  {/* Academic Footnote / Page Number Footer (omitted on titlepage) */}
+                  {!isTitlePage && (
+                    <div
+                      style={{ ...paperFooterStyle, cursor: 'pointer' }}
+                      className="synctex-target"
+                      data-line="1"
+                      title="Click to jump to document preamble"
+                    >
+                      <span>{currentFormatConfig.footerMeta}</span>
+                      <span>Page {pIdx + 1} of {pages.length}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import katex from 'katex';
 import type { Diagnostic, ParsedDocument, ProjectFile, LatexLabel } from '../types/latex';
 import { renderTikzToSvg } from './tikzRenderer';
+import { resolveProjectAsset } from './virtualFileSystem';
 
 // High-speed KaTeX formula LRU cache (eliminates redundant formula typesetting during editing)
 const katexFormulaCache = new Map<string, string>();
@@ -251,6 +252,27 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
     title = cleanLatexInline(titleMatch[1]);
   }
 
+  // Support \begin{titlepage} ... \end{titlepage} and \begin{title} ... \end{title}
+  const titlePageMatch = code.match(/\\begin\{(?:titlepage|title)\}([\s\S]*?)\\end\{(?:titlepage|title)\}/);
+  let hasTitlePage = false;
+  let titlePageContent = '';
+  if (titlePageMatch) {
+    hasTitlePage = true;
+    titlePageContent = titlePageMatch[1];
+    if (title === 'Untitled Document') {
+      const hugeMatch = titlePageContent.match(/\\(?:Huge|huge|LARGE|Large)\{?([^}\n\\]+)\}?/);
+      const boldMatch = titlePageContent.match(/\\textbf\{([^}]+)\}/);
+      if (hugeMatch) {
+        title = cleanLatexInline(hugeMatch[1]).trim();
+      } else if (boldMatch) {
+        title = cleanLatexInline(boldMatch[1]).trim();
+      } else {
+        const line = titlePageContent.split('\n').map(l => cleanLatexInline(l).trim()).find(l => l.length > 3 && !l.startsWith('\\'));
+        if (line) title = line;
+      }
+    }
+  }
+
   // Extract \author{...}
   const authorMatch = code.match(/\\author\{([\s\S]*?)\}/);
   if (authorMatch) {
@@ -281,7 +303,7 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
 
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    if (l.includes('\\title{') && titleLine === 1) titleLine = i + 1;
+    if ((l.includes('\\title{') || l.includes('\\begin{titlepage}') || l.includes('\\begin{title}')) && titleLine === 1) titleLine = i + 1;
     if (l.includes('\\author{') && authorLine === 1) authorLine = i + 1;
     if (l.includes('\\date{') && dateLine === 1) dateLine = i + 1;
     if (l.includes('\\begin{abstract}') && abstractLine === 1) abstractLine = i + 1;
@@ -330,6 +352,8 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
     mathBlocks,
     isTwoColumn,
     documentClass,
+    hasTitlePage,
+    titlePageContent,
   };
 }
 
@@ -411,6 +435,42 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   const bodyMatch = cleanCode.match(/\\begin\{document\}([\s\S]*?)\\end\{document\}/);
   let bodyText = bodyMatch ? bodyMatch[1] : cleanCode;
 
+  // Support \begin{titlepage} ... \end{titlepage} and \begin{title} ... \end{title}
+  bodyText = bodyText.replace(/\\begin\{(?:titlepage|title)\}([\s\S]*?)\\end\{(?:titlepage|title)\}/g, (_, content) => {
+    const tpLine = findSourceLine('titlepage', rawLines, '\\begin{titlepage');
+    let parsedTp = content
+      .replace(/\\centering/g, '')
+      .replace(/\\vspace\*?\{[^}]+\}/g, '<div style="height: 18px;"></div>')
+      .replace(/\\vfill/g, '<div style="flex: 1; min-height: 24px;"></div>')
+      .replace(/\\today/g, new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }))
+      .replace(/\\Huge\{?([^}\\]+)\}?/g, '<div style="font-size: 24px; font-weight: 800; line-height: 1.3; margin-bottom: 12px; color: var(--paper-text);">$1</div>')
+      .replace(/\\huge\{?([^}\\]+)\}?/g, '<div style="font-size: 20px; font-weight: 700; line-height: 1.3; margin-bottom: 10px; color: var(--paper-text);">$1</div>')
+      .replace(/\\LARGE\{?([^}\\]+)\}?/g, '<div style="font-size: 18px; font-weight: 700; line-height: 1.3; margin-bottom: 8px; color: var(--paper-text);">$1</div>')
+      .replace(/\\Large\{?([^}\\]+)\}?/g, '<div style="font-size: 16px; font-weight: 600; line-height: 1.35; margin-bottom: 8px; color: var(--paper-text);">$1</div>')
+      .replace(/\\large\{?([^}\\]+)\}?/g, '<div style="font-size: 14px; font-weight: 500; line-height: 1.4; margin-bottom: 6px; color: var(--paper-text);">$1</div>')
+      .replace(/\\par/g, '<div style="height: 6px;"></div>')
+      .replace(/\\\\/g, '<br/>');
+
+    parsedTp = parseInlineFormatting(parsedTp);
+
+    const tpLines = parsedTp
+      .split(/\n\s*\n/)
+      .map((p: string) => p.trim())
+      .filter((p: string) => p.length > 0)
+      .map((p: string) => {
+        if (/^<div|^<h|^<br/.test(p)) return p;
+        return `<div style="margin: 6px 0; font-size: 13px; color: var(--paper-text);">${p}</div>`;
+      })
+      .join('\n');
+
+    return `\n\n<div class="latex-titlepage synctex-target" data-line="${tpLine}" title="Click to jump to titlepage in code" style="min-height: 750px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 20px;">
+      ${tpLines}
+    </div>\n\n<div class="latex-page-break" data-break="titlepage"></div>\n\n`;
+  });
+
+  // Support discrete page breaks: \newpage, \pagebreak, \clearpage, \cleardoublepage
+  bodyText = bodyText.replace(/\\(?:newpage|pagebreak|clearpage|cleardoublepage)/g, '\n\n<div class="latex-page-break"></div>\n\n');
+
   // Render Figures: \begin{figure} ... \includegraphics{...} ... \end{figure}
   bodyText = bodyText.replace(/\\begin\{figure\*?\}(?:\[.*?\])?([\s\S]*?)\\end\{figure\*?\}/g, (_, figContent) => {
     const imgMatch = figContent.match(/\\includegraphics(?:\[.*?\])?\{([^}]+)\}/);
@@ -422,8 +482,8 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     const label = labelMatch ? labelMatch[1] : '';
     const figLine = findSourceLine(filename, rawLines, '\\includegraphics');
 
-    // Check if image exists in project files with dataUrl
-    const matchedFile = files?.find(f => f.name === filename || f.name.includes(filename));
+    // Check if image exists in project files with dataUrl using robust resolver
+    const matchedFile = resolveProjectAsset(filename, files);
     const imgSrc = matchedFile?.dataUrl || '';
 
     return `
@@ -449,7 +509,7 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   bodyText = bodyText.replace(/\\includegraphics(?:\[.*?\])?\{([^}]+)\}/g, (_, filename) => {
     const name = filename.trim();
     const figLine = findSourceLine(name, rawLines, '\\includegraphics');
-    const matchedFile = files?.find(f => f.name === name || f.name.includes(name));
+    const matchedFile = resolveProjectAsset(name, files);
     if (matchedFile?.dataUrl) {
       return `<div class="latex-figure-container synctex-target" data-line="${figLine}" title="Click to jump to line ${figLine} in code"><img src="${matchedFile.dataUrl}" alt="${name}" class="latex-figure-img" /></div>`;
     }

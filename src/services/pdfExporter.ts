@@ -5,6 +5,9 @@
  */
 
 import { PAPER_FORMATS, type PaperFormatId } from './paperFormats';
+import { dataUrlToUint8Array } from './virtualFileSystem';
+
+export { dataUrlToUint8Array };
 
 export interface ExportPdfOptions {
   title: string;
@@ -34,6 +37,11 @@ export function exportDocumentAsPdf({
     el.classList.remove('synctex-forward-pulse');
   });
 
+  // Remove UI-only page badge pills
+  clone.querySelectorAll('.latex-page-pill-tag').forEach(el => {
+    el.remove();
+  });
+
   // Normalize clone inline styles to eliminate on-screen zoom transforms and match physical page
   clone.style.transform = 'none';
   clone.style.transformOrigin = 'unset';
@@ -45,6 +53,22 @@ export function exportDocumentAsPdf({
   clone.style.maxWidth = '210mm';
   clone.style.padding = formatConfig.padding;
   clone.style.boxSizing = 'border-box';
+
+  // Normalize all child discrete pages if present
+  clone.querySelectorAll<HTMLElement>('.latex-paper-page').forEach(page => {
+    page.style.transform = 'none';
+    page.style.transformOrigin = 'unset';
+    page.style.margin = '0 auto';
+    page.style.boxShadow = 'none';
+    page.style.borderRadius = '0';
+    page.style.width = '210mm';
+    page.style.minHeight = '297mm';
+    page.style.maxHeight = '297mm';
+    page.style.height = '297mm';
+    page.style.pageBreakAfter = 'always';
+    page.style.breakAfter = 'page';
+    page.style.boxSizing = 'border-box';
+  });
 
   // Create isolated hidden iframe for printing
   const iframe = document.createElement('iframe');
@@ -179,10 +203,37 @@ export function exportDocumentAsPdf({
       margin: 12px 0 !important;
     }
 
-    .synctex-target {
-      cursor: default !important;
-      outline: none !important;
-      background: none !important;
+    .latex-paper-page {
+      width: 210mm !important;
+      height: 297mm !important;
+      min-height: 297mm !important;
+      max-height: 297mm !important;
+      padding: ${formatConfig.padding} !important;
+      margin: 0 auto !important;
+      box-sizing: border-box !important;
+      page-break-after: always !important;
+      break-after: page !important;
+      overflow: hidden !important;
+      background: #ffffff !important;
+      box-shadow: none !important;
+    }
+
+    .latex-paper-page:last-child {
+      page-break-after: auto !important;
+      break-after: auto !important;
+    }
+
+    .latex-page-break, .page-break {
+      page-break-before: always !important;
+      break-before: page !important;
+      height: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      display: block !important;
+    }
+
+    .latex-page-pill-tag {
+      display: none !important;
     }
   </style>
 </head>
