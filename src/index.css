@@ -856,3 +856,19 @@ input:focus, textarea:focus, select:focus {
   color: transparent !important;
 }
 
+/* Matching Bracket Highlight */
+.latex-matching-bracket {
+  box-shadow: 0 0 5px rgba(245, 158, 11, 0.45);
+  animation: bracketHighlightPulse 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes bracketHighlightPulse {
+  0% {
+    background-color: rgba(245, 158, 11, 0.22);
+  }
+  100% {
+    background-color: rgba(245, 158, 11, 0.42);
+  }
+}
+
+

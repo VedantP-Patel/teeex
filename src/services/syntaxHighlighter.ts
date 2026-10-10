@@ -172,7 +172,8 @@ function escapeHtml(str: string): string {
 export function highlightLatexCode(
   code: string,
   theme: SyntaxTheme = 'vscode',
-  isLight: boolean = false
+  isLight: boolean = false,
+  matchingPair?: [number, number] | null
 ): string {
   if (theme === 'normal') {
     return escapeHtml(code);
@@ -180,8 +181,8 @@ export function highlightLatexCode(
 
   const colors = getThemeColors(theme, isLight);
 
-  // Regex tokenizer matching comments, math blocks, commands, braces, brackets, numbers, and symbols
-  const tokenRegex = /(%[^\n]*)|(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^$\n]+\$|\\\(.*?\\\))|(\\[a-zA-Z@]+)|([{}])|([\[\]])|(\b\d+(?:\.\d+)?(?:pt|mm|cm|in|em|ex|%|s|ms|k|M|G)?\b)|(&|\\\\)/g;
+  // Regex tokenizer matching comments, math blocks, commands, delimiters, numbers, and symbols
+  const tokenRegex = /(%[^\n]*)|(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^$\n]+\$|\\\(.*?\\\))|(\\[a-zA-Z@]+)|([{}])|([\[\]\(\)])|(\b\d+(?:\.\d+)?(?:pt|mm|cm|in|em|ex|%|s|ms|k|M|G)?\b)|(&|\\\\)/g;
 
   let lastIndex = 0;
   let html = '';
@@ -202,9 +203,19 @@ export function highlightLatexCode(
     } else if (command) {
       html += `<span style="color: ${colors.command};">${escapeHtml(command)}</span>`;
     } else if (brace) {
-      html += `<span style="color: ${colors.brace};">${escapeHtml(brace)}</span>`;
+      const isMatched = matchingPair && (match.index === matchingPair[0] || match.index === matchingPair[1]);
+      if (isMatched) {
+        html += `<span class="latex-matching-bracket" style="border-bottom: 2px solid #f59e0b; background-color: rgba(245, 158, 11, 0.28); border-radius: 2px; color: #f59e0b; font-weight: 700;">${escapeHtml(brace)}</span>`;
+      } else {
+        html += `<span style="color: ${colors.brace};">${escapeHtml(brace)}</span>`;
+      }
     } else if (bracket) {
-      html += `<span style="color: ${colors.bracket};">${escapeHtml(bracket)}</span>`;
+      const isMatched = matchingPair && (match.index === matchingPair[0] || match.index === matchingPair[1]);
+      if (isMatched) {
+        html += `<span class="latex-matching-bracket" style="border-bottom: 2px solid #f59e0b; background-color: rgba(245, 158, 11, 0.28); border-radius: 2px; color: #f59e0b; font-weight: 700;">${escapeHtml(bracket)}</span>`;
+      } else {
+        html += `<span style="color: ${colors.bracket};">${escapeHtml(bracket)}</span>`;
+      }
     } else if (number) {
       html += `<span style="color: ${colors.number};">${escapeHtml(number)}</span>`;
     } else if (symbol) {

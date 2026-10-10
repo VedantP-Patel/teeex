@@ -26,7 +26,8 @@ import {
   ArrowUp,
   ArrowDown,
   Layers,
-  Sparkles
+  Sparkles,
+  Map as MapIcon
 } from 'lucide-react';
 import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile, TrackedChange } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
@@ -34,6 +35,8 @@ import { extractLatexLabels } from '../services/latexParser';
 import { SYNTAX_THEMES, type SyntaxTheme, highlightLatexCode } from '../services/syntaxHighlighter';
 import { VisualEditor } from './VisualEditor';
 import { searchLatexSnippets, type LatexSnippet } from '../services/latexSnippets';
+import { findMatchingBracket } from '../services/bracketMatcher';
+import { EditorMinimap } from './EditorMinimap';
 
 interface Props {
   code: string;
@@ -358,9 +361,28 @@ export const Editor: React.FC<Props> = ({
   });
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
   const [menuCoords, setMenuCoords] = useState<{ top: number; right: number } | null>(null);
+  const [isMinimapOpen, setIsMinimapOpen] = useState<boolean>(() => {
+    const saved = localStorage.getItem('teeex_editor_minimap');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [cursorOffset, setCursorOffset] = useState<number>(0);
+  const [viewportScrollTop, setViewportScrollTop] = useState<number>(0);
+  const [viewportHeight, setViewportHeight] = useState<number>(600);
   const syntaxBackdropRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
   const themeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Track viewport dimensions for minimap scaling
+  useEffect(() => {
+    const updateViewportDim = () => {
+      if (viewportRef.current) {
+        setViewportHeight(viewportRef.current.clientHeight);
+      }
+    };
+    updateViewportDim();
+    window.addEventListener('resize', updateViewportDim);
+    return () => window.removeEventListener('resize', updateViewportDim);
+  }, []);
 
   const toggleThemeMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -412,15 +434,21 @@ export const Editor: React.FC<Props> = ({
     return () => observer.disconnect();
   }, []);
 
+  // Compute matching bracket pair based on current cursor offset
+  const matchingBracketPair = React.useMemo(() => {
+    return findMatchingBracket(code, cursorOffset);
+  }, [code, cursorOffset]);
+
   // Tokenize LaTeX syntax for color backdrop overlay with light/dark mode adaptation
   const highlightedHtml = React.useMemo(() => {
     if (syntaxTheme === 'normal') return '';
-    return highlightLatexCode(code, syntaxTheme, isLightMode) + (code.endsWith('\n') ? ' ' : '');
-  }, [code, syntaxTheme, isLightMode]);
+    return highlightLatexCode(code, syntaxTheme, isLightMode, matchingBracketPair) + (code.endsWith('\n') ? ' ' : '');
+  }, [code, syntaxTheme, isLightMode, matchingBracketPair]);
 
-  // Sync gutter scroll
+  // Sync gutter scroll and minimap position
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const st = e.currentTarget.scrollTop;
+    setViewportScrollTop(st);
     if (gutterRef.current) {
       gutterRef.current.scrollTop = st;
     }
@@ -678,6 +706,7 @@ export const Editor: React.FC<Props> = ({
     const line = textBefore.split('\n').length;
     const col = pos - textBefore.lastIndexOf('\n');
     setCurrentCursorLine(line);
+    setCursorOffset(pos);
     onCursorChange(line, col);
 
     // Check if cursor is right after \cite{...
@@ -1463,6 +1492,26 @@ export const Editor: React.FC<Props> = ({
             >
               <Search size={12} />
               <span style={{ fontSize: 10 }}>Find</span>
+            </button>
+
+            {/* Toggle Code Minimap */}
+            <button
+              type="button"
+              onClick={() => {
+                const next = !isMinimapOpen;
+                setIsMinimapOpen(next);
+                localStorage.setItem('teeex_editor_minimap', String(next));
+              }}
+              className="btn-ghost"
+              style={{
+                ...toolBtnStyle,
+                color: isMinimapOpen ? '#38bdf8' : 'var(--text-secondary)',
+                backgroundColor: isMinimapOpen ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+              }}
+              title="Toggle Code Minimap"
+            >
+              <MapIcon size={12} />
+              <span style={{ fontSize: 10 }}>Minimap</span>
             </button>
           </div>
         )}
@@ -2450,6 +2499,21 @@ export const Editor: React.FC<Props> = ({
             </div>
           )}
         </div>
+
+        {/* Canvas Code Minimap */}
+        {isMinimapOpen && (
+          <EditorMinimap
+            code={code}
+            theme={syntaxTheme}
+            isLightMode={isLightMode}
+            scrollTop={viewportScrollTop}
+            viewportHeight={viewportHeight}
+            totalContentHeight={Math.max(viewportHeight, lines.length * 21 + 40)}
+            onScrollTo={(target) => {
+              if (viewportRef.current) viewportRef.current.scrollTop = target;
+            }}
+          />
+        )}
       </div>
       )}
     </div>
