@@ -1083,6 +1083,8 @@ export function App() {
             onCreateFolder={handleCreateFolder}
             onDeleteFolder={handleDeleteFolder}
             documentOutline={parsedDoc.sections}
+            parsedDoc={parsedDoc}
+            activeCursorLine={selfUser.cursorLine}
             onJumpToLine={setTargetLine}
             wordCount={wordCount}
             equationCount={equationCount}

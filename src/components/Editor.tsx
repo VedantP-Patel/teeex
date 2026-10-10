@@ -25,13 +25,15 @@ import {
   Search,
   ArrowUp,
   ArrowDown,
-  Layers
+  Layers,
+  Sparkles
 } from 'lucide-react';
 import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile, TrackedChange } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
 import { extractLatexLabels } from '../services/latexParser';
 import { SYNTAX_THEMES, type SyntaxTheme, highlightLatexCode } from '../services/syntaxHighlighter';
 import { VisualEditor } from './VisualEditor';
+import { searchLatexSnippets, type LatexSnippet } from '../services/latexSnippets';
 
 interface Props {
   code: string;
@@ -105,6 +107,16 @@ export const Editor: React.FC<Props> = ({
   const [activeCommentLine, setActiveCommentLine] = useState<number | null>(null);
   const [commentDraft, setCommentDraft] = useState('');
   const [currentCursorLine, setCurrentCursorLine] = useState(1);
+
+  // LaTeX Command & Environment Snippet Autocomplete State
+  const [snippetQuery, setSnippetQuery] = useState<string | null>(null);
+  const [snippetStartPos, setSnippetStartPos] = useState<number | null>(null);
+  const [selectedSnippetIdx, setSelectedSnippetIdx] = useState(0);
+
+  const filteredSnippets = React.useMemo(() => {
+    if (snippetQuery === null) return [];
+    return searchLatexSnippets(snippetQuery);
+  }, [snippetQuery]);
 
   // In-Editor Find & Replace State
   const [isFindOpen, setIsFindOpen] = useState(false);
@@ -452,8 +464,35 @@ export const Editor: React.FC<Props> = ({
     }
   }, [targetLine, lines, onClearTargetLine, editorMode]);
 
-  // Handle key events: Tab, Ctrl+Enter, auto-close brackets, Ctrl+F, Ctrl+H, Esc
+  // Handle key events: Tab, Ctrl+Enter, auto-close brackets, snippet navigation, Ctrl+F, Ctrl+H, Esc
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 1. Snippet autocomplete popover keyboard navigation
+    if (snippetQuery !== null && filteredSnippets.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSnippetIdx(prev => (prev + 1) % filteredSnippets.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSnippetIdx(prev => (prev - 1 + filteredSnippets.length) % filteredSnippets.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const activeSnip = filteredSnippets[selectedSnippetIdx] || filteredSnippets[0];
+        if (activeSnip) {
+          handleSelectSnippet(activeSnip);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSnippetQuery(null);
+        return;
+      }
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       onCompileShortcut();
@@ -485,10 +524,117 @@ export const Editor: React.FC<Props> = ({
       return;
     }
 
-    if (e.key === 'Escape' && isFindOpen) {
-      e.preventDefault();
-      setIsFindOpen(false);
-      return;
+    if (e.key === 'Escape') {
+      if (snippetQuery !== null) {
+        e.preventDefault();
+        setSnippetQuery(null);
+        return;
+      }
+      if (isFindOpen) {
+        e.preventDefault();
+        setIsFindOpen(false);
+        return;
+      }
+    }
+
+    // 2. Smart auto-closing pairs & selection wrapping
+    if (role !== 'viewer') {
+      const ta = e.currentTarget;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+
+      // Selection wrapping: (, [, {, ", $
+      if (start !== end && ['(', '[', '{', '"', '$'].includes(e.key)) {
+        e.preventDefault();
+        const pairs: Record<string, string> = { '(': ')', '[': ']', '{': '}', '"': '"', '$': '$' };
+        const closeChar = pairs[e.key] || e.key;
+        const selected = code.substring(start, end);
+        const newCode = code.substring(0, start) + e.key + selected + closeChar + code.substring(end);
+        onChange(newCode);
+        setTimeout(() => {
+          ta.selectionStart = start + 1;
+          ta.selectionEnd = end + 1;
+        }, 0);
+        return;
+      }
+
+      // Pair auto-closing when no selection
+      if (start === end) {
+        if (['(', '[', '{', '"'].includes(e.key)) {
+          e.preventDefault();
+          const pairs: Record<string, string> = { '(': ')', '[': ']', '{': '}', '"': '"' };
+          const closeChar = pairs[e.key];
+          const newCode = code.substring(0, start) + e.key + closeChar + code.substring(start);
+          onChange(newCode);
+          setTimeout(() => {
+            ta.selectionStart = ta.selectionEnd = start + 1;
+          }, 0);
+          return;
+        }
+
+        if (e.key === '$') {
+          e.preventDefault();
+          const newCode = code.substring(0, start) + '$$' + code.substring(start);
+          onChange(newCode);
+          setTimeout(() => {
+            ta.selectionStart = ta.selectionEnd = start + 1;
+          }, 0);
+          return;
+        }
+
+        // Skip-over existing closing character
+        if ([')', ']', '}', '"', '$'].includes(e.key) && code[start] === e.key) {
+          e.preventDefault();
+          ta.selectionStart = ta.selectionEnd = start + 1;
+          return;
+        }
+
+        // Smart Backspace: delete matching pairs
+        if (e.key === 'Backspace' && start > 0) {
+          const charBefore = code[start - 1];
+          const charAfter = code[start];
+          const isPair =
+            (charBefore === '(' && charAfter === ')') ||
+            (charBefore === '[' && charAfter === ']') ||
+            (charBefore === '{' && charAfter === '}') ||
+            (charBefore === '"' && charAfter === '"') ||
+            (charBefore === '$' && charAfter === '$');
+
+          if (isPair) {
+            e.preventDefault();
+            const newCode = code.substring(0, start - 1) + code.substring(start + 1);
+            onChange(newCode);
+            setTimeout(() => {
+              ta.selectionStart = ta.selectionEnd = start - 1;
+            }, 0);
+            return;
+          }
+        }
+
+        // Environment auto-closing on Enter after \begin{...}
+        if (e.key === 'Enter') {
+          const lineStart = code.lastIndexOf('\n', start - 1) + 1;
+          const lineBefore = code.substring(lineStart, start);
+          const envMatch = lineBefore.match(/\\begin\{([a-zA-Z0-9*]+)\}(?:\[.*?\])?$/);
+          if (envMatch) {
+            const envName = envMatch[1];
+            const textAfter = code.substring(start);
+            const nextClose = `\\end{${envName}}`;
+            if (!textAfter.trim().startsWith(nextClose)) {
+              e.preventDefault();
+              const indent = '  ';
+              const insertion = `\n${indent}\n\\end{${envName}}`;
+              const newCode = code.substring(0, start) + insertion + code.substring(start);
+              const cursorTarget = start + 1 + indent.length;
+              onChange(newCode);
+              setTimeout(() => {
+                ta.selectionStart = ta.selectionEnd = cursorTarget;
+              }, 0);
+              return;
+            }
+          }
+        }
+      }
     }
 
     if (e.key === 'Tab') {
@@ -506,7 +652,7 @@ export const Editor: React.FC<Props> = ({
     }
   };
 
-  // Track cursor position and check for \cite{
+  // Track cursor position and check for \cite{ and \ref{ and \command
   const handleSelect = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
     const ta = e.currentTarget;
     const pos = ta.selectionStart;
@@ -533,6 +679,32 @@ export const Editor: React.FC<Props> = ({
     } else {
       setRefQuery(null);
     }
+
+    // Check if cursor is right after \command... (for snippet autocomplete)
+    const snippetMatch = textBefore.match(/\\([a-zA-Z]{1,20})$/);
+    if (snippetMatch && !textBefore.endsWith('\\cite') && !textBefore.endsWith('\\ref')) {
+      setSnippetQuery(snippetMatch[1]);
+      setSnippetStartPos(pos - snippetMatch[1].length - 1);
+      setSelectedSnippetIdx(0);
+    } else {
+      setSnippetQuery(null);
+    }
+  };
+
+  // Insert snippet autocomplete key
+  const handleSelectSnippet = (snip: LatexSnippet) => {
+    if (!textareaRef.current || snippetStartPos === null) return;
+    const ta = textareaRef.current;
+    const pos = ta.selectionStart;
+    const newCode = code.substring(0, snippetStartPos) + snip.template + code.substring(pos);
+    onChange(newCode);
+    setSnippetQuery(null);
+
+    setTimeout(() => {
+      ta.focus();
+      const targetPos = snippetStartPos + (snip.cursorOffset ?? snip.template.length);
+      ta.selectionStart = ta.selectionEnd = targetPos;
+    }, 0);
   };
 
   // Insert citation autocomplete key
@@ -1593,6 +1765,84 @@ export const Editor: React.FC<Props> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* LaTeX Command & Environment Autocomplete Dropdown */}
+          {snippetQuery !== null && filteredSnippets.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: Math.max(10, (currentCursorLine - 1) * 21 + 24),
+              left: 40,
+              zIndex: 40,
+              backgroundColor: 'var(--bg-surface-1)',
+              border: '1px solid var(--border-medium)',
+              borderRadius: 'var(--radius-sm)',
+              boxShadow: '0 16px 36px rgba(0, 0, 0, 0.65)',
+              maxHeight: 240,
+              width: 360,
+              overflowY: 'auto',
+              backdropFilter: 'blur(16px)',
+            }}>
+              <div style={{ padding: '6px 10px', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'var(--bg-surface-0)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Sparkles size={11} color="#a855f7" />
+                  <span style={{ letterSpacing: '0.04em' }}>LATEX AUTOCOMPLETE</span>
+                </div>
+                <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                  ↵ / Tab to insert
+                </span>
+              </div>
+              {filteredSnippets.map((snip, idx) => {
+                const isSelected = idx === selectedSnippetIdx;
+                const catColor = snip.category === 'env' ? '#c084fc' :
+                                 snip.category === 'math' ? '#38bdf8' :
+                                 snip.category === 'structure' ? '#fbbf24' :
+                                 snip.category === 'format' ? '#34d399' : '#fb7185';
+                const catBg = snip.category === 'env' ? 'rgba(192, 132, 252, 0.12)' :
+                              snip.category === 'math' ? 'rgba(56, 189, 248, 0.12)' :
+                              snip.category === 'structure' ? 'rgba(251, 191, 36, 0.12)' :
+                              snip.category === 'format' ? 'rgba(52, 211, 153, 0.12)' : 'rgba(251, 113, 133, 0.12)';
+                return (
+                  <div
+                    key={snip.id}
+                    onClick={() => handleSelectSnippet(snip)}
+                    onMouseEnter={() => setSelectedSnippetIdx(idx)}
+                    style={{
+                      padding: '7px 10px',
+                      borderBottom: '1px solid var(--border-subtle)',
+                      cursor: 'pointer',
+                      fontSize: 11,
+                      backgroundColor: isSelected ? 'var(--bg-active)' : 'transparent',
+                      borderLeft: isSelected ? `3px solid ${catColor}` : '3px solid transparent',
+                      transition: 'background 0.1s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ fontWeight: 700, color: catColor, fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>
+                        {snip.label}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          padding: '1px 5px',
+                          borderRadius: 3,
+                          backgroundColor: catBg,
+                          color: catColor,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                        }}
+                      >
+                        {snip.category}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 10, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {snip.description}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 

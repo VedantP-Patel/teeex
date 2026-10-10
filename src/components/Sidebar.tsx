@@ -15,9 +15,12 @@ import {
   ChevronDown,
   ChevronRight,
   Image as ImageIcon,
-  PanelLeftClose
+  PanelLeftClose,
+  Search,
+  X
 } from 'lucide-react';
 import type { ProjectFile, ParsedDocument, ProjectRole } from '../types/latex';
+import { extractLatexLabels } from '../services/latexParser';
 
 interface Props {
   files: ProjectFile[];
@@ -36,6 +39,8 @@ interface Props {
   onOpenHistory?: () => void;
   role?: ProjectRole;
   onCollapse?: () => void;
+  activeCursorLine?: number;
+  parsedDoc?: ParsedDocument;
 }
 
 export const Sidebar: React.FC<Props> = ({
@@ -55,8 +60,14 @@ export const Sidebar: React.FC<Props> = ({
   onOpenHistory,
   role = 'owner',
   onCollapse,
+  activeCursorLine,
+  parsedDoc,
 }) => {
   const [activeTab, setActiveTab] = useState<'files' | 'outline'>('files');
+
+  // Document Outline Filter & Search State
+  const [outlineFilter, setOutlineFilter] = useState<'all' | 'sections' | 'figures' | 'tables' | 'math'>('all');
+  const [outlineSearch, setOutlineSearch] = useState('');
 
   // Creation Modes: null | 'root-file' | 'root-folder' | `folder:${folderName}`
   const [creationMode, setCreationMode] = useState<string | null>(null);
@@ -120,6 +131,97 @@ export const Sidebar: React.FC<Props> = ({
   const rootFiles = useMemo(() => {
     return files.filter(f => getFileFolder(f) === null);
   }, [files]);
+
+  // Outline Nodes computation for Document Outline Tree
+  interface OutlineNode {
+    id: string;
+    type: 'section' | 'subsection' | 'subsubsection' | 'figure' | 'table' | 'equation';
+    title: string;
+    caption?: string;
+    line: number;
+    level: number;
+  }
+
+  const allOutlineNodes = useMemo<OutlineNode[]>(() => {
+    const nodes: OutlineNode[] = [];
+
+    // 1. Sections from documentOutline
+    (documentOutline || []).forEach((sec, idx) => {
+      nodes.push({
+        id: `sec-${idx}-${sec.line}`,
+        type: sec.level === 1 ? 'section' : sec.level === 2 ? 'subsection' : 'subsubsection',
+        title: sec.title,
+        line: sec.line,
+        level: sec.level,
+      });
+    });
+
+    // 2. Labels for Figures, Tables, Equations
+    const labels = extractLatexLabels(files);
+    labels.forEach(l => {
+      if (l.type === 'figure') {
+        nodes.push({
+          id: `fig-${l.key}-${l.line}`,
+          type: 'figure',
+          title: l.caption || `Figure: ${l.key}`,
+          caption: l.key,
+          line: l.line,
+          level: 2,
+        });
+      } else if (l.type === 'table') {
+        nodes.push({
+          id: `tab-${l.key}-${l.line}`,
+          type: 'table',
+          title: l.caption || `Table: ${l.key}`,
+          caption: l.key,
+          line: l.line,
+          level: 2,
+        });
+      } else if (l.type === 'equation') {
+        nodes.push({
+          id: `eq-${l.key}-${l.line}`,
+          type: 'equation',
+          title: `Eq: ${l.key}`,
+          caption: l.caption,
+          line: l.line,
+          level: 2,
+        });
+      }
+    });
+
+    // 3. Parsed math blocks without labels
+    if (parsedDoc?.mathBlocks) {
+      parsedDoc.mathBlocks.forEach((mb, idx) => {
+        if (!nodes.some(n => n.type === 'equation' && Math.abs(n.line - mb.line) <= 1)) {
+          const preview = mb.latex.replace(/\\label\{[^}]+\}/g, '').trim().slice(0, 32);
+          nodes.push({
+            id: `mathblock-${idx}-${mb.line}`,
+            type: 'equation',
+            title: `$$ ${preview}${mb.latex.length > 32 ? '...' : ''} $$`,
+            line: mb.line,
+            level: 2,
+          });
+        }
+      });
+    }
+
+    return nodes.sort((a, b) => a.line - b.line);
+  }, [documentOutline, files, parsedDoc]);
+
+  const filteredOutlineNodes = useMemo(() => {
+    return allOutlineNodes.filter(node => {
+      if (outlineFilter === 'sections' && !['section', 'subsection', 'subsubsection'].includes(node.type)) return false;
+      if (outlineFilter === 'figures' && node.type !== 'figure') return false;
+      if (outlineFilter === 'tables' && node.type !== 'table') return false;
+      if (outlineFilter === 'math' && node.type !== 'equation') return false;
+
+      if (outlineSearch.trim()) {
+        const q = outlineSearch.toLowerCase();
+        return node.title.toLowerCase().includes(q) || (node.caption && node.caption.toLowerCase().includes(q));
+      }
+      return true;
+    });
+  }, [allOutlineNodes, outlineFilter, outlineSearch]);
 
   // Handle Form Submission
   const handleCreateSubmit = (e: React.FormEvent) => {
@@ -481,39 +583,179 @@ export const Sidebar: React.FC<Props> = ({
 
       {/* Document Outline View */}
       {activeTab === 'outline' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-          <div style={{ padding: '4px 8px 8px 8px' }}>
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
-              STRUCTURE NAVIGATION
-            </span>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Outline Search & Filters Header */}
+          <div style={{ padding: '8px 8px 6px 8px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {/* Search Input */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              backgroundColor: 'var(--bg-surface-1)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '2px 6px',
+              gap: 5,
+            }}>
+              <Search size={11} color="var(--text-muted)" />
+              <input
+                type="text"
+                value={outlineSearch}
+                onChange={e => setOutlineSearch(e.target.value)}
+                placeholder="Filter outline..."
+                style={{
+                  border: 'none',
+                  outline: 'none',
+                  background: 'transparent',
+                  color: 'var(--text-primary)',
+                  fontSize: 10.5,
+                  width: '100%',
+                }}
+              />
+              {outlineSearch && (
+                <button
+                  type="button"
+                  onClick={() => setOutlineSearch('')}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </div>
+
+            {/* Category Filter Pills */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3, overflowX: 'auto' }} className="toolbar-scrollbar">
+              {[
+                { id: 'all', label: 'All', count: allOutlineNodes.length },
+                { id: 'sections', label: '§ Sec', count: allOutlineNodes.filter(n => ['section', 'subsection', 'subsubsection'].includes(n.type)).length },
+                { id: 'figures', label: 'Fig', count: allOutlineNodes.filter(n => n.type === 'figure').length },
+                { id: 'tables', label: 'Tab', count: allOutlineNodes.filter(n => n.type === 'table').length },
+                { id: 'math', label: '∑ Eq', count: allOutlineNodes.filter(n => n.type === 'equation').length },
+              ].map(f => {
+                const isSelected = outlineFilter === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setOutlineFilter(f.id as any)}
+                    style={{
+                      padding: '2px 5px',
+                      fontSize: 9.5,
+                      fontWeight: isSelected ? 700 : 500,
+                      borderRadius: 4,
+                      backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.15)' : 'var(--bg-surface-1)',
+                      color: isSelected ? '#38bdf8' : 'var(--text-muted)',
+                      border: isSelected ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid transparent',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 3,
+                    }}
+                  >
+                    <span>{f.label}</span>
+                    <span style={{ opacity: 0.7, fontSize: 8.5 }}>{f.count}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {documentOutline.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '12px 8px' }}>
-              No sections detected. Use \section{} in LaTeX.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {documentOutline.map((sec, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => onJumpToLine(sec.line)}
-                  style={{
-                    ...outlineItemStyle,
-                    paddingLeft: sec.level === 1 ? 8 : sec.level === 2 ? 18 : 26,
-                  }}
-                  title={`Jump to line ${sec.line}`}
-                >
-                  <span style={{ color: 'var(--text-muted)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
-                    L{sec.line}
-                  </span>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
-                    {sec.title}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Outline Items List */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '6px 6px' }}>
+            {filteredOutlineNodes.length === 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '16px 8px', textAlign: 'center' }}>
+                {outlineSearch ? 'No matches found.' : 'No structure items detected in LaTeX.'}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {filteredOutlineNodes.map((node, idx) => {
+                  const isActive = activeCursorLine !== undefined &&
+                    (node.line === activeCursorLine || (node.line <= activeCursorLine && (idx === filteredOutlineNodes.length - 1 || filteredOutlineNodes[idx + 1].line > activeCursorLine)));
+
+                  const badgeColor =
+                    node.type === 'section' ? '#38bdf8' :
+                    node.type === 'subsection' ? '#0284c7' :
+                    node.type === 'subsubsection' ? '#64748b' :
+                    node.type === 'figure' ? '#10b981' :
+                    node.type === 'table' ? '#f59e0b' : '#c084fc';
+
+                  const badgeBg =
+                    node.type === 'section' ? 'rgba(56, 189, 248, 0.12)' :
+                    node.type === 'subsection' ? 'rgba(2, 132, 199, 0.12)' :
+                    node.type === 'subsubsection' ? 'rgba(100, 116, 139, 0.12)' :
+                    node.type === 'figure' ? 'rgba(16, 185, 129, 0.12)' :
+                    node.type === 'table' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(192, 132, 252, 0.12)';
+
+                  const badgeLabel =
+                    node.type === 'section' ? 'H1' :
+                    node.type === 'subsection' ? 'H2' :
+                    node.type === 'subsubsection' ? 'H3' :
+                    node.type === 'figure' ? 'FIG' :
+                    node.type === 'table' ? 'TAB' : 'EQ';
+
+                  const indent =
+                    node.type === 'section' ? 4 :
+                    node.type === 'subsection' ? 12 :
+                    node.type === 'subsubsection' ? 18 : 10;
+
+                  return (
+                    <button
+                      key={node.id}
+                      onClick={() => onJumpToLine(node.line)}
+                      style={{
+                        ...outlineItemStyle,
+                        paddingLeft: indent,
+                        backgroundColor: isActive ? 'rgba(56, 189, 248, 0.10)' : 'transparent',
+                        borderLeft: isActive ? '2px solid #38bdf8' : '2px solid transparent',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 6,
+                        width: '100%',
+                        textAlign: 'left',
+                        transition: 'background 0.12s ease',
+                      }}
+                      title={`Jump to line ${node.line}: ${node.title}`}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                        <span style={{
+                          fontSize: 8.5,
+                          fontWeight: 800,
+                          padding: '1px 3.5px',
+                          borderRadius: 3,
+                          backgroundColor: badgeBg,
+                          color: badgeColor,
+                          letterSpacing: '0.02em',
+                          flexShrink: 0,
+                        }}>
+                          {badgeLabel}
+                        </span>
+                        <span style={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          color: isActive ? '#38bdf8' : 'var(--text-primary)',
+                          fontWeight: isActive || node.type === 'section' ? 600 : 400,
+                          fontSize: 11,
+                        }}>
+                          {node.title}
+                        </span>
+                      </div>
+
+                      <span style={{
+                        color: 'var(--text-muted)',
+                        fontSize: 9.5,
+                        fontFamily: 'var(--font-mono)',
+                        flexShrink: 0,
+                      }}>
+                        L{node.line}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

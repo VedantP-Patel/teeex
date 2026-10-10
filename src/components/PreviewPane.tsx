@@ -10,7 +10,12 @@ import {
   MousePointerClick,
   BookOpen,
   ChevronDown,
-  Check
+  Check,
+  Layers,
+  Grid,
+  ChevronLeft,
+  ChevronRight,
+  FileText
 } from 'lucide-react';
 import type { ParsedDocument } from '../types/latex';
 import { PAPER_FORMATS, type PaperFormatId } from '../services/paperFormats';
@@ -55,8 +60,51 @@ export const PreviewPane: React.FC<Props> = ({
     : (localColumnOverride !== null ? localColumnOverride : (currentFormatConfig.defaultColumns === 2));
 
   const sheetRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const formatMenuRef = useRef<HTMLDivElement>(null);
   const formatButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Sheet View vs Flow View State
+  const [previewMode, setPreviewMode] = useState<'sheet' | 'flow'>(() => {
+    return (localStorage.getItem('teeex_preview_mode') as 'sheet' | 'flow') || 'sheet';
+  });
+  const [showMarginGuides, setShowMarginGuides] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+
+  const handleTogglePreviewMode = (mode: 'sheet' | 'flow') => {
+    setPreviewMode(mode);
+    localStorage.setItem('teeex_preview_mode', mode);
+  };
+
+  useEffect(() => {
+    if (sheetRef.current) {
+      const pageHeight = 1122;
+      const h = sheetRef.current.scrollHeight;
+      const pages = Math.max(1, Math.ceil(h / pageHeight));
+      setTotalPages(pages);
+    }
+  }, [renderedHtml, activeFormat, isTwoCol, zoom]);
+
+  const scrollToPage = (pageNum: number) => {
+    setCurrentPage(pageNum);
+    if (viewportRef.current) {
+      const pageHeight = 1122 * (zoom / 100);
+      viewportRef.current.scrollTo({
+        top: (pageNum - 1) * pageHeight,
+        behavior: 'smooth',
+      });
+    }
+  };
+
+  const handleViewportScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const top = e.currentTarget.scrollTop;
+    const pageHeight = 1122 * (zoom / 100);
+    const p = Math.min(totalPages, Math.max(1, Math.floor(top / pageHeight) + 1));
+    if (p !== currentPage) {
+      setCurrentPage(p);
+    }
+  };
 
   const toggleFormatMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -451,6 +499,128 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
             )}
           </div>
 
+          {/* View Mode Toggle: Sheet vs Flow */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            backgroundColor: 'var(--bg-surface-1)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 5,
+            height: 24,
+            padding: 1,
+          }}>
+            <button
+              type="button"
+              onClick={() => handleTogglePreviewMode('sheet')}
+              style={{
+                padding: '2px 7px',
+                fontSize: 10,
+                fontWeight: previewMode === 'sheet' ? 700 : 500,
+                backgroundColor: previewMode === 'sheet' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+                color: previewMode === 'sheet' ? '#38bdf8' : 'var(--text-muted)',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                height: '100%',
+              }}
+              title="Paged Sheet View: Discrete academic paper pages with margins and headers"
+            >
+              <Layers size={10} />
+              <span>Sheet</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTogglePreviewMode('flow')}
+              style={{
+                padding: '2px 7px',
+                fontSize: 10,
+                fontWeight: previewMode === 'flow' ? 700 : 500,
+                backgroundColor: previewMode === 'flow' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+                color: previewMode === 'flow' ? '#38bdf8' : 'var(--text-muted)',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                height: '100%',
+              }}
+              title="Continuous Flow View: Single continuous scrollable canvas"
+            >
+              <FileText size={10} />
+              <span>Flow</span>
+            </button>
+          </div>
+
+          {/* Margins Guide Toggle (in Sheet mode) */}
+          {previewMode === 'sheet' && (
+            <button
+              type="button"
+              onClick={() => setShowMarginGuides(prev => !prev)}
+              style={{
+                padding: '2px 7px',
+                fontSize: 10,
+                fontWeight: showMarginGuides ? 700 : 500,
+                color: showMarginGuides ? '#10b981' : 'var(--text-muted)',
+                backgroundColor: showMarginGuides ? 'rgba(16, 185, 129, 0.12)' : 'var(--bg-surface-1)',
+                border: showMarginGuides ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border-subtle)',
+                borderRadius: 5,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                cursor: 'pointer',
+                height: 24,
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s ease',
+              }}
+              title="Toggle printable 1-inch margin guidelines"
+            >
+              <Grid size={11} />
+              <span>Margins</span>
+            </button>
+          )}
+
+          {/* Page Navigation in Sheet Mode */}
+          {previewMode === 'sheet' && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              backgroundColor: 'var(--bg-surface-1)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 5,
+              height: 24,
+              padding: '0 3px',
+              gap: 2,
+            }}>
+              <button
+                type="button"
+                onClick={() => scrollToPage(Math.max(1, currentPage - 1))}
+                className="btn-ghost"
+                style={{ padding: '1px 3px', height: '100%', display: 'flex', alignItems: 'center' }}
+                title="Previous Page"
+                disabled={currentPage <= 1}
+              >
+                <ChevronLeft size={11} />
+              </button>
+              <span style={{ fontSize: 9.5, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-primary)', padding: '0 2px' }}>
+                p. {currentPage} / {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => scrollToPage(Math.min(totalPages, currentPage + 1))}
+                className="btn-ghost"
+                style={{ padding: '1px 3px', height: '100%', display: 'flex', alignItems: 'center' }}
+                title="Next Page"
+                disabled={currentPage >= totalPages}
+              >
+                <ChevronRight size={11} />
+              </button>
+            </div>
+          )}
+
           {/* Column Toggle Button */}
           <button
             type="button"
@@ -526,6 +696,8 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
 
       {/* Paper Sheet View Container (PDF Surrounding Area) */}
       <div
+        ref={viewportRef}
+        onScroll={handleViewportScroll}
         style={sheetViewportStyle}
         className="sheet-viewport"
       >
@@ -540,12 +712,43 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
             fontSize: currentFormatConfig.fontSize,
             lineHeight: currentFormatConfig.lineHeight,
             padding: currentFormatConfig.padding,
-            maxWidth: currentFormatConfig.maxWidth,
+            maxWidth: previewMode === 'flow' ? '860px' : currentFormatConfig.maxWidth,
+            width: previewMode === 'flow' ? '100%' : '210mm',
+            boxShadow: previewMode === 'flow' ? '0 4px 16px rgba(0,0,0,0.2)' : '0 18px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05)',
             transform: `scale(${zoom / 100})`,
             transformOrigin: 'top center',
           }}
-          className={`latex-paper-sheet format-${activeFormat}`}
+          className={`latex-paper-sheet format-${activeFormat} ${previewMode === 'sheet' ? 'preview-mode-sheet' : 'preview-mode-flow'}`}
         >
+          {/* Printable 1-Inch Margin Boundaries */}
+          {previewMode === 'sheet' && showMarginGuides && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '18mm',
+                left: '18mm',
+                right: '18mm',
+                bottom: '18mm',
+                border: '1px dashed rgba(56, 189, 248, 0.45)',
+                pointerEvents: 'none',
+                zIndex: 20,
+              }}
+            >
+              <span style={{
+                position: 'absolute',
+                top: 2,
+                right: 4,
+                fontSize: 8,
+                fontFamily: 'monospace',
+                color: '#38bdf8',
+                opacity: 0.8,
+                fontWeight: 600,
+              }}>
+                1-Inch Margin Guide
+              </span>
+            </div>
+          )}
+
           {/* Format Metadata Header */}
           <div className="paper-meta-header synctex-target" data-line="1">
             <span>{currentFormatConfig.headerMeta}</span>
@@ -606,7 +809,7 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
             title="Click to jump to document preamble"
           >
             <span>{currentFormatConfig.footerMeta}</span>
-            <span>Page 1</span>
+            <span>Page {currentPage} of {totalPages}</span>
           </div>
         </div>
       </div>
