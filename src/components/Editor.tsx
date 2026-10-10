@@ -2343,7 +2343,7 @@ const markerAreaStyle: React.CSSProperties = {
  * Strict Shared Monospace Typography & Padding Metrics
  * Guarantees zero-drift pixel alignment between transparent textarea caret and syntax backdrop spans.
  */
-export const SHARED_EDITOR_METRICS: React.CSSProperties = {
+const SHARED_EDITOR_METRICS: React.CSSProperties = {
   fontFamily: 'var(--font-mono, "JetBrains Mono", Consolas, "Courier New", monospace)',
   fontSize: 13,
   lineHeight: '21px',
