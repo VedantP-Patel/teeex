@@ -89,7 +89,7 @@ export function parseLatexToVisualBlocks(code: string): ParsedVisualDoc {
 
   // Tokenize the body into visual blocks
   // Regex to match environment blocks and headings
-  const blockRegex = /(\\begin\{(abstract|equation\*?|figure\*?|table\*?|itemize|enumerate)\}[\s\S]*?\\end\{\2\})|(\\\[[\s\S]*?\\\])|(\\(section|subsection|subsubsection)\*?\{[^}]+\})/g;
+  const blockRegex = /(\\begin\{(abstract|equation\*?|align\*?|gather\*?|figure\*?|table\*?|tabular\*?|minipage|algorithm\*?|theorem|lemma|definition|proof|verbatim\*?|lstlisting|itemize|enumerate|description|quote|tcolorbox)\}[\s\S]*?\\end\{\2\})|(\\\[[\s\S]*?\\\])|(\\(section|subsection|subsubsection)\*?\{[^}]+\})/g;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -157,7 +157,19 @@ export function parseLatexToVisualBlocks(code: string): ParsedVisualDoc {
         content: matchedStr,
       });
     }
-    // 4. List: \begin{itemize} or \begin{enumerate}
+    // 4. Table: \begin{table} or \begin{tabular}
+    else if (matchedStr.startsWith('\\begin{table') || matchedStr.startsWith('\\begin{tabular')) {
+      const capMatch = matchedStr.match(/\\caption\{([^}]+)\}/);
+      const labMatch = matchedStr.match(/\\label\{([^}]+)\}/);
+      blocks.push({
+        id: nextId(),
+        type: 'table',
+        caption: capMatch ? capMatch[1].trim() : '',
+        label: labMatch ? labMatch[1].trim() : '',
+        content: matchedStr,
+      });
+    }
+    // 5. List: \begin{itemize} or \begin{enumerate}
     else if (matchedStr.startsWith('\\begin{itemize') || matchedStr.startsWith('\\begin{enumerate')) {
       const isOrdered = matchedStr.startsWith('\\begin{enumerate');
       const inner = matchedStr
@@ -316,6 +328,10 @@ export function serializeVisualDocToLatex(doc: ParsedVisualDoc): string {
         bodyLines.push(`\\begin{${env}}\n${itemsStr}\n\\end{${env}}\n`);
         break;
       }
+
+      case 'table':
+        bodyLines.push(`${b.content}\n`);
+        break;
 
       case 'raw':
         bodyLines.push(`${b.content}\n`);

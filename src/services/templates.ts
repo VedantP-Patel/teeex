@@ -34,6 +34,10 @@ The quantum variational autoencoder comprises an encoder module $E_\\phi$ that m
 \\section{Experimental Results}
 We evaluated our framework against synthetic GHZ and W-states across system sizes up to $N = 12$ qubits. Table I summarizes the reconstruction fidelity and convergence latency.
 
+\\begin{table}[htbp]
+\\centering
+\\caption{Reconstruction Fidelity and Execution Latency Across Quantum State Families}
+\\label{tab:fidelity}
 \\begin{tabular}{l c c c}
 \\hline
 Quantum State & Qubits ($N$) & Fidelity (\\%) & Runtime (ms) \\\\
@@ -44,6 +48,7 @@ Cluster State & 8 & 98.91 & 62.4 \\\\
 Random Haar & 10 & 97.80 & 145.0 \\\\
 \\hline
 \\end{tabular}
+\\end{table}
 
 \\section{Conclusion}
 We demonstrated that attention-based quantum state tomography scales effectively beyond the reach of standard convex optimization solvers. Future work will explore real-time hardware deployment on superconducting architectures.

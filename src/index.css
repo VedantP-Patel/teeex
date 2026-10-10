@@ -908,4 +908,519 @@ input:focus, textarea:focus, select:focus {
   color: var(--accent-rose) !important;
 }
 
+/* ==============================================================================
+   ACADEMIC PUBLICATION SHEET: COMPLETE ENVIRONMENT RENDERING SYSTEM
+   Tables, Minipages, TOC, Theorems, Proofs, Algorithms, Code & Boxes
+   ============================================================================== */
+
+/* --- High-Fidelity Academic Tables --- */
+.latex-floating-table {
+  margin: 18px 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.latex-table-caption {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--paper-text, #1e293b);
+  margin-bottom: 8px;
+  text-align: center;
+  line-height: 1.4;
+  max-width: 90%;
+}
+
+.latex-table-caption strong {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+  margin: 6px 0;
+  break-inside: avoid;
+}
+
+.latex-table {
+  border-collapse: collapse;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--paper-text, #0f172a);
+  margin: 0 auto;
+  background: transparent;
+}
+
+.latex-table th {
+  padding: 6px 12px;
+  font-weight: 700;
+  border-top: 1px solid rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.02);
+  vertical-align: bottom;
+}
+
+.latex-table td {
+  padding: 5px 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  vertical-align: top;
+}
+
+/* Booktabs: Thick top and bottom rules, clean midrule, no vertical lines */
+.table-booktabs {
+  border-top: 2px solid #0f172a !important;
+  border-bottom: 2px solid #0f172a !important;
+}
+
+.table-booktabs thead th {
+  border-top: none !important;
+  border-bottom: 1.2px solid #0f172a !important;
+}
+
+.table-booktabs tbody tr:first-child td {
+  border-top: none !important;
+}
+
+.table-booktabs td {
+  border-top: none;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.table-booktabs tbody tr:last-child td {
+  border-bottom: none !important;
+}
+
+/* --- Minipages & Multi-Column Layouts --- */
+.latex-minipage-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin: 14px 0;
+  width: 100%;
+  break-inside: avoid;
+}
+
+.latex-minipage {
+  display: inline-block;
+  vertical-align: top;
+  box-sizing: border-box;
+}
+
+.latex-minipage .latex-figure-container,
+.latex-minipage .latex-floating-table,
+.latex-minipage .table-container {
+  margin: 4px 0;
+}
+
+/* --- Table of Contents & Lists of Figures/Tables --- */
+.latex-toc {
+  margin: 20px 0;
+  padding: 16px 20px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.015);
+  break-inside: avoid;
+}
+
+.latex-toc-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--paper-text, #0f172a);
+  margin-bottom: 14px;
+}
+
+.latex-toc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.latex-toc-item {
+  display: flex;
+  align-items: baseline;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--paper-text, #1e293b);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.latex-toc-item:hover {
+  background-color: rgba(56, 189, 248, 0.1);
+  color: #0284c7;
+}
+
+.latex-toc-level-1 {
+  font-weight: 700;
+  margin-top: 6px;
+  color: var(--paper-text, #0f172a);
+}
+
+.latex-toc-level-2 {
+  font-weight: 500;
+  padding-left: 18px;
+}
+
+.latex-toc-level-3 {
+  font-weight: 400;
+  padding-left: 36px;
+  font-style: italic;
+  font-size: 11px;
+}
+
+.latex-toc-num {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.latex-toc-text {
+  flex-shrink: 0;
+  max-width: 75%;
+}
+
+.latex-toc-leader {
+  flex: 1;
+  margin: 0 8px;
+  border-bottom: 1.5px dotted rgba(0, 0, 0, 0.35);
+  position: relative;
+  top: -4px;
+  min-width: 24px;
+}
+
+.latex-toc-page {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+/* --- Theorem, Lemma, Corollary, Definition, Remark Environments --- */
+.latex-theorem {
+  margin: 14px 0;
+  padding: 10px 14px;
+  border-left: 3.5px solid #3b82f6;
+  background: rgba(59, 130, 246, 0.035);
+  border-radius: 0 4px 4px 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  break-inside: avoid;
+}
+
+.latex-theorem-header {
+  font-weight: 700;
+  color: var(--paper-text, #0f172a);
+  margin-bottom: 4px;
+}
+
+.latex-theorem-body {
+  color: var(--paper-text, #1e293b);
+}
+
+/* Proof Environment with Q.E.D. Tombstone */
+.latex-proof {
+  margin: 12px 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--paper-text, #1e293b);
+  break-inside: avoid;
+}
+
+.latex-proof-header {
+  font-weight: 600;
+  font-style: italic;
+  margin-bottom: 4px;
+}
+
+.latex-qed-tombstone {
+  font-size: 13px;
+  color: var(--paper-text, #0f172a);
+}
+
+/* --- Algorithm & Pseudocode Environment --- */
+.latex-algorithm {
+  margin: 16px 0;
+  border-top: 2px solid #0f172a;
+  border-bottom: 2px solid #0f172a;
+  padding: 8px 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--paper-text, #0f172a);
+  break-inside: avoid;
+}
+
+.latex-alg-header {
+  font-weight: 700;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  margin-bottom: 8px;
+}
+
+.latex-algorithmic {
+  display: flex;
+  flex-direction: column;
+}
+
+.latex-alg-line {
+  display: flex;
+  align-items: baseline;
+  line-height: 1.55;
+}
+
+.latex-alg-lineno {
+  width: 26px;
+  flex-shrink: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: #64748b;
+  user-select: none;
+}
+
+.latex-alg-text {
+  flex: 1;
+}
+
+.latex-alg-io {
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.latex-alg-comment {
+  color: #64748b;
+  font-style: italic;
+  margin-left: 6px;
+}
+
+/* --- Verbatim & Listings Code Blocks --- */
+.latex-verbatim-container {
+  margin: 12px 0;
+  break-inside: avoid;
+}
+
+.latex-lst-caption {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 4px;
+}
+
+.latex-verbatim {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 10px 14px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  color: #0f172a;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* --- Description & Custom Lists --- */
+.latex-desc-list {
+  margin: 10px 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.latex-desc-term {
+  font-weight: 700;
+  margin-top: 6px;
+  color: var(--paper-text, #0f172a);
+}
+
+.latex-desc-def {
+  margin-left: 18px;
+  margin-bottom: 6px;
+  color: var(--paper-text, #334155);
+}
+
+.latex-custom-list {
+  list-style: none !important;
+  padding-left: 4px !important;
+}
+
+.latex-custom-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.latex-item-marker {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* --- Callout Box (tcolorbox) & Quotes --- */
+.latex-tcolorbox {
+  margin: 14px 0;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.015);
+  break-inside: avoid;
+}
+
+.latex-tcolorbox-title {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 6px 14px;
+  font-weight: 700;
+  font-size: 11.5px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.latex-tcolorbox-content {
+  padding: 10px 14px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.latex-quote {
+  margin: 12px 0;
+  padding: 6px 18px;
+  border-left: 3px solid #cbd5e1;
+  font-style: italic;
+  color: #475569;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.latex-verse {
+  margin: 12px 0;
+  padding-left: 24px;
+  font-style: italic;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+/* --- Equation Number Display --- */
+.latex-math-display {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin: 12px 0;
+}
+
+.latex-math-content {
+  display: flex;
+  justify-content: center;
+  flex: 1;
+}
+
+.latex-eq-number {
+  position: absolute;
+  right: 8px;
+  font-size: 11px;
+  color: #64748b;
+  font-family: inherit;
+}
+
+/* --- Footnotes System --- */
+.latex-footnote-ref {
+  font-size: 9px;
+  font-weight: 600;
+  vertical-align: super;
+  padding: 0 1px;
+}
+
+.latex-footnote-ref a {
+  color: #0284c7;
+  text-decoration: none;
+}
+
+.latex-footnotes-container {
+  margin-top: 24px;
+  padding-top: 10px;
+  font-size: 10px;
+  color: #475569;
+  line-height: 1.45;
+}
+
+.latex-footnotes-divider {
+  width: 120px;
+  border-top: 1px solid #cbd5e1;
+  margin-bottom: 8px;
+}
+
+.latex-footnotes-list {
+  padding-left: 14px;
+  margin: 0;
+}
+
+.latex-footnote-item {
+  margin: 4px 0;
+}
+
+/* --- Rules & Fillers --- */
+.latex-hrule {
+  border: none;
+  border-top: 1px solid rgba(0, 0, 0, 0.2);
+  margin: 12px 0;
+}
+
+.latex-hrulefill {
+  display: inline-block;
+  width: 100%;
+  border-top: 1px solid currentColor;
+}
+
+.latex-dotfill {
+  display: inline-block;
+  width: 100%;
+  border-top: 1.5px dotted currentColor;
+}
+
+/* --- Bibliography --- */
+.latex-bibliography {
+  margin-top: 20px;
+}
+
+.latex-bib-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+}
+
+.latex-bib-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 6px 0;
+}
+
+.latex-bib-marker {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.latex-bib-text {
+  flex: 1;
+}
+
+
 

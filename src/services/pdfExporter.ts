@@ -197,7 +197,7 @@ export function exportDocumentAsPdf({
       page-break-after: avoid !important;
     }
 
-    .latex-math-display, .latex-figure-container, .table-container {
+    .latex-math-display, .latex-figure-container, .table-container, .latex-floating-table, .latex-minipage-row, .latex-toc, .latex-algorithm, .latex-theorem, .latex-proof, .latex-verbatim-container, .latex-tcolorbox {
       break-inside: avoid !important;
       page-break-inside: avoid !important;
       margin: 12px 0 !important;

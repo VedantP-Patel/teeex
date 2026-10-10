@@ -97,11 +97,26 @@ function paginateHtmlIntoPages(
         blockHeight = 70;
       } else if (block.includes('latex-abstract')) {
         blockHeight = 140;
-      } else if (block.startsWith('<table') || block.includes('table-container')) {
+      } else if (block.includes('latex-floating-table') || block.startsWith('<table') || block.includes('table-container')) {
         const rows = (block.match(/<tr/g) || []).length;
-        blockHeight = 50 + rows * 28;
-      } else if (block.startsWith('<ul') || block.startsWith('<ol')) {
-        const items = (block.match(/<li/g) || []).length;
+        blockHeight = 55 + rows * 28;
+      } else if (block.includes('latex-minipage-row')) {
+        blockHeight = 220;
+      } else if (block.includes('latex-toc')) {
+        const items = (block.match(/latex-toc-item/g) || []).length;
+        blockHeight = 50 + items * 24;
+      } else if (block.includes('latex-algorithm')) {
+        const lines = (block.match(/latex-alg-line/g) || []).length;
+        blockHeight = 50 + lines * 22;
+      } else if (block.includes('latex-theorem') || block.includes('latex-proof')) {
+        blockHeight = 90;
+      } else if (block.includes('latex-verbatim')) {
+        const lines = (block.match(/\n/g) || []).length;
+        blockHeight = 45 + lines * 19;
+      } else if (block.includes('latex-tcolorbox') || block.includes('latex-quote')) {
+        blockHeight = 85;
+      } else if (block.startsWith('<ul') || block.startsWith('<ol') || block.startsWith('<dl')) {
+        const items = (block.match(/<(?:li|dt)/g) || []).length;
         blockHeight = 35 + items * 24;
       } else {
         const textLen = block.replace(/<[^>]+>/g, '').length;
@@ -413,6 +428,20 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
     }
 
     const target = e.target as HTMLElement;
+
+    // 1b. Table of Contents navigation: jump to line and scroll preview to target heading
+    const tocItem = target.closest('.latex-toc-item') as HTMLElement | null;
+    if (tocItem) {
+      const targetLine = tocItem.dataset.targetLine ? parseInt(tocItem.dataset.targetLine, 10) : undefined;
+      if (targetLine && !isNaN(targetLine)) {
+        onJumpToLine(targetLine);
+        const headingEl = sheetRef.current?.querySelector(`[data-line="${targetLine}"]`);
+        if (headingEl) {
+          headingEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        return;
+      }
+    }
 
     // 2. Direct data-line attribute on the target or any parent element
     const lineEl = target.closest('[data-line]') as HTMLElement | null;

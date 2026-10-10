@@ -169,7 +169,7 @@ export interface AuditLogEntry {
 
 export interface LatexLabel {
   key: string;
-  type: 'section' | 'figure' | 'table' | 'equation' | 'other';
+  type: 'section' | 'figure' | 'table' | 'equation' | 'theorem' | 'algorithm' | 'other';
   caption?: string;
   line: number;
   fileName: string;
