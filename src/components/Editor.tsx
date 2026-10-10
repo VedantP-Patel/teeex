@@ -1719,8 +1719,13 @@ export const Editor: React.FC<Props> = ({
             style={{
               ...textareaStyle,
               color: syntaxTheme === 'normal' ? 'var(--text-primary)' : 'transparent',
+              WebkitTextFillColor: syntaxTheme === 'normal' ? 'var(--text-primary)' : 'transparent',
               caretColor: '#38bdf8',
-              position: 'relative',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
               zIndex: 2,
               cursor: role === 'viewer' ? 'default' : 'text',
               opacity: role === 'viewer' ? 0.9 : 1,
@@ -2365,6 +2370,9 @@ export const SHARED_EDITOR_METRICS: React.CSSProperties = {
 
 const textareaStyle: React.CSSProperties = {
   ...SHARED_EDITOR_METRICS,
+  position: 'absolute',
+  top: 0,
+  left: 0,
   width: '100%',
   height: '100%',
   backgroundColor: 'transparent',
