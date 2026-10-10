@@ -272,6 +272,7 @@ export function App() {
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isTableBuilderOpen, setIsTableBuilderOpen] = useState(false);
   const [isSymbolsOpen, setIsSymbolsOpen] = useState(false);
+  const [symbolsInitialTab, setSymbolsInitialTab] = useState<'symbols' | 'snippets' | 'macros'>('symbols');
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
   const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
@@ -691,6 +692,34 @@ export function App() {
     setTimeout(() => triggerCompile(), 50);
   };
 
+  // Revert a single file to its checkpoint snapshot
+  const handleRestoreSingleFile = useCallback((file: ProjectFile) => {
+    setFiles(prev => prev.map(f => (f.id === file.id || f.name === file.name) ? { ...file } : f));
+    const updated = files.map(f => (f.id === file.id || f.name === file.name) ? { ...file } : f);
+    updateProject(activeProjectId, { files: updated });
+    setTimeout(() => triggerCompile(), 50);
+  }, [files, activeProjectId]);
+
+  // Inject a custom \newcommand into the preamble (before \begin{document})
+  const handleAddPreambleMacro = useCallback((macroDef: string) => {
+    setFiles(prev => {
+      const mainFile = prev.find(f => f.name.endsWith('.tex') && f.isEntry) || prev.find(f => f.name.endsWith('.tex')) || prev[0];
+      if (!mainFile) return prev;
+      let content = mainFile.content;
+      if (content.includes(macroDef.trim())) {
+        return prev;
+      }
+      const beginDocIdx = content.indexOf('\\begin{document}');
+      if (beginDocIdx !== -1) {
+        content = content.slice(0, beginDocIdx) + macroDef.trim() + '\n\n' + content.slice(beginDocIdx);
+      } else {
+        content = macroDef.trim() + '\n\n' + content;
+      }
+      return prev.map(f => f.id === mainFile.id ? { ...f, content } : f);
+    });
+    setTimeout(() => triggerCompile(), 50);
+  }, []);
+
   // Export pristine publication PDF isolated from IDE UI
   const handleExportPdf = useCallback(() => {
     const sheet = document.querySelector('.latex-paper-sheet') as HTMLElement;
@@ -1004,7 +1033,10 @@ export function App() {
         onToggleTheme={toggleTheme}
         onOpenShare={() => setIsShareOpen(true)}
         onOpenTableBuilder={() => setIsTableBuilderOpen(true)}
-        onOpenSymbols={() => setIsSymbolsOpen(true)}
+        onOpenSymbols={() => {
+          setSymbolsInitialTab('symbols');
+          setIsSymbolsOpen(true);
+        }}
         onOpenTemplates={() => setIsTemplatesOpen(true)}
         onOpenImageUpload={() => setIsImageUploadOpen(true)}
         onOpenSupabase={() => setIsSupabaseOpen(true)}
@@ -1092,6 +1124,10 @@ export function App() {
               onAcceptTrackedChange={handleAcceptTrackedChange}
               onRejectTrackedChange={handleRejectTrackedChange}
               onAddTrackedChange={handleAddTrackedChange}
+              onOpenSnippets={() => {
+                setSymbolsInitialTab('snippets');
+                setIsSymbolsOpen(true);
+              }}
             />
           </div>
 
@@ -1167,6 +1203,8 @@ export function App() {
         isOpen={isSymbolsOpen}
         onClose={() => setIsSymbolsOpen(false)}
         onInsert={handleInsertCode}
+        onAddPreambleMacro={handleAddPreambleMacro}
+        initialTab={symbolsInitialTab}
       />
 
       <TableBuilderModal
@@ -1182,6 +1220,7 @@ export function App() {
         currentFiles={files}
         onCreateCheckpoint={handleCreateCheckpoint}
         onRestoreCheckpoint={handleRestoreCheckpoint}
+        onRestoreSingleFile={handleRestoreSingleFile}
       />
 
       <WordCountModal

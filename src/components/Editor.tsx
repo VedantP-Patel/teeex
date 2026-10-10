@@ -21,7 +21,11 @@ import {
   Palette,
   FileText,
   ChevronDown,
-  Zap
+  Zap,
+  Search,
+  ArrowUp,
+  ArrowDown,
+  Layers
 } from 'lucide-react';
 import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile, TrackedChange } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
@@ -56,6 +60,7 @@ interface Props {
   onAcceptTrackedChange?: (changeId: string) => void;
   onRejectTrackedChange?: (changeId: string) => void;
   onAddTrackedChange?: (change: Omit<TrackedChange, 'id' | 'status' | 'timestamp'>) => void;
+  onOpenSnippets?: () => void;
 }
 
 export const Editor: React.FC<Props> = ({
@@ -85,6 +90,7 @@ export const Editor: React.FC<Props> = ({
   onAcceptTrackedChange,
   onRejectTrackedChange,
   onAddTrackedChange: _onAddTrackedChange,
+  onOpenSnippets,
 }) => {
   const [editorMode, setEditorMode] = useState<'code' | 'visual'>(() => {
     return (localStorage.getItem('teeex_editor_mode') as 'code' | 'visual') || 'code';
@@ -99,6 +105,174 @@ export const Editor: React.FC<Props> = ({
   const [activeCommentLine, setActiveCommentLine] = useState<number | null>(null);
   const [commentDraft, setCommentDraft] = useState('');
   const [currentCursorLine, setCurrentCursorLine] = useState(1);
+
+  // In-Editor Find & Replace State
+  const [isFindOpen, setIsFindOpen] = useState(false);
+  const [isReplaceOpen, setIsReplaceOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [replaceQuery, setReplaceQuery] = useState('');
+  const [matchCase, setMatchCase] = useState(false);
+  const [matchWord, setMatchWord] = useState(false);
+  const [useRegex, setUseRegex] = useState(false);
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const [replaceFeedback, setReplaceFeedback] = useState<string | null>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
+
+  // Compute all matches for Find & Replace
+  interface MatchRange {
+    start: number;
+    end: number;
+    line: number;
+    text: string;
+  }
+
+  const findMatches = React.useMemo<MatchRange[]>(() => {
+    if (!findQuery) return [];
+    try {
+      let patternStr = findQuery;
+      if (!useRegex) {
+        patternStr = patternStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      }
+      if (matchWord) {
+        patternStr = `\\b${patternStr}\\b`;
+      }
+      const flags = matchCase ? 'g' : 'gi';
+      const regex = new RegExp(patternStr, flags);
+      const matches: MatchRange[] = [];
+      let match: RegExpExecArray | null;
+
+      let count = 0;
+      while ((match = regex.exec(code)) !== null && count < 2000) {
+        count++;
+        const start = match.index;
+        const end = match.index + match[0].length;
+        const textBefore = code.slice(0, start);
+        const line = textBefore.split('\n').length;
+        matches.push({
+          start,
+          end,
+          line,
+          text: match[0],
+        });
+        if (match[0].length === 0) {
+          regex.lastIndex++;
+        }
+      }
+      return matches;
+    } catch {
+      return [];
+    }
+  }, [code, findQuery, matchCase, matchWord, useRegex]);
+
+  const scrollToMatch = (m: MatchRange) => {
+    if (!textareaRef.current) return;
+    const ta = textareaRef.current;
+    ta.focus();
+    ta.setSelectionRange(m.start, m.end);
+
+    const lineHeight = 21;
+    const targetScroll = Math.max(0, (m.line - 4) * lineHeight);
+    ta.scrollTop = targetScroll;
+    setScrollTop(targetScroll);
+    if (gutterRef.current) gutterRef.current.scrollTop = targetScroll;
+    if (syntaxBackdropRef.current) syntaxBackdropRef.current.scrollTop = targetScroll;
+  };
+
+  const handleNextMatch = () => {
+    if (findMatches.length === 0) return;
+    const nextIdx = (activeMatchIndex + 1) % findMatches.length;
+    setActiveMatchIndex(nextIdx);
+    scrollToMatch(findMatches[nextIdx]);
+  };
+
+  const handlePrevMatch = () => {
+    if (findMatches.length === 0) return;
+    const prevIdx = (activeMatchIndex - 1 + findMatches.length) % findMatches.length;
+    setActiveMatchIndex(prevIdx);
+    scrollToMatch(findMatches[prevIdx]);
+  };
+
+  const handleReplaceCurrent = () => {
+    if (role === 'viewer' || findMatches.length === 0) return;
+    const curr = findMatches[activeMatchIndex] || findMatches[0];
+    if (!curr) return;
+
+    const newCode = code.substring(0, curr.start) + replaceQuery + code.substring(curr.end);
+    onChange(newCode);
+
+    setReplaceFeedback('Replaced match');
+    setTimeout(() => setReplaceFeedback(null), 1500);
+
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(curr.start, curr.start + replaceQuery.length);
+      }
+    }, 0);
+  };
+
+  const handleReplaceAll = () => {
+    if (role === 'viewer' || findMatches.length === 0) return;
+    try {
+      let patternStr = findQuery;
+      if (!useRegex) {
+        patternStr = patternStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      }
+      if (matchWord) {
+        patternStr = `\\b${patternStr}\\b`;
+      }
+      const flags = matchCase ? 'g' : 'gi';
+      const regex = new RegExp(patternStr, flags);
+      const replacedCount = findMatches.length;
+      const newCode = code.replace(regex, replaceQuery);
+      onChange(newCode);
+
+      setReplaceFeedback(`Replaced ${replacedCount} occurrence${replacedCount > 1 ? 's' : ''}`);
+      setTimeout(() => setReplaceFeedback(null), 2000);
+    } catch (e: any) {
+      alert('Replace All failed: ' + e.message);
+    }
+  };
+
+  // Global shortcut listeners for Ctrl+F and Ctrl+H
+  useEffect(() => {
+    const handleGlobalKeys = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        const target = e.target as HTMLElement;
+        const isOtherInput = (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') && target !== textareaRef.current && target !== findInputRef.current;
+        if (!isOtherInput) {
+          e.preventDefault();
+          if (textareaRef.current) {
+            const ta = textareaRef.current;
+            const selected = code.substring(ta.selectionStart, ta.selectionEnd);
+            if (selected && selected.length < 100 && !selected.includes('\n')) {
+              setFindQuery(selected);
+            }
+          }
+          setIsFindOpen(true);
+          setTimeout(() => findInputRef.current?.focus(), 50);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) {
+        const target = e.target as HTMLElement;
+        const isOtherInput = (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') && target !== textareaRef.current && target !== findInputRef.current;
+        if (!isOtherInput) {
+          e.preventDefault();
+          if (textareaRef.current) {
+            const ta = textareaRef.current;
+            const selected = code.substring(ta.selectionStart, ta.selectionEnd);
+            if (selected && selected.length < 100 && !selected.includes('\n')) {
+              setFindQuery(selected);
+            }
+          }
+          setIsFindOpen(true);
+          setIsReplaceOpen(true);
+          setTimeout(() => findInputRef.current?.focus(), 50);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeys);
+    return () => window.removeEventListener('keydown', handleGlobalKeys);
+  }, [code]);
 
   // Citation Autocomplete state
   const [citeQuery, setCiteQuery] = useState<string | null>(null);
@@ -290,11 +464,42 @@ export const Editor: React.FC<Props> = ({
     }
   }, [targetLine, lines, onClearTargetLine, editorMode]);
 
-  // Handle key events: Tab, Ctrl+Enter, auto-close brackets
+  // Handle key events: Tab, Ctrl+Enter, auto-close brackets, Ctrl+F, Ctrl+H, Esc
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       onCompileShortcut();
+      return;
+    }
+
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault();
+      const ta = e.currentTarget;
+      const selected = code.substring(ta.selectionStart, ta.selectionEnd);
+      if (selected && selected.length < 100 && !selected.includes('\n')) {
+        setFindQuery(selected);
+      }
+      setIsFindOpen(true);
+      setTimeout(() => findInputRef.current?.focus(), 50);
+      return;
+    }
+
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) {
+      e.preventDefault();
+      const ta = e.currentTarget;
+      const selected = code.substring(ta.selectionStart, ta.selectionEnd);
+      if (selected && selected.length < 100 && !selected.includes('\n')) {
+        setFindQuery(selected);
+      }
+      setIsFindOpen(true);
+      setIsReplaceOpen(true);
+      setTimeout(() => findInputRef.current?.focus(), 50);
+      return;
+    }
+
+    if (e.key === 'Escape' && isFindOpen) {
+      e.preventDefault();
+      setIsFindOpen(false);
       return;
     }
 
@@ -730,6 +935,21 @@ export const Editor: React.FC<Props> = ({
                 >
                   <List size={11} />
                 </button>
+
+                {onOpenSnippets && (
+                  <>
+                    <div style={formatDividerStyle} />
+                    <button
+                      type="button"
+                      onClick={onOpenSnippets}
+                      className="format-toolbar-btn"
+                      style={{ ...formatBtnStyle, color: '#a855f7' }}
+                      title="LaTeX Snippets & Macro Manager (Matrices, Algorithms, TikZ, \newcommand)"
+                    >
+                      <Layers size={11} />
+                    </button>
+                  </>
+                )}
               </div>
             )}
 
@@ -1028,6 +1248,28 @@ export const Editor: React.FC<Props> = ({
                   {comments.filter(c => !c.resolved).length + trackedChanges.filter(t => t.status === 'pending').length}
                 </span>
               )}
+            </button>
+
+            {/* Find & Replace Bar Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsFindOpen(prev => {
+                  const next = !prev;
+                  if (next) setTimeout(() => findInputRef.current?.focus(), 50);
+                  return next;
+                });
+              }}
+              className="btn-ghost"
+              style={{
+                ...toolBtnStyle,
+                color: isFindOpen ? '#38bdf8' : 'var(--text-secondary)',
+                backgroundColor: isFindOpen ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+              }}
+              title="Find & Replace in Document (Ctrl+F / Ctrl+H)"
+            >
+              <Search size={12} />
+              <span style={{ fontSize: 10 }}>Find</span>
             </button>
           </div>
         )}
@@ -1477,6 +1719,277 @@ export const Editor: React.FC<Props> = ({
               opacity: role === 'viewer' ? 0.9 : 1,
             }}
           />
+
+          {/* Floating Find & Replace Bar */}
+          {isFindOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 8,
+                right: isReviewPanelOpen ? 326 : 14,
+                zIndex: 42,
+                backgroundColor: 'var(--bg-surface-1)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-md)',
+                boxShadow: '0 12px 32px rgba(0, 0, 0, 0.6)',
+                padding: '8px 10px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                backdropFilter: 'blur(16px)',
+                animation: 'modalContent 0.18s var(--ease-spring) forwards',
+                minWidth: 350,
+                maxWidth: 'calc(100% - 28px)',
+              }}
+            >
+              {/* Row 1: Search Input + Mode Toggles + Navigation + Close */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {/* Expand/Collapse Replace Chevron */}
+                <button
+                  type="button"
+                  onClick={() => setIsReplaceOpen(prev => !prev)}
+                  className="btn-ghost"
+                  style={{ padding: '2px 4px', color: isReplaceOpen ? '#38bdf8' : 'var(--text-muted)' }}
+                  title={isReplaceOpen ? 'Collapse Replace field' : 'Expand Replace field (Ctrl+H)'}
+                >
+                  <ChevronDown
+                    size={13}
+                    style={{
+                      transform: isReplaceOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+                      transition: 'transform 0.15s ease',
+                    }}
+                  />
+                </button>
+
+                {/* Search Input Box */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    flex: 1,
+                    backgroundColor: 'var(--bg-surface-0)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 4,
+                    padding: '3px 8px',
+                    gap: 6,
+                    minWidth: 0,
+                  }}
+                >
+                  <Search size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                  <input
+                    ref={findInputRef}
+                    type="text"
+                    placeholder="Find (Enter: next, Shift+Enter: prev)..."
+                    value={findQuery}
+                    onChange={e => {
+                      setFindQuery(e.target.value);
+                      setActiveMatchIndex(0);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (e.shiftKey) handlePrevMatch();
+                        else handleNextMatch();
+                      } else if (e.key === 'Escape') {
+                        setIsFindOpen(false);
+                        textareaRef.current?.focus();
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      background: 'none',
+                      border: 'none',
+                      outline: 'none',
+                      fontSize: 11.5,
+                      color: 'var(--text-primary)',
+                      fontFamily: 'var(--font-mono)',
+                      minWidth: 0,
+                    }}
+                  />
+
+                  {/* Match Count Badge */}
+                  {findQuery && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontFamily: 'var(--font-mono)',
+                        fontWeight: 600,
+                        color: findMatches.length > 0 ? '#10b981' : '#f43f5e',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {findMatches.length > 0 ? `${activeMatchIndex + 1} of ${findMatches.length}` : '0 results'}
+                    </span>
+                  )}
+                </div>
+
+                {/* Search Modifiers: Aa (Case), \b (Word), .* (Regex) */}
+                <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => setMatchCase(prev => !prev)}
+                    style={{
+                      padding: '2px 5px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      borderRadius: 3,
+                      border: `1px solid ${matchCase ? '#38bdf8' : 'transparent'}`,
+                      backgroundColor: matchCase ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                      color: matchCase ? '#38bdf8' : 'var(--text-muted)',
+                      cursor: 'pointer',
+                    }}
+                    title="Match Case"
+                  >
+                    Aa
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMatchWord(prev => !prev)}
+                    style={{
+                      padding: '2px 5px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      borderRadius: 3,
+                      border: `1px solid ${matchWord ? '#38bdf8' : 'transparent'}`,
+                      backgroundColor: matchWord ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                      color: matchWord ? '#38bdf8' : 'var(--text-muted)',
+                      cursor: 'pointer',
+                    }}
+                    title="Match Whole Word"
+                  >
+                    \b
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUseRegex(prev => !prev)}
+                    style={{
+                      padding: '2px 5px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      borderRadius: 3,
+                      border: `1px solid ${useRegex ? '#38bdf8' : 'transparent'}`,
+                      backgroundColor: useRegex ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                      color: useRegex ? '#38bdf8' : 'var(--text-muted)',
+                      cursor: 'pointer',
+                    }}
+                    title="Regular Expression"
+                  >
+                    .*
+                  </button>
+                </div>
+
+                {/* Arrows: Previous / Next Match */}
+                <button
+                  type="button"
+                  onClick={handlePrevMatch}
+                  disabled={findMatches.length === 0}
+                  className="btn-ghost"
+                  style={{ padding: '3px 4px', color: findMatches.length > 0 ? 'var(--text-primary)' : 'var(--text-faint)' }}
+                  title="Previous Match (Shift+Enter)"
+                >
+                  <ArrowUp size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNextMatch}
+                  disabled={findMatches.length === 0}
+                  className="btn-ghost"
+                  style={{ padding: '3px 4px', color: findMatches.length > 0 ? 'var(--text-primary)' : 'var(--text-faint)' }}
+                  title="Next Match (Enter)"
+                >
+                  <ArrowDown size={12} />
+                </button>
+
+                {/* Close Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsFindOpen(false);
+                    textareaRef.current?.focus();
+                  }}
+                  className="btn-ghost"
+                  style={{ padding: '3px 4px', color: 'var(--text-muted)' }}
+                  title="Close (Esc)"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+
+              {/* Row 2: Replace Input + Action Buttons */}
+              {isReplaceOpen && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 4, borderTop: '1px solid var(--border-subtle)' }}>
+                  <div style={{ width: 18 }} />
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      flex: 1,
+                      backgroundColor: 'var(--bg-surface-0)',
+                      border: '1px solid var(--border-medium)',
+                      borderRadius: 4,
+                      padding: '3px 8px',
+                      minWidth: 0,
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="Replace with..."
+                      value={replaceQuery}
+                      onChange={e => setReplaceQuery(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleReplaceCurrent();
+                        } else if (e.key === 'Escape') {
+                          setIsFindOpen(false);
+                          textareaRef.current?.focus();
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        background: 'none',
+                        border: 'none',
+                        outline: 'none',
+                        fontSize: 11.5,
+                        color: 'var(--text-primary)',
+                        fontFamily: 'var(--font-mono)',
+                        minWidth: 0,
+                      }}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleReplaceCurrent}
+                    disabled={role === 'viewer' || findMatches.length === 0}
+                    className="btn-secondary"
+                    style={{ fontSize: 10.5, padding: '3px 8px' }}
+                    title="Replace current match"
+                  >
+                    Replace
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleReplaceAll}
+                    disabled={role === 'viewer' || findMatches.length === 0}
+                    className="btn-primary"
+                    style={{ fontSize: 10.5, padding: '3px 8px' }}
+                    title="Replace all matching occurrences"
+                  >
+                    Replace All
+                  </button>
+
+                  {replaceFeedback && (
+                    <span style={{ fontSize: 10, color: '#10b981', fontWeight: 600 }}>
+                      {replaceFeedback}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Floating Review & Suggestions Drawer */}
           {isReviewPanelOpen && (
