@@ -34,34 +34,38 @@ export function parseLatexDimensionToCss(dim: string): string {
   const clean = dim.trim().replace(/[{}]/g, '');
   if (!clean) return '100%';
 
+  const isNeg = clean.startsWith('-');
+  const unsigned = isNeg ? clean.slice(1).trim() : clean;
+
   // Match relative widths: e.g. 0.48\textwidth, 0.5\columnwidth, \linewidth, \textwidth
-  const relMatch = clean.match(/^([0-9.]*)\s*\\(textwidth|columnwidth|linewidth|paperwidth|pagewidth)$/i);
+  const relMatch = unsigned.match(/^([0-9.]*)\s*\\(textwidth|columnwidth|linewidth|paperwidth|pagewidth)$/i);
   if (relMatch) {
     const factor = relMatch[1] ? parseFloat(relMatch[1]) : 1.0;
     if (!isNaN(factor)) {
-      return `${Math.round(factor * 1000) / 10}%`;
+      const val = Math.round(factor * 1000) / 10;
+      return isNeg ? `-${val}%` : `${val}%`;
     }
-    return '100%';
+    return isNeg ? '-100%' : '100%';
   }
 
   // Explicit units: cm, mm, in, pt, em, ex, px
-  const unitMatch = clean.match(/^([0-9.]+)\s*(cm|mm|in|pt|em|ex|px)$/i);
+  const unitMatch = unsigned.match(/^([0-9.]+)\s*(cm|mm|in|pt|em|ex|px)$/i);
   if (unitMatch) {
     const val = parseFloat(unitMatch[1]);
     const unit = unitMatch[2].toLowerCase();
     if (!isNaN(val)) {
-      return `${val}${unit}`;
+      return isNeg ? `-${val}${unit}` : `${val}${unit}`;
     }
   }
 
   // Pure number fallback
-  const numMatch = clean.match(/^([0-9.]+)$/);
+  const numMatch = unsigned.match(/^([0-9.]+)$/);
   if (numMatch) {
-    return `${numMatch[1]}px`;
+    return isNeg ? `-${numMatch[1]}px` : `${numMatch[1]}px`;
   }
 
-  if (clean.includes('\\textwidth') || clean.includes('\\columnwidth') || clean.includes('\\linewidth')) {
-    return '100%';
+  if (unsigned.includes('\\textwidth') || unsigned.includes('\\columnwidth') || unsigned.includes('\\linewidth')) {
+    return isNeg ? '-100%' : '100%';
   }
 
   return '100%';
@@ -92,6 +96,7 @@ export interface ColSpecItem {
   width?: string;
   borderLeft?: boolean;
   borderRight?: boolean;
+  isX?: boolean;
 }
 
 export function parseColSpec(rawSpec: string): ColSpecItem[] {
@@ -140,6 +145,49 @@ export function parseColSpec(rawSpec: string): ColSpecItem[] {
         borderLeft: pendingBorderLeft,
       });
       pendingBorderLeft = false;
+    } else if (ch === '>') {
+      // Lookahead for formatting commands inside >{...} e.g. >{\centering\arraybackslash}X
+      i++;
+      let formatCmd = '';
+      if (spec[i] === '{') {
+        let depth = 1;
+        const startIdx = i + 1;
+        i++;
+        while (i < spec.length && depth > 0) {
+          if (spec[i] === '{') depth++;
+          else if (spec[i] === '}') depth--;
+          i++;
+        }
+        formatCmd = spec.substring(startIdx, i - 1);
+      }
+      let alignOverride: 'left' | 'center' | 'right' | undefined;
+      if (formatCmd.includes('centering')) alignOverride = 'center';
+      else if (formatCmd.includes('raggedleft')) alignOverride = 'right';
+      else if (formatCmd.includes('raggedright')) alignOverride = 'left';
+
+      if (i < spec.length) {
+        const nextCol = spec[i];
+        if (nextCol === 'X') {
+          cols.push({
+            align: alignOverride || 'left',
+            isX: true,
+            borderLeft: pendingBorderLeft,
+          });
+          pendingBorderLeft = false;
+          i++;
+        } else if (nextCol === 'c' || nextCol === 'l' || nextCol === 'r') {
+          cols.push({
+            align: alignOverride || (nextCol === 'c' ? 'center' : nextCol === 'r' ? 'right' : 'left'),
+            borderLeft: pendingBorderLeft,
+          });
+          pendingBorderLeft = false;
+          i++;
+        }
+      }
+    } else if (ch === 'X') {
+      cols.push({ align: 'left', isX: true, borderLeft: pendingBorderLeft });
+      pendingBorderLeft = false;
+      i++;
     } else if (ch === '@' || ch === '!') {
       i++;
       if (spec[i] === '{') {
@@ -152,8 +200,8 @@ export function parseColSpec(rawSpec: string): ColSpecItem[] {
         }
       }
     } else {
-      if (ch === 'X' || ch === 'S') {
-        cols.push({ align: 'left', borderLeft: pendingBorderLeft });
+      if (ch === 'S') {
+        cols.push({ align: 'right', borderLeft: pendingBorderLeft });
         pendingBorderLeft = false;
       }
       i++;
@@ -214,10 +262,14 @@ export function parseTabularEnvironment(
   tableContent: string,
   colSpecRaw: string,
   _rawLines: string[],
-  tabLine: number
+  tabLine: number,
+  tableWidthRaw?: string
 ): string {
   const cols = parseColSpec(colSpecRaw);
   const isBooktabs = /\\(?:toprule|midrule|bottomrule)/.test(tableContent);
+  const hasXColumns = cols.some(c => c.isX);
+  const isTabularx = !!tableWidthRaw || hasXColumns;
+  const tableWidthCss = tableWidthRaw ? parseLatexDimensionToCss(tableWidthRaw) : (hasXColumns ? '100%' : '');
 
   const rawRows = tableContent
     .split(/\\\\(?:\s*\[[^\]]*\])?/)
@@ -259,6 +311,7 @@ export function parseTabularEnvironment(
       let borderLeft = cols[cIdx]?.borderLeft || false;
       let borderRight = cols[cIdx]?.borderRight || false;
       let colWidth = cols[cIdx]?.width;
+      const isXCol = cols[cIdx]?.isX || false;
 
       // Detect \multicolumn{num}{spec}{content}
       const mcMatch = cellText.match(/\\multicolumn\{(\d+)\}\{([^}]+)\}\{([\s\S]*)\}/);
@@ -287,12 +340,17 @@ export function parseTabularEnvironment(
       if (borderLeft) styleParts.push('border-left: 1px solid #cbd5e1;');
       if (borderRight) styleParts.push('border-right: 1px solid #cbd5e1;');
       if (colWidth) styleParts.push(`width: ${colWidth}; min-width: ${colWidth};`);
+      if (isXCol) styleParts.push('word-wrap: break-word; overflow-wrap: break-word; white-space: normal;');
 
+      const classParts: string[] = [];
+      if (isXCol) classParts.push('col-is-x');
+
+      const classAttr = classParts.length > 0 ? ` class="${classParts.join(' ')}"` : '';
       const styleAttr = styleParts.length > 0 ? ` style="${styleParts.join(' ')}"` : '';
       const tag = isHeaderRow ? 'th' : 'td';
       const parsedCell = parseInlineFormatting(cellText.trim());
 
-      cellsHtml += `<${tag}${colspan > 1 ? ` colspan="${colspan}"` : ''}${rowspanAttr}${styleAttr}>${parsedCell}</${tag}>`;
+      cellsHtml += `<${tag}${colspan > 1 ? ` colspan="${colspan}"` : ''}${rowspanAttr}${classAttr}${styleAttr}>${parsedCell}</${tag}>`;
     }
 
     const rowClass = (hasMidRule || hasTopRule || hasBottomRule) ? ' class="table-rule-row"' : '';
@@ -309,10 +367,14 @@ export function parseTabularEnvironment(
 
   const tableClasses = ['latex-table'];
   if (isBooktabs) tableClasses.push('table-booktabs');
+  if (isTabularx) tableClasses.push('table-tabularx');
+
+  const containerStyle = tableWidthCss ? ` style="width: 100%; max-width: 100%;"` : '';
+  const tableStyle = tableWidthCss ? ` style="width: ${tableWidthCss}; max-width: 100%;"` : '';
 
   return `
-    <div class="table-container synctex-target" data-line="${tabLine}" title="Click to jump to table in code">
-      <table class="${tableClasses.join(' ')}">
+    <div class="table-container synctex-target" data-line="${tabLine}"${containerStyle} title="Click to jump to table in code">
+      <table class="${tableClasses.join(' ')}"${tableStyle}>
         ${theadHtml ? `<thead>${theadHtml}</thead>` : ''}
         <tbody>${tbodyHtml}</tbody>
       </table>
@@ -1153,7 +1215,7 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   // --------------------------------------------------------------------------
   let tableCounter = 0;
 
-  // Floating Table Environment: \begin{table} ... \begin{tabular} ... \caption ... \end{table}
+  // Floating Table Environment: \begin{table} ... \begin{tabularx} or \begin{tabular} ... \caption ... \end{table}
   bodyText = bodyText.replace(/\\begin\{table\*?\}(?:\[.*?\])?([\s\S]*?)\\end\{table\*?\}/g, (_, tableBody) => {
     tableCounter++;
     const tabLine = findSourceLine('table', rawLines, '\\begin{table');
@@ -1163,13 +1225,24 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     const label = labelMatch ? labelMatch[1].trim() : '';
 
     let tabularHtml = '';
-    const tabularMatch = tableBody.match(/\\begin\{(?:tabular|tablular)\*?\}(?:\{[^}]*\})?\{([^}]+)\}([\s\S]*?)\\end\{(?:tabular|tablular)\*?\}/);
-    if (tabularMatch) {
-      const colSpec = tabularMatch[1];
-      const tabContent = tabularMatch[2];
-      tabularHtml = parseTabularEnvironment(tabContent, colSpec, rawLines, tabLine);
+
+    // 1. Check for tabularx, tabulary, tabular*
+    const tabularxMatch = tableBody.match(/\\begin\{(tabularx|tabulary|tabular\*)\*?\}(?:\[[^\]]*\])?\{([^}]+)\}(?:(?:\[[^\]]*\])?\{([^}]+)\})?([\s\S]*?)\\end\{\1\*?\}/);
+    if (tabularxMatch) {
+      const width = tabularxMatch[3] ? tabularxMatch[2] : '100%';
+      const colSpec = tabularxMatch[3] ? tabularxMatch[3] : tabularxMatch[2];
+      const tabContent = tabularxMatch[4];
+      tabularHtml = parseTabularEnvironment(tabContent, colSpec, rawLines, tabLine, width);
     } else {
-      tabularHtml = parseInlineFormatting(tableBody.replace(/\\caption(?:\[.*?\])?\{[^}]+\}/g, '').replace(/\\label\{[^}]+\}/g, '').replace(/\\centering/g, ''));
+      // 2. Check for standard tabular, tablular
+      const tabularMatch = tableBody.match(/\\begin\{(tabular|tablular)\*?\}(?:\[[^\]]*\])?\{([^}]+)\}([\s\S]*?)\\end\{(?:tabular|tablular)\*?\}/);
+      if (tabularMatch) {
+        const colSpec = tabularMatch[2];
+        const tabContent = tabularMatch[3];
+        tabularHtml = parseTabularEnvironment(tabContent, colSpec, rawLines, tabLine);
+      } else {
+        tabularHtml = parseInlineFormatting(tableBody.replace(/\\caption(?:\[.*?\])?\{[^}]+\}/g, '').replace(/\\label\{[^}]+\}/g, '').replace(/\\centering/g, ''));
+      }
     }
 
     const captionHtml = caption ? `
@@ -1186,10 +1259,44 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     `;
   });
 
+  // Standalone tabularx, tabulary, tabular* outside of \begin{table}
+  bodyText = bodyText.replace(/\\begin\{(tabularx|tabulary|tabular\*)\*?\}(?:\[[^\]]*\])?\{([^}]+)\}(?:(?:\[[^\]]*\])?\{([^}]+)\})?([\s\S]*?)\\end\{\1\*?\}/g, (_, envName, arg1, arg2, content) => {
+    const tabLine = findSourceLine(envName, rawLines, `\\begin{${envName}`);
+    const width = arg2 ? arg1 : '100%';
+    const colSpec = arg2 ? arg2 : arg1;
+    return parseTabularEnvironment(content, colSpec, rawLines, tabLine, width);
+  });
+
   // Standalone \begin{tabular} or \begin{tablular} outside of \begin{table}
-  bodyText = bodyText.replace(/\\begin\{(?:tabular|tablular)\*?\}(?:\{[^}]*\})?\{([^}]+)\}([\s\S]*?)\\end\{(?:tabular|tablular)\*?\}/g, (_, colSpec, content) => {
-    const tabLine = findSourceLine('tabular', rawLines, '\\begin{tabular');
+  bodyText = bodyText.replace(/\\begin\{(tabular|tablular)\*?\}(?:\[[^\]]*\])?\{([^}]+)\}([\s\S]*?)\\end\{(?:tabular|tablular)\*?\}/g, (_, envName, colSpec, content) => {
+    const tabLine = findSourceLine(envName, rawLines, `\\begin{${envName}`);
     return parseTabularEnvironment(content, colSpec, rawLines, tabLine);
+  });
+
+  // --------------------------------------------------------------------------
+  // STAGE 3B: VERTICAL SPACING & FILLERS
+  // Handles \vspace, \vspace*, \bigskip, \medskip, \smallskip, \vfill, \vskip
+  // --------------------------------------------------------------------------
+  bodyText = bodyText.replace(/\\vspace\*?\{([^}]+)\}/g, (_, dim) => {
+    const isNeg = dim.trim().startsWith('-');
+    const cssDim = parseLatexDimensionToCss(dim.trim().replace(/^-/, ''));
+    if (isNeg) {
+      return `\n\n<div class="latex-vspace latex-vspace-neg" style="margin-top: -${cssDim}; height: 0; display: block;"></div>\n\n`;
+    }
+    return `\n\n<div class="latex-vspace" style="height: ${cssDim}; min-height: ${cssDim}; display: block;"></div>\n\n`;
+  });
+
+  bodyText = bodyText.replace(/\\bigskip\b/g, '\n\n<div class="latex-vspace latex-bigskip" style="height: 18px; display: block;"></div>\n\n');
+  bodyText = bodyText.replace(/\\medskip\b/g, '\n\n<div class="latex-vspace latex-medskip" style="height: 10px; display: block;"></div>\n\n');
+  bodyText = bodyText.replace(/\\smallskip\b/g, '\n\n<div class="latex-vspace latex-smallskip" style="height: 5px; display: block;"></div>\n\n');
+  bodyText = bodyText.replace(/\\vfill\b/g, '\n\n<div class="latex-vfill" style="flex: 1; min-height: 20px; display: block;"></div>\n\n');
+  bodyText = bodyText.replace(/\\vskip\s*([0-9.-]+(?:cm|mm|in|pt|em|ex|px))\b/g, (_, dim) => {
+    const isNeg = dim.trim().startsWith('-');
+    const cssDim = parseLatexDimensionToCss(dim.trim().replace(/^-/, ''));
+    if (isNeg) {
+      return `\n\n<div class="latex-vspace latex-vspace-neg" style="margin-top: -${cssDim}; height: 0; display: block;"></div>\n\n`;
+    }
+    return `\n\n<div class="latex-vspace" style="height: ${cssDim}; min-height: ${cssDim}; display: block;"></div>\n\n`;
   });
 
   // --------------------------------------------------------------------------
@@ -1483,7 +1590,7 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
     .replace(/(<\/(?:h2|h3|h4|div|ul|ol|dl|blockquote|table|pre)>)\s*([^\n<\s])/g, '$1\n\n$2')
     .replace(/([^\n>\s])\s*(<(?:h2|h3|h4|div|ul|ol|dl|blockquote|table|pre)[\s>])/g, '$1\n\n$2');
 
-  // Paragraph wrapping with accurate data-line anchors
+  // Paragraph wrapping with accurate data-line anchors and indentation awareness
   const paragraphs = bodyText
     .split(/\n\s*\n/)
     .map(p => p.trim())
@@ -1492,9 +1599,26 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
       if (/^<(?:h2|h3|h4|div|ul|ol|dl|blockquote|table|pre)[\s>]/.test(p) || p.startsWith('<!--')) {
         return p;
       }
-      const cleanSnippet = p.replace(/<[^>]+>/g, '').trim().slice(0, 30);
+
+      let pClass = 'latex-paragraph';
+      const pStyles: string[] = [];
+
+      let cleanContent = p;
+      if (/^\\noindent\b/.test(cleanContent)) {
+        pClass += ' latex-noindent';
+        pStyles.push('text-indent: 0 !important;');
+        cleanContent = cleanContent.replace(/^\\noindent\s*/, '');
+      } else if (/^\\indent\b/.test(cleanContent)) {
+        pClass += ' latex-force-indent';
+        pStyles.push('text-indent: 1.5em !important;');
+        cleanContent = cleanContent.replace(/^\\indent\s*/, '');
+      }
+
+      const cleanSnippet = cleanContent.replace(/<[^>]+>/g, '').trim().slice(0, 30);
       const pLine = cleanSnippet ? findSourceLine(cleanSnippet.slice(0, 18), rawLines) : 1;
-      return `<p class="latex-paragraph synctex-target" data-line="${pLine}" title="Click to jump to line ${pLine} in code">${p}</p>`;
+      const styleAttr = pStyles.length > 0 ? ` style="${pStyles.join(' ')}"` : '';
+
+      return `<p class="${pClass} synctex-target"${styleAttr} data-line="${pLine}" title="Click to jump to line ${pLine} in code">${cleanContent}</p>`;
     });
 
   let finalHtml = paragraphs.join('\n\n');
@@ -1513,6 +1637,7 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
  * Universal inline formatting transformer:
  * Handles \textbf, \textit, \underline, \texttt, \textsc, \textsf, \textsl,
  * \sout, \textcolor, \colorbox, \rule, \hrule, \cite, \ref, \eqref, \autoref,
+ * \indent, \noindent, \hspace, \quad, \qquad, \enspace, \hfill,
  * smart quotes, em-dash, and en-dash.
  */
 function parseInlineFormatting(text: string): string {
@@ -1529,6 +1654,16 @@ function parseInlineFormatting(text: string): string {
     .replace(/\\(?:sout|st)\{([^}]+)\}/g, '<del>$1</del>')
     .replace(/\\textsuperscript\{([^}]+)\}/g, '<sup>$1</sup>')
     .replace(/\\textsubscript\{([^}]+)\}/g, '<sub>$1</sub>')
+
+    // Horizontal Spacing, Indentation & Fillers
+    .replace(/\\indent\b/g, '<span class="latex-indent" style="display: inline-block; width: 1.5em;"></span>')
+    .replace(/\\noindent\b/g, '<span class="latex-noindent"></span>')
+    .replace(/\\hspace\*?\{([^}]+)\}/g, (_, dim) => `<span class="latex-hspace" style="display: inline-block; width: ${parseLatexDimensionToCss(dim)};"></span>`)
+    .replace(/\\quad\b/g, '<span class="latex-space-quad" style="display: inline-block; width: 1em;"></span>')
+    .replace(/\\qquad\b/g, '<span class="latex-space-qquad" style="display: inline-block; width: 2em;"></span>')
+    .replace(/\\enspace\b/g, '<span class="latex-space-enspace" style="display: inline-block; width: 0.5em;"></span>')
+    .replace(/\\thinspace\b/g, '&thinsp;')
+    .replace(/\\hfill\b/g, '<span class="latex-hfill" style="display: inline-block; flex: 1; min-width: 12px;"></span>')
 
     // Colors
     .replace(/\\textcolor\{([^}]+)\}\{([^}]+)\}/g, (_, color, body) => `<span style="color: ${color};">${body}</span>`)
@@ -1573,6 +1708,9 @@ export function cleanLatexInline(text: string): string {
     .replace(/\\textsc\{([^}]+)\}/g, '$1')
     .replace(/\\textsf\{([^}]+)\}/g, '$1')
     .replace(/\\emph\{([^}]+)\}/g, '$1')
+    .replace(/\\(?:indent|noindent)\b/g, '')
+    .replace(/\\(?:vspace|hspace)\*?\{[^}]+\}/g, '')
+    .replace(/\\(?:bigskip|medskip|smallskip|vfill|hfill|quad|qquad|enspace|thinspace)\b/g, '')
     .replace(/\\\\/g, ' ')
     .replace(/\\/g, '')
     .trim();

@@ -115,6 +115,9 @@ function paginateHtmlIntoPages(
         blockHeight = 45 + lines * 19;
       } else if (block.includes('latex-tcolorbox') || block.includes('latex-quote')) {
         blockHeight = 85;
+      } else if (block.includes('latex-vspace')) {
+        const hMatch = block.match(/height:\s*([0-9.]+)px/);
+        blockHeight = hMatch ? Math.max(0, parseFloat(hMatch[1])) : 18;
       } else if (block.startsWith('<ul') || block.startsWith('<ol') || block.startsWith('<dl')) {
         const items = (block.match(/<(?:li|dt)/g) || []).length;
         blockHeight = 35 + items * 24;

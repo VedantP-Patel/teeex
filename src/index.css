@@ -1422,5 +1422,109 @@ input:focus, textarea:focus, select:focus {
   flex: 1;
 }
 
+/* ==============================================================================
+   TABULARX, VSPACE & INDENTATION RENDERING SYSTEM
+   ============================================================================== */
+
+/* --- Tabularx Auto-Expanding Flex Columns (X) --- */
+.table-tabularx {
+  width: 100% !important;
+  table-layout: auto;
+}
+
+.latex-table th.col-is-x,
+.latex-table td.col-is-x {
+  word-wrap: break-word !important;
+  overflow-wrap: break-word !important;
+  white-space: normal !important;
+  text-align: left;
+}
+
+/* --- Paragraphs & Indentation System (\indent, \noindent) --- */
+.latex-paragraph {
+  margin: 6px 0;
+  text-align: justify;
+  line-height: 1.55;
+  text-indent: 1.5em;
+}
+
+/* First paragraph following a structural heading or break is unindented */
+.latex-section + .latex-paragraph,
+.latex-subsection + .latex-paragraph,
+.latex-subsubsection + .latex-paragraph,
+.latex-abstract + .latex-paragraph,
+.latex-toc + .latex-paragraph,
+.latex-figure-container + .latex-paragraph,
+.latex-floating-table + .latex-paragraph,
+.table-container + .latex-paragraph {
+  text-indent: 0;
+}
+
+/* Explicit \noindent command */
+.latex-paragraph.latex-noindent,
+p.latex-noindent {
+  text-indent: 0 !important;
+}
+
+/* Explicit \indent command */
+.latex-paragraph.latex-force-indent,
+p.latex-force-indent {
+  text-indent: 1.5em !important;
+}
+
+.latex-indent {
+  display: inline-block;
+  width: 1.5em;
+}
+
+.latex-noindent {
+  display: inline;
+}
+
+.latex-hspace {
+  display: inline-block;
+}
+
+.latex-space-quad {
+  display: inline-block;
+  width: 1em;
+}
+
+.latex-space-qquad {
+  display: inline-block;
+  width: 2em;
+}
+
+.latex-space-enspace {
+  display: inline-block;
+  width: 0.5em;
+}
+
+.latex-hfill {
+  display: inline-block;
+  flex: 1;
+  min-width: 12px;
+}
+
+/* --- Vertical Whitespace System (\vspace, \bigskip, \medskip, \smallskip, \vfill) --- */
+.latex-vspace {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.latex-vspace-neg {
+  height: 0 !important;
+  min-height: 0 !important;
+}
+
+.latex-vfill {
+  display: block;
+  flex: 1;
+  min-height: 20px;
+}
+
+
 
 

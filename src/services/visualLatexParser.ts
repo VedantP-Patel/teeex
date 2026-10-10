@@ -89,7 +89,7 @@ export function parseLatexToVisualBlocks(code: string): ParsedVisualDoc {
 
   // Tokenize the body into visual blocks
   // Regex to match environment blocks and headings
-  const blockRegex = /(\\begin\{(abstract|equation\*?|align\*?|gather\*?|figure\*?|table\*?|tabular\*?|minipage|algorithm\*?|theorem|lemma|definition|proof|verbatim\*?|lstlisting|itemize|enumerate|description|quote|tcolorbox)\}[\s\S]*?\\end\{\2\})|(\\\[[\s\S]*?\\\])|(\\(section|subsection|subsubsection)\*?\{[^}]+\})/g;
+  const blockRegex = /(\\begin\{(abstract|equation\*?|align\*?|gather\*?|figure\*?|table\*?|tabular\*?|tabularx\*?|tabulary\*?|minipage|algorithm\*?|theorem|lemma|definition|proof|verbatim\*?|lstlisting|itemize|enumerate|description|quote|tcolorbox)\}[\s\S]*?\\end\{\2\})|(\\\[[\s\S]*?\\\])|(\\(section|subsection|subsubsection)\*?\{[^}]+\})/g;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
