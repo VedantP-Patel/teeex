@@ -86,7 +86,7 @@
 
   /* UI Fonts */
   --font-ui: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", Consolas, Menlo, Monaco, monospace;
 
   /* Transitions & Curves */
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
@@ -802,5 +802,57 @@ input:focus, textarea:focus, select:focus {
     opacity: 0.35;
     transform: scaleY(0.92);
   }
+}
+
+/* ==============================================================================
+   PRECISION EDITOR CARET & SYNTAX BACKDROP SYNCHRONIZATION
+   Guarantees 100% identical monospace metrics, zero ligatures, and exact caret placement
+   ============================================================================== */
+.syntax-backdrop,
+.editor-code-textarea {
+  font-family: var(--font-mono, "JetBrains Mono", Consolas, "Courier New", monospace) !important;
+  font-size: 13px !important;
+  line-height: 21px !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  letter-spacing: 0px !important;
+  word-spacing: 0px !important;
+  font-variant-ligatures: none !important;
+  font-feature-settings: "liga" 0, "calt" 0 !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+  text-rendering: auto !important;
+  white-space: pre !important;
+  tab-size: 2 !important;
+  -moz-tab-size: 2 !important;
+  box-sizing: border-box !important;
+  padding: 10px 14px !important;
+  margin: 0 !important;
+  border: none !important;
+  outline: none !important;
+}
+
+.syntax-backdrop span {
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  letter-spacing: 0px !important;
+  word-spacing: 0px !important;
+  font-variant-ligatures: none !important;
+  font-feature-settings: "liga" 0, "calt" 0 !important;
+}
+
+.editor-code-textarea:focus {
+  border: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.editor-code-textarea::selection {
+  background-color: rgba(56, 189, 248, 0.35) !important;
+  color: transparent !important;
 }
 

@@ -196,19 +196,19 @@ export function highlightLatexCode(
     const [, comment, math, command, brace, bracket, number, symbol] = match;
 
     if (comment) {
-      html += `<span style="color: ${colors.comment}; font-style: italic;">${escapeHtml(comment)}</span>`;
+      html += `<span style="color: ${colors.comment};">${escapeHtml(comment)}</span>`;
     } else if (math) {
       html += `<span style="color: ${colors.math};">${escapeHtml(math)}</span>`;
     } else if (command) {
-      html += `<span style="color: ${colors.command}; font-weight: 600;">${escapeHtml(command)}</span>`;
+      html += `<span style="color: ${colors.command};">${escapeHtml(command)}</span>`;
     } else if (brace) {
-      html += `<span style="color: ${colors.brace}; font-weight: 500;">${escapeHtml(brace)}</span>`;
+      html += `<span style="color: ${colors.brace};">${escapeHtml(brace)}</span>`;
     } else if (bracket) {
       html += `<span style="color: ${colors.bracket};">${escapeHtml(bracket)}</span>`;
     } else if (number) {
       html += `<span style="color: ${colors.number};">${escapeHtml(number)}</span>`;
     } else if (symbol) {
-      html += `<span style="color: ${colors.command}; opacity: 0.85;">${escapeHtml(symbol)}</span>`;
+      html += `<span style="color: ${colors.command};">${escapeHtml(symbol)}</span>`;
     }
 
     lastIndex = tokenRegex.lastIndex;

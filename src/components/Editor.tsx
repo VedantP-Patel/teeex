@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Bold,
@@ -416,6 +416,14 @@ export const Editor: React.FC<Props> = ({
       syntaxBackdropRef.current.scrollLeft = sl;
     }
   };
+
+  // Lock syntax backdrop scroll offsets synchronously with textarea across typing & edits
+  useLayoutEffect(() => {
+    if (syntaxBackdropRef.current && textareaRef.current) {
+      syntaxBackdropRef.current.scrollTop = textareaRef.current.scrollTop;
+      syntaxBackdropRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    }
+  }, [highlightedHtml]);
 
   // Scroll to target line if triggered externally (SyncTeX)
   useEffect(() => {
@@ -1675,22 +1683,17 @@ export const Editor: React.FC<Props> = ({
               aria-hidden="true"
               className="syntax-backdrop"
               style={{
+                ...SHARED_EDITOR_METRICS,
                 position: 'absolute',
                 top: 0,
                 left: 0,
                 right: 0,
                 bottom: 0,
-                padding: '10px 14px',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 13,
-                lineHeight: '21px',
-                whiteSpace: 'pre',
                 overflow: 'hidden',
                 pointerEvents: 'none',
                 zIndex: 1,
                 color: SYNTAX_THEMES[syntaxTheme].colors.defaultText,
-                boxSizing: 'border-box',
-                tabSize: 2,
+                backgroundColor: 'transparent',
               }}
               dangerouslySetInnerHTML={{ __html: highlightedHtml }}
             />
@@ -1699,6 +1702,7 @@ export const Editor: React.FC<Props> = ({
           {/* Core Textarea */}
           <textarea
             ref={textareaRef}
+            className="editor-code-textarea"
             value={code}
             readOnly={role === 'viewer'}
             onChange={e => onChange(e.target.value)}
@@ -1709,6 +1713,9 @@ export const Editor: React.FC<Props> = ({
             onDoubleClick={() => onForwardSync?.(currentCursorLine)}
             onScroll={handleScroll}
             spellCheck={false}
+            autoCapitalize="off"
+            autoComplete="off"
+            autoCorrect="off"
             style={{
               ...textareaStyle,
               color: syntaxTheme === 'normal' ? 'var(--text-primary)' : 'transparent',
@@ -2327,22 +2334,45 @@ const markerAreaStyle: React.CSSProperties = {
   alignItems: 'center',
 };
 
-const textareaStyle: React.CSSProperties = {
-  width: '100%',
-  height: '100%',
-  border: 'none',
-  outline: 'none',
-  backgroundColor: 'transparent',
-  color: 'var(--text-primary)',
-  fontFamily: 'var(--font-mono)',
+/**
+ * Strict Shared Monospace Typography & Padding Metrics
+ * Guarantees zero-drift pixel alignment between transparent textarea caret and syntax backdrop spans.
+ */
+export const SHARED_EDITOR_METRICS: React.CSSProperties = {
+  fontFamily: 'var(--font-mono, "JetBrains Mono", Consolas, "Courier New", monospace)',
   fontSize: 13,
   lineHeight: '21px',
-  padding: '10px 14px',
-  resize: 'none',
+  fontWeight: 400,
+  fontStyle: 'normal',
+  letterSpacing: '0px',
+  wordSpacing: '0px',
+  fontVariantLigatures: 'none',
+  fontFeatureSettings: '"liga" 0, "calt" 0',
+  WebkitFontSmoothing: 'antialiased',
+  MozOsxFontSmoothing: 'grayscale',
+  textRendering: 'auto',
   whiteSpace: 'pre',
-  overflowWrap: 'normal',
-  overflowX: 'auto',
   tabSize: 2,
+  MozTabSize: 2,
+  overflowWrap: 'normal',
+  wordBreak: 'normal',
+  boxSizing: 'border-box',
+  padding: '10px 14px',
+  margin: 0,
+  border: 'none',
+  outline: 'none',
+};
+
+const textareaStyle: React.CSSProperties = {
+  ...SHARED_EDITOR_METRICS,
+  width: '100%',
+  height: '100%',
+  backgroundColor: 'transparent',
+  resize: 'none',
+  overflowX: 'auto',
+  overflowY: 'auto',
+  borderRadius: 0,
+  boxShadow: 'none',
 };
 
 const tabStripStyle: React.CSSProperties = {
