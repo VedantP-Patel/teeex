@@ -99,9 +99,9 @@ export const Editor: React.FC<Props> = ({
   const [isReviewPanelOpen, setIsReviewPanelOpen] = useState(false);
   const [activeChangeId, setActiveChangeId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
   const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
-  const [scrollTop, setScrollTop] = useState(0);
   const [activeCommentLine, setActiveCommentLine] = useState<number | null>(null);
   const [commentDraft, setCommentDraft] = useState('');
   const [currentCursorLine, setCurrentCursorLine] = useState(1);
@@ -172,8 +172,7 @@ export const Editor: React.FC<Props> = ({
 
     const lineHeight = 21;
     const targetScroll = Math.max(0, (m.line - 4) * lineHeight);
-    ta.scrollTop = targetScroll;
-    setScrollTop(targetScroll);
+    if (viewportRef.current) viewportRef.current.scrollTop = targetScroll;
     if (gutterRef.current) gutterRef.current.scrollTop = targetScroll;
     if (syntaxBackdropRef.current) syntaxBackdropRef.current.scrollTop = targetScroll;
   };
@@ -403,27 +402,13 @@ export const Editor: React.FC<Props> = ({
     return highlightLatexCode(code, syntaxTheme, isLightMode) + (code.endsWith('\n') ? ' ' : '');
   }, [code, syntaxTheme, isLightMode]);
 
-  // Sync gutter scroll and overlay position
-  const handleScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
+  // Sync gutter scroll
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const st = e.currentTarget.scrollTop;
-    const sl = e.currentTarget.scrollLeft;
-    setScrollTop(st);
     if (gutterRef.current) {
       gutterRef.current.scrollTop = st;
     }
-    if (syntaxBackdropRef.current) {
-      syntaxBackdropRef.current.scrollTop = st;
-      syntaxBackdropRef.current.scrollLeft = sl;
-    }
   };
-
-  // Lock syntax backdrop scroll offsets synchronously with textarea across typing & edits
-  useLayoutEffect(() => {
-    if (syntaxBackdropRef.current && textareaRef.current) {
-      syntaxBackdropRef.current.scrollTop = textareaRef.current.scrollTop;
-      syntaxBackdropRef.current.scrollLeft = textareaRef.current.scrollLeft;
-    }
-  }, [highlightedHtml]);
 
   // Scroll to target line if triggered externally (SyncTeX)
   useEffect(() => {
@@ -446,14 +431,9 @@ export const Editor: React.FC<Props> = ({
         // Accurate scroll calculation
         const lineHeight = 21;
         const newScrollTop = Math.max(0, (targetLine - 5) * lineHeight);
-        textarea.scrollTop = newScrollTop;
-        setScrollTop(newScrollTop);
+        if (viewportRef.current) viewportRef.current.scrollTop = newScrollTop;
         if (gutterRef.current) {
           gutterRef.current.scrollTop = newScrollTop;
-        }
-        if (syntaxBackdropRef.current) {
-          syntaxBackdropRef.current.scrollTop = newScrollTop;
-          syntaxBackdropRef.current.scrollLeft = 0;
         }
 
         // Flash highlight line for 3 seconds
@@ -1393,14 +1373,20 @@ export const Editor: React.FC<Props> = ({
           })}
         </div>
 
-        {/* Textarea Input & Multiplayer Floating Overlay */}
-        <div style={{ position: 'relative', flex: 1, height: '100%', overflow: 'hidden' }}>
+        {/* Scrollable Viewport */}
+        <div 
+          ref={viewportRef}
+          style={{ position: 'relative', flex: 1, height: '100%', overflow: 'auto' }}
+          onScroll={handleScroll}
+        >
+          {/* Relative Container that grows to content size */}
+          <div style={{ position: 'relative', minHeight: '100%', minWidth: '100%', width: 'fit-content', height: 'fit-content' }}>
           {/* External Highlight Line Banner (SyncTeX Jump Flash) */}
           {highlightedLine !== null && (
             <div
               style={{
                 position: 'absolute',
-                top: (highlightedLine - 1) * 21 + 10 - scrollTop,
+                top: (highlightedLine - 1) * 21 + 10,
                 left: 0,
                 right: 0,
                 height: 21,
@@ -1420,7 +1406,7 @@ export const Editor: React.FC<Props> = ({
             .map(p => {
               const startLine = p.selectionStartLine || p.cursorLine;
               const endLine = p.selectionEndLine || p.cursorLine;
-              const topOffset = (startLine - 1) * 21 + 10 - scrollTop;
+              const topOffset = (startLine - 1) * 21 + 10;
               const height = (endLine - startLine + 1) * 21;
               return (
                 <div
@@ -1445,7 +1431,7 @@ export const Editor: React.FC<Props> = ({
           {peers
             .filter(p => p.activeFile === fileName)
             .map(p => {
-              const topOffset = (p.cursorLine - 1) * 21 + 10 - scrollTop;
+              const topOffset = (p.cursorLine - 1) * 21 + 10;
               const isTyping = p.status === 'typing';
               return (
                 <div
@@ -1684,12 +1670,6 @@ export const Editor: React.FC<Props> = ({
               className="syntax-backdrop"
               style={{
                 ...SHARED_EDITOR_METRICS,
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                overflow: 'hidden',
                 pointerEvents: 'none',
                 zIndex: 1,
                 color: SYNTAX_THEMES[syntaxTheme].colors.defaultText,
@@ -1711,7 +1691,10 @@ export const Editor: React.FC<Props> = ({
             onClick={handleSelect}
             onKeyUp={handleSelect}
             onDoubleClick={() => onForwardSync?.(currentCursorLine)}
-            onScroll={handleScroll}
+            onScroll={(e) => {
+              if (e.currentTarget.scrollTop !== 0) e.currentTarget.scrollTop = 0;
+              if (e.currentTarget.scrollLeft !== 0) e.currentTarget.scrollLeft = 0;
+            }}
             spellCheck={false}
             autoCapitalize="off"
             autoComplete="off"
@@ -1729,8 +1712,10 @@ export const Editor: React.FC<Props> = ({
               zIndex: 2,
               cursor: role === 'viewer' ? 'default' : 'text',
               opacity: role === 'viewer' ? 0.9 : 1,
+              overflow: 'hidden',
             }}
           />
+          </div>
 
           {/* Floating Find & Replace Bar */}
           {isFindOpen && (
