@@ -284,35 +284,108 @@ export const Sidebar: React.FC<Props> = ({
 
   return (
     <aside style={sidebarStyle}>
-      {/* Tab Switcher */}
+      {/* Sleek Segmented Tab Switcher */}
       <div style={tabBarStyle}>
-        <button
-          onClick={() => setActiveTab('files')}
-          style={{
-            ...tabButtonStyle,
-            color: activeTab === 'files' ? '#38bdf8' : 'var(--text-secondary)',
-            borderBottom: activeTab === 'files' ? '2px solid #38bdf8' : '2px solid transparent',
-          }}
-        >
-          <FileText size={13} /> Files ({files.length})
-        </button>
+        <div style={{
+          display: 'flex',
+          backgroundColor: 'var(--bg-surface-1)',
+          borderRadius: 6,
+          padding: 2,
+          flex: 1,
+          gap: 2,
+          border: '1px solid var(--border-subtle)',
+        }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('files')}
+            style={{
+              flex: 1,
+              padding: '4px 6px',
+              fontSize: 11,
+              fontWeight: activeTab === 'files' ? 600 : 500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 5,
+              borderRadius: 4,
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              backgroundColor: activeTab === 'files' ? 'var(--bg-surface-elevated)' : 'transparent',
+              color: activeTab === 'files' ? '#38bdf8' : 'var(--text-muted)',
+              boxShadow: activeTab === 'files' ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+            }}
+          >
+            <FileText size={12} />
+            <span>Files</span>
+            <span style={{
+              fontSize: 9.5,
+              fontWeight: 700,
+              padding: '0 5px',
+              borderRadius: 10,
+              backgroundColor: activeTab === 'files' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+              color: activeTab === 'files' ? '#38bdf8' : 'var(--text-muted)',
+              lineHeight: '14px',
+            }}>
+              {files.length}
+            </span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('outline')}
-          style={{
-            ...tabButtonStyle,
-            color: activeTab === 'outline' ? '#38bdf8' : 'var(--text-secondary)',
-            borderBottom: activeTab === 'outline' ? '2px solid #38bdf8' : '2px solid transparent',
-          }}
-        >
-          <ListTree size={13} /> Outline ({documentOutline.length})
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('outline')}
+            style={{
+              flex: 1,
+              padding: '4px 6px',
+              fontSize: 11,
+              fontWeight: activeTab === 'outline' ? 600 : 500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 5,
+              borderRadius: 4,
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              backgroundColor: activeTab === 'outline' ? 'var(--bg-surface-elevated)' : 'transparent',
+              color: activeTab === 'outline' ? '#38bdf8' : 'var(--text-muted)',
+              boxShadow: activeTab === 'outline' ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+            }}
+          >
+            <ListTree size={12} />
+            <span>Outline</span>
+            <span style={{
+              fontSize: 9.5,
+              fontWeight: 700,
+              padding: '0 5px',
+              borderRadius: 10,
+              backgroundColor: activeTab === 'outline' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+              color: activeTab === 'outline' ? '#38bdf8' : 'var(--text-muted)',
+              lineHeight: '14px',
+            }}>
+              {documentOutline.length}
+            </span>
+          </button>
+        </div>
 
         {onCollapse && (
           <button
+            type="button"
             onClick={onCollapse}
-            className="btn-ghost"
-            style={{ padding: '6px 8px', borderRadius: 0, color: 'var(--text-muted)' }}
+            className="sidebar-icon-btn"
+            style={{
+              width: 24,
+              height: 24,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 4,
+              color: 'var(--text-muted)',
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
             title="Collapse Sidebar"
           >
             <PanelLeftClose size={13} />
@@ -333,7 +406,7 @@ export const Sidebar: React.FC<Props> = ({
               onImportFiles(e.dataTransfer.files);
             }
           }}
-          style={{ flex: 1, overflowY: 'auto', padding: 8 }}
+          style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}
         >
           {/* Hidden file input for general upload */}
           <input
@@ -365,47 +438,61 @@ export const Sidebar: React.FC<Props> = ({
             }}
           />
 
-          {/* Header & New File / New Folder / Upload Buttons */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 6px 8px 6px' }}>
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
-              WORKSPACE FILES
+          {/* Header & New File / New Folder / Upload Micro-actions */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '6px 4px 6px 6px',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+            marginBottom: 6,
+          }}>
+            <span style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.07em',
+              textTransform: 'uppercase',
+              color: 'var(--text-muted)',
+            }}>
+              Workspace Files
             </span>
+
             {role !== 'viewer' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                 <button
+                  type="button"
                   onClick={() => {
                     setCreationMode('root-file');
                     setNewItemName('');
                   }}
-                  className="btn-ghost"
-                  style={{ padding: '3px 5px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3 }}
-                  title="New File"
+                  className="sidebar-icon-btn"
+                  style={sidebarIconBtnStyle}
+                  title="New File (.tex, .bib)"
                 >
                   <FilePlus size={13} color="#38bdf8" />
-                  <span style={{ fontSize: 10, fontWeight: 600 }}>File</span>
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => {
                     setCreationMode('root-folder');
                     setNewItemName('');
                   }}
-                  className="btn-ghost"
-                  style={{ padding: '3px 5px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3 }}
+                  className="sidebar-icon-btn"
+                  style={sidebarIconBtnStyle}
                   title="New Folder Directory"
                 >
                   <FolderPlus size={13} color="#f59e0b" />
-                  <span style={{ fontSize: 10, fontWeight: 600 }}>Folder</span>
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="btn-ghost"
-                  style={{ padding: '3px 5px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3, color: '#10b981' }}
+                  className="sidebar-icon-btn"
+                  style={sidebarIconBtnStyle}
                   title="Upload / Import LaTeX files or figures from your computer"
                 >
-                  <Upload size={12} color="#10b981" />
-                  <span style={{ fontSize: 10, fontWeight: 600 }}>Upload</span>
+                  <Upload size={13} color="#10b981" />
                 </button>
               </div>
             )}
@@ -413,15 +500,15 @@ export const Sidebar: React.FC<Props> = ({
 
           {/* Inline creation input for root file */}
           {creationMode === 'root-file' && role !== 'viewer' && (
-            <form onSubmit={handleCreateSubmit} style={{ padding: '4px 6px', marginBottom: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, backgroundColor: 'var(--bg-surface-1)', borderRadius: 'var(--radius-sm)', padding: '2px 6px', border: '1px solid #38bdf8' }}>
+            <form onSubmit={handleCreateSubmit} style={{ padding: '2px 0 6px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, backgroundColor: 'var(--bg-surface-1)', borderRadius: 5, padding: '3px 6px', border: '1px solid #38bdf8' }}>
                 <FileCode size={13} color="#38bdf8" />
                 <input
                   type="text"
                   value={newItemName}
                   onChange={e => setNewItemName(e.target.value)}
                   placeholder="filename.tex or .bib"
-                  style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 11.5, color: 'var(--text-primary)', outline: 'none' }}
+                  style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 11, color: 'var(--text-primary)', outline: 'none', fontFamily: 'var(--font-mono)' }}
                   autoFocus
                   onBlur={() => !newItemName && setCreationMode(null)}
                   onKeyDown={e => e.key === 'Escape' && setCreationMode(null)}
@@ -432,15 +519,15 @@ export const Sidebar: React.FC<Props> = ({
 
           {/* Inline creation input for root folder */}
           {creationMode === 'root-folder' && role !== 'viewer' && (
-            <form onSubmit={handleCreateSubmit} style={{ padding: '4px 6px', marginBottom: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, backgroundColor: 'var(--bg-surface-1)', borderRadius: 'var(--radius-sm)', padding: '2px 6px', border: '1px solid #f59e0b' }}>
+            <form onSubmit={handleCreateSubmit} style={{ padding: '2px 0 6px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, backgroundColor: 'var(--bg-surface-1)', borderRadius: 5, padding: '3px 6px', border: '1px solid #f59e0b' }}>
                 <FolderPlus size={13} color="#f59e0b" />
                 <input
                   type="text"
                   value={newItemName}
                   onChange={e => setNewItemName(e.target.value)}
                   placeholder="folder name (e.g. sections)"
-                  style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 11.5, color: 'var(--text-primary)', outline: 'none' }}
+                  style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 11, color: 'var(--text-primary)', outline: 'none' }}
                   autoFocus
                   onBlur={() => !newItemName && setCreationMode(null)}
                   onKeyDown={e => e.key === 'Escape' && setCreationMode(null)}
@@ -462,6 +549,7 @@ export const Sidebar: React.FC<Props> = ({
                   {/* Folder Row */}
                   <div
                     onClick={() => toggleFolder(folderName)}
+                    className="sidebar-folder-row"
                     onDragOver={e => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -482,68 +570,81 @@ export const Sidebar: React.FC<Props> = ({
                     }}
                     style={{
                       ...folderRowStyle,
-                      backgroundColor: isOverThis ? 'rgba(56, 189, 248, 0.16)' : folderRowStyle.backgroundColor,
+                      backgroundColor: isOverThis ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
                       border: isOverThis ? '1px dashed #38bdf8' : '1px solid transparent',
-                      transition: 'all 0.15s ease',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden' }}>
-                      {isOpen ? (
-                        <ChevronDown size={12} color="var(--text-muted)" />
-                      ) : (
-                        <ChevronRight size={12} color="var(--text-muted)" />
-                      )}
-                      {isOpen ? (
-                        <FolderOpen size={13} color="#f59e0b" />
-                      ) : (
-                        <Folder size={13} color="#f59e0b" />
-                      )}
-                      <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}>
+                        {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', color: '#f59e0b' }}>
+                        {isOpen ? <FolderOpen size={13} /> : <Folder size={13} />}
+                      </span>
+                      <span style={{
+                        fontSize: 11.5,
+                        fontWeight: 600,
+                        color: 'var(--text-primary)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
                         {folderName}
                       </span>
-                      <span style={{ fontSize: 9.5, color: 'var(--text-muted)', marginLeft: 2 }}>
-                        ({folderFiles.length})
+                      <span style={{
+                        fontSize: 9,
+                        fontWeight: 600,
+                        color: 'var(--text-muted)',
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                        padding: '1px 5px',
+                        borderRadius: 8,
+                        marginLeft: 2,
+                      }}>
+                        {folderFiles.length}
                       </span>
                     </div>
 
                     {role !== 'viewer' && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <div className="folder-hover-actions" style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         {folderName === 'figures' && (
                           <button
+                            type="button"
                             onClick={e => {
                               e.stopPropagation();
                               imageInputRef.current?.click();
                             }}
-                            className="btn-ghost"
-                            style={{ padding: 2, color: '#10b981' }}
+                            className="sidebar-row-action-btn"
+                            style={{ padding: 3, borderRadius: 3, border: 'none', background: 'transparent', cursor: 'pointer', color: '#10b981' }}
                             title="Upload image into figures/"
                           >
-                            <ImagePlus size={12} color="#10b981" />
+                            <ImagePlus size={11.5} />
                           </button>
                         )}
                         <button
+                          type="button"
                           onClick={e => {
                             e.stopPropagation();
                             setCreationMode(`folder:${folderName}`);
                             setOpenFolders(prev => new Set(prev).add(folderName));
                             setNewItemName('');
                           }}
-                          className="btn-ghost"
-                          style={{ padding: 2, color: 'var(--text-muted)' }}
-                          title={`Add file to ${folderName}/`}
+                          className="sidebar-row-action-btn"
+                          style={{ padding: 3, borderRadius: 3, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}
+                          title={`New file in ${folderName}/`}
                         >
-                          <Plus size={12} />
+                          <Plus size={11.5} />
                         </button>
                         {onDeleteFolder && (
                           <button
+                            type="button"
                             onClick={e => {
                               e.stopPropagation();
-                              if (window.confirm(`Delete folder '${folderName}' and its files?`)) {
+                              if (window.confirm(`Delete folder '${folderName}' and all its contents?`)) {
                                 onDeleteFolder(folderName);
                               }
                             }}
-                            className="btn-ghost"
-                            style={{ padding: 2, color: 'var(--text-muted)' }}
+                            className="sidebar-row-action-btn"
+                            style={{ padding: 3, borderRadius: 3, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}
                             title="Delete folder"
                           >
                             <Trash2 size={11} />
@@ -555,18 +656,27 @@ export const Sidebar: React.FC<Props> = ({
 
                   {/* Folder Children */}
                   {isOpen && (
-                    <div style={{ paddingLeft: 14, borderLeft: '1px solid rgba(255, 255, 255, 0.08)', marginLeft: 8, marginTop: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <div style={{
+                      paddingLeft: 8,
+                      borderLeft: '1px solid rgba(255, 255, 255, 0.07)',
+                      marginLeft: 11,
+                      marginTop: 2,
+                      marginBottom: 4,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 1
+                    }}>
                       {/* Sub-file Creation Input inside folder */}
                       {isCreatingInThisFolder && role !== 'viewer' && (
-                        <form onSubmit={handleCreateSubmit} style={{ padding: '3px 0' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, backgroundColor: 'var(--bg-surface-1)', borderRadius: 'var(--radius-sm)', padding: '2px 6px', border: '1px solid #38bdf8' }}>
+                        <form onSubmit={handleCreateSubmit} style={{ padding: '2px 0 4px 0' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, backgroundColor: 'var(--bg-surface-1)', borderRadius: 4, padding: '2px 6px', border: '1px solid #38bdf8' }}>
                             <FileCode size={12} color="#38bdf8" />
                             <input
                               type="text"
                               value={newItemName}
                               onChange={e => setNewItemName(e.target.value)}
-                              placeholder="filename.tex in folder"
-                              style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 11, color: 'var(--text-primary)', outline: 'none' }}
+                              placeholder="filename.tex"
+                              style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 11, color: 'var(--text-primary)', outline: 'none', fontFamily: 'var(--font-mono)' }}
                               autoFocus
                               onBlur={() => !newItemName && setCreationMode(null)}
                               onKeyDown={e => e.key === 'Escape' && setCreationMode(null)}
@@ -578,40 +688,66 @@ export const Sidebar: React.FC<Props> = ({
                       {folderFiles.length === 0 && !isCreatingInThisFolder ? (
                         <div
                           style={{
-                            fontSize: 10.5,
-                            color: 'var(--text-muted)',
-                            padding: '4px 6px',
-                            fontStyle: 'italic',
+                            margin: '3px 4px 4px 4px',
+                            padding: '6px 8px',
+                            borderRadius: 5,
+                            border: '1px dashed rgba(255, 255, 255, 0.08)',
+                            backgroundColor: 'rgba(255, 255, 255, 0.02)',
                             display: 'flex',
                             alignItems: 'center',
-                            flexWrap: 'wrap',
-                            gap: 5,
+                            justifyContent: 'space-between',
+                            gap: 4,
                           }}
                         >
-                          <span>Empty folder &bull;</span>
-                          <span
-                            onClick={() => {
-                              setCreationMode(`folder:${folderName}`);
-                              setNewItemName('');
-                            }}
-                            style={{ color: '#38bdf8', cursor: 'pointer' }}
-                          >
-                            + Add file
+                          <span style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>
+                            Empty folder
                           </span>
-                          {(folderName.toLowerCase().includes('figure') || folderName.toLowerCase().includes('image')) && (
-                            <>
-                              <span>&bull;</span>
-                              <span
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCreationMode(`folder:${folderName}`);
+                                setNewItemName('');
+                              }}
+                              style={{
+                                fontSize: 9.5,
+                                fontWeight: 600,
+                                color: '#38bdf8',
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 2,
+                                padding: '1px 3px',
+                              }}
+                            >
+                              <Plus size={10} /> File
+                            </button>
+                            {(folderName.toLowerCase().includes('figure') || folderName.toLowerCase().includes('image')) && (
+                              <button
+                                type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   onOpenImageUpload ? onOpenImageUpload() : imageInputRef.current?.click();
                                 }}
-                                style={{ color: '#10b981', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 2 }}
+                                style={{
+                                  fontSize: 9.5,
+                                  fontWeight: 600,
+                                  color: '#10b981',
+                                  background: 'transparent',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 2,
+                                  padding: '1px 3px',
+                                }}
                               >
-                                <UploadCloud size={10} /> + Upload image
-                              </span>
-                            </>
-                          )}
+                                <UploadCloud size={10} /> Image
+                              </button>
+                            )}
+                          </div>
                         </div>
                       ) : (
                         folderFiles.map(f => {
@@ -620,28 +756,47 @@ export const Sidebar: React.FC<Props> = ({
                             <div
                               key={f.id}
                               onClick={() => onSelectFile(f.id)}
+                              className="sidebar-file-item"
                               style={{
                                 ...fileItemStyle,
-                                backgroundColor: isActive ? 'var(--bg-active)' : 'transparent',
+                                backgroundColor: isActive ? 'rgba(56, 189, 248, 0.09)' : 'transparent',
+                                borderLeft: isActive ? '2px solid #38bdf8' : '2px solid transparent',
                                 color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                                 fontWeight: isActive ? 600 : 400,
+                                paddingLeft: 6,
                               }}
                             >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', minWidth: 0, flex: 1 }}>
                                 {getFileIcon(f, isActive)}
-                                <span style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <span style={{
+                                  fontSize: 11.5,
+                                  fontFamily: 'var(--font-mono)',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}>
                                   {getFileDisplayName(f)}
                                 </span>
                               </div>
 
                               {files.length > 1 && !f.isEntry && role !== 'viewer' && (
                                 <button
+                                  type="button"
                                   onClick={e => {
                                     e.stopPropagation();
                                     onDeleteFile(f.id);
                                   }}
                                   className="file-delete-btn"
-                                  style={{ color: 'var(--text-muted)', padding: 2 }}
+                                  style={{
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: 'var(--text-muted)',
+                                    padding: 2,
+                                    borderRadius: 3,
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                  }}
                                   title="Delete file"
                                 >
                                   <Trash2 size={11} />
@@ -659,7 +814,18 @@ export const Sidebar: React.FC<Props> = ({
 
             {/* Root Files Header & Items */}
             {rootFiles.length > 0 && (
-              <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <div style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: '0.07em',
+                  textTransform: 'uppercase',
+                  color: 'var(--text-muted)',
+                  padding: '4px 6px 2px 6px',
+                  opacity: 0.75,
+                }}>
+                  Root Files
+                </div>
                 {rootFiles.map(f => {
                   const isActive = f.id === activeFileId;
                   const isMain = f.isEntry || f.name === 'main.tex';
@@ -668,20 +834,38 @@ export const Sidebar: React.FC<Props> = ({
                     <div
                       key={f.id}
                       onClick={() => onSelectFile(f.id)}
+                      className="sidebar-file-item"
                       style={{
                         ...fileItemStyle,
-                        backgroundColor: isActive ? 'var(--bg-active)' : 'transparent',
+                        backgroundColor: isActive ? 'rgba(56, 189, 248, 0.09)' : 'transparent',
+                        borderLeft: isActive ? '2px solid #38bdf8' : '2px solid transparent',
                         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                         fontWeight: isActive ? 600 : 400,
+                        paddingLeft: 6,
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', minWidth: 0, flex: 1 }}>
                         {getFileIcon(f, isActive)}
-                        <span style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span style={{
+                          fontSize: 11.5,
+                          fontFamily: 'var(--font-mono)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
                           {f.name}
                         </span>
                         {isMain && (
-                          <span style={{ fontSize: 8.5, fontWeight: 700, padding: '1px 4px', borderRadius: 3, backgroundColor: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', letterSpacing: '0.04em' }}>
+                          <span style={{
+                            fontSize: 8,
+                            fontWeight: 700,
+                            padding: '1px 4px',
+                            borderRadius: 3,
+                            backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                            color: '#38bdf8',
+                            letterSpacing: '0.04em',
+                            border: '1px solid rgba(56, 189, 248, 0.25)',
+                          }}>
                             ROOT
                           </span>
                         )}
@@ -689,12 +873,22 @@ export const Sidebar: React.FC<Props> = ({
 
                       {files.length > 1 && !f.isEntry && f.name !== 'main.tex' && role !== 'viewer' && (
                         <button
+                          type="button"
                           onClick={e => {
                             e.stopPropagation();
                             onDeleteFile(f.id);
                           }}
                           className="file-delete-btn"
-                          style={{ color: 'var(--text-muted)', padding: 2 }}
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            color: 'var(--text-muted)',
+                            padding: 2,
+                            borderRadius: 3,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
                           title="Delete file"
                         >
                           <Trash2 size={11} />
@@ -919,7 +1113,7 @@ export const Sidebar: React.FC<Props> = ({
 };
 
 const sidebarStyle: React.CSSProperties = {
-  width: 210,
+  width: '100%',
   height: '100%',
   backgroundColor: 'var(--bg-surface-0)',
   borderRight: '1px solid var(--border-subtle)',
@@ -931,30 +1125,21 @@ const sidebarStyle: React.CSSProperties = {
 
 const tabBarStyle: React.CSSProperties = {
   display: 'flex',
+  alignItems: 'center',
+  padding: '6px 8px',
+  gap: 4,
   borderBottom: '1px solid var(--border-subtle)',
   backgroundColor: 'var(--bg-surface-0)',
-};
-
-const tabButtonStyle: React.CSSProperties = {
-  flex: 1,
-  padding: '8px 4px',
-  fontSize: 11,
-  fontWeight: 600,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 5,
-  cursor: 'pointer',
 };
 
 const folderRowStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  padding: '5px 6px',
+  padding: '4px 6px',
   borderRadius: 'var(--radius-sm)',
   cursor: 'pointer',
-  transition: 'background var(--transition-fast)',
+  transition: 'background var(--transition-fast), border-color var(--transition-fast)',
   userSelect: 'none',
 };
 
@@ -962,10 +1147,23 @@ const fileItemStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  padding: '5px 6px',
+  padding: '4px 6px',
   borderRadius: 'var(--radius-sm)',
   cursor: 'pointer',
   transition: 'background var(--transition-fast)',
+};
+
+const sidebarIconBtnStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderRadius: 4,
+  border: 'none',
+  background: 'transparent',
+  cursor: 'pointer',
+  transition: 'all 0.15s ease',
 };
 
 const outlineItemStyle: React.CSSProperties = {
@@ -981,7 +1179,7 @@ const outlineItemStyle: React.CSSProperties = {
 };
 
 const footerStyle: React.CSSProperties = {
-  padding: '8px 12px',
+  padding: '6px 10px',
   borderTop: '1px solid var(--border-subtle)',
   backgroundColor: 'var(--bg-surface-0)',
 };

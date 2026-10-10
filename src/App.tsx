@@ -1305,7 +1305,7 @@ export function App() {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Left Sidebar */}
         <div style={{
-          width: isSidebarOpen ? 210 : 0,
+          width: isSidebarOpen ? 236 : 0,
           transition: 'width 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
           overflow: 'hidden',
           display: 'flex',

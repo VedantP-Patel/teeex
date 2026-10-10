@@ -871,4 +871,41 @@ input:focus, textarea:focus, select:focus {
   }
 }
 
+/* Sidebar High-Density IDE Tree Styles */
+.sidebar-icon-btn {
+  color: var(--text-muted);
+}
+.sidebar-icon-btn:hover {
+  background-color: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+.sidebar-folder-row:hover {
+  background-color: var(--bg-hover) !important;
+}
+.sidebar-folder-row .folder-hover-actions {
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+.sidebar-folder-row:hover .folder-hover-actions {
+  opacity: 1;
+}
+.sidebar-row-action-btn:hover {
+  background-color: var(--bg-active) !important;
+  color: var(--text-primary) !important;
+}
+.sidebar-file-item:hover {
+  background-color: var(--bg-hover) !important;
+}
+.sidebar-file-item .file-delete-btn {
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.sidebar-file-item:hover .file-delete-btn {
+  opacity: 0.65;
+}
+.sidebar-file-item .file-delete-btn:hover {
+  opacity: 1 !important;
+  color: var(--accent-rose) !important;
+}
+
 
