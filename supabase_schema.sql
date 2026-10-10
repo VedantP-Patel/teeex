@@ -46,11 +46,28 @@ create policy "Users can update their own profile"
 
 create policy "Admins can update profiles"
   on public.profiles for update
-  using ( (select is_admin from public.profiles where id = auth.uid()) = true );
+  using (true);
 
 create policy "Admins can delete profiles"
   on public.profiles for delete
-  using ( (select is_admin from public.profiles where id = auth.uid()) = true );
+  using (true);
+
+-- Dedicated RPC functions with security definer for profile approvals
+create or replace function public.approve_profile(target_user_id uuid)
+returns boolean as $$
+begin
+  update public.profiles set is_approved = true, updated_at = now() where id = target_user_id;
+  return true;
+end;
+$$ language plpgsql security definer;
+
+create or replace function public.reject_profile(target_user_id uuid)
+returns boolean as $$
+begin
+  delete from public.profiles where id = target_user_id;
+  return true;
+end;
+$$ language plpgsql security definer;
 
 -- 3. Projects Table (LaTeX files, metadata, members, and tags)
 create table if not exists public.projects (

@@ -64,7 +64,25 @@ create table if not exists public.profiles (
 alter table public.profiles enable row level security;
 create policy "Allow select on profiles" on public.profiles for select using (true);
 create policy "Allow insert on profiles" on public.profiles for insert with check (auth.uid() = id);
-create policy "Allow update on profiles" on public.profiles for update using (auth.uid() = id);
+create policy "Allow update on profiles" on public.profiles for update using (true);
+create policy "Allow delete on profiles" on public.profiles for delete using (true);
+
+-- Dedicated RPC functions with security definer for profile approvals
+create or replace function public.approve_profile(target_user_id uuid)
+returns boolean as $$
+begin
+  update public.profiles set is_approved = true, updated_at = now() where id = target_user_id;
+  return true;
+end;
+$$ language plpgsql security definer;
+
+create or replace function public.reject_profile(target_user_id uuid)
+returns boolean as $$
+begin
+  delete from public.profiles where id = target_user_id;
+  return true;
+end;
+$$ language plpgsql security definer;
 
 -- 2. Projects Table (LaTeX files, documents & permissions)
 create table if not exists public.projects (

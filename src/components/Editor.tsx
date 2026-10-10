@@ -27,7 +27,11 @@ import {
   ArrowDown,
   Layers,
   Sparkles,
-  Map as MapIcon
+  Map as MapIcon,
+  Image as ImageIcon,
+  Download,
+  Copy,
+  Upload
 } from 'lucide-react';
 import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile, TrackedChange } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
@@ -68,6 +72,8 @@ interface Props {
   onOpenSnippets?: () => void;
   onFormatDocument?: () => void;
   onOpenCommandPalette?: () => void;
+  onOpenImageUpload?: () => void;
+  onImportFiles?: (files: FileList | File[], targetFolder?: string) => void;
 }
 
 export const Editor: React.FC<Props> = ({
@@ -100,6 +106,8 @@ export const Editor: React.FC<Props> = ({
   onOpenSnippets,
   onFormatDocument,
   onOpenCommandPalette,
+  onOpenImageUpload,
+  onImportFiles,
 }) => {
   const [editorMode, setEditorMode] = useState<'code' | 'visual'>(() => {
     return (localStorage.getItem('teeex_editor_mode') as 'code' | 'visual') || 'code';
@@ -114,6 +122,11 @@ export const Editor: React.FC<Props> = ({
   const [activeCommentLine, setActiveCommentLine] = useState<number | null>(null);
   const [commentDraft, setCommentDraft] = useState('');
   const [currentCursorLine, setCurrentCursorLine] = useState(1);
+  const [imageCopied, setImageCopied] = useState(false);
+
+  // Active file & Image asset detection
+  const currentFile = files.find(f => (activeFileId && f.id === activeFileId) || f.name === fileName);
+  const isImageFile = currentFile?.type === 'image' || /\.(png|jpe?g|gif|svg|webp|ico)$/i.test(fileName);
 
   // LaTeX Command & Environment Snippet Autocomplete State
   const [snippetQuery, setSnippetQuery] = useState<string | null>(null);
@@ -912,39 +925,61 @@ export const Editor: React.FC<Props> = ({
             </button>
           )}
 
-          {/* Overleaf-Style Code vs Visual Segmented Switch */}
-          <div style={segmentedControlStyle}>
-            <button
-              type="button"
-              onClick={() => {
-                setEditorMode('code');
-                localStorage.setItem('teeex_editor_mode', 'code');
-              }}
+          {/* Overleaf-Style Code vs Visual Segmented Switch (or Asset Badge) */}
+          {isImageFile ? (
+            <div
               style={{
-                ...segmentedBtnStyle,
-                ...(editorMode === 'code' ? activeSegmentedBtnStyle : {}),
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '0 8px',
+                borderRadius: 5,
+                backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                color: '#38bdf8',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
+                fontSize: 10.5,
+                fontWeight: 600,
+                height: 24,
+                boxSizing: 'border-box',
               }}
-              title="Code Editor: Raw LaTeX source with syntax highlighting"
             >
-              <CodeIcon size={11} />
-              <span>Code</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setEditorMode('visual');
-                localStorage.setItem('teeex_editor_mode', 'visual');
-              }}
-              style={{
-                ...segmentedBtnStyle,
-                ...(editorMode === 'visual' ? activeSegmentedBtnStyle : {}),
-              }}
-              title="Visual Editor: Interactive rich-text LaTeX WYSIWYG editor"
-            >
-              <Eye size={11} />
-              <span>Visual</span>
-            </button>
-          </div>
+              <ImageIcon size={11} />
+              <span>Image Asset</span>
+            </div>
+          ) : (
+            <div style={segmentedControlStyle}>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditorMode('code');
+                  localStorage.setItem('teeex_editor_mode', 'code');
+                }}
+                style={{
+                  ...segmentedBtnStyle,
+                  ...(editorMode === 'code' ? activeSegmentedBtnStyle : {}),
+                }}
+                title="Code Editor: Raw LaTeX source with syntax highlighting"
+              >
+                <CodeIcon size={11} />
+                <span>Code</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditorMode('visual');
+                  localStorage.setItem('teeex_editor_mode', 'visual');
+                }}
+                style={{
+                  ...segmentedBtnStyle,
+                  ...(editorMode === 'visual' ? activeSegmentedBtnStyle : {}),
+                }}
+                title="Visual Editor: Interactive rich-text LaTeX WYSIWYG editor"
+              >
+                <Eye size={11} />
+                <span>Visual</span>
+              </button>
+            </div>
+          )}
 
           {/* Active File Pill */}
           <div
@@ -961,12 +996,12 @@ export const Editor: React.FC<Props> = ({
               flexShrink: 0,
             }}
           >
-            <FileText size={11} color="#38bdf8" />
+            {isImageFile ? <ImageIcon size={11} color="#38bdf8" /> : <FileText size={11} color="#38bdf8" />}
             <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
               {fileName}
             </span>
             <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
-              • {lines.length} lines
+              {isImageFile ? '• Asset' : `• ${lines.length} lines`}
             </span>
           </div>
 
@@ -1069,7 +1104,90 @@ export const Editor: React.FC<Props> = ({
         </div>
 
         {/* Right Controls: Quick Formatting Snippets, Edit/Suggest, Sync Preview, Syntax Theme */}
-        {editorMode === 'code' && (
+        {isImageFile ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
+            <button
+              type="button"
+              onClick={() => {
+                const includePath = currentFile?.folder ? `${currentFile.folder}/${fileName.split('/').pop()}` : fileName;
+                const cleanLabel = (fileName.split('/').pop() || 'fig').replace(/\.[^/.]+$/, '');
+                const snippet = `\\begin{figure}[htbp]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{${includePath}}\n  \\caption{Caption}\n  \\label{fig:${cleanLabel}}\n\\end{figure}`;
+                navigator.clipboard.writeText(snippet);
+                setImageCopied(true);
+                setTimeout(() => setImageCopied(false), 2000);
+              }}
+              style={{
+                height: 24,
+                padding: '0 8px',
+                fontSize: 10.5,
+                fontWeight: 600,
+                borderRadius: 5,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                backgroundColor: imageCopied ? 'rgba(34, 197, 94, 0.15)' : 'rgba(56, 189, 248, 0.12)',
+                color: imageCopied ? '#22c55e' : '#38bdf8',
+                border: imageCopied ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(56, 189, 248, 0.25)',
+                cursor: 'pointer',
+              }}
+              title="Copy LaTeX \\includegraphics snippet to clipboard"
+            >
+              <Copy size={11} />
+              <span>{imageCopied ? 'Copied' : 'Copy \\includegraphics'}</span>
+            </button>
+
+            {currentFile?.dataUrl && (
+              <a
+                href={currentFile.dataUrl}
+                download={fileName.split('/').pop() || 'figure.png'}
+                style={{
+                  height: 24,
+                  padding: '0 8px',
+                  fontSize: 10.5,
+                  fontWeight: 500,
+                  borderRadius: 5,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  backgroundColor: 'var(--bg-surface-1)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-subtle)',
+                  textDecoration: 'none',
+                  cursor: 'pointer',
+                }}
+                title="Download original image file"
+              >
+                <Download size={11} />
+                <span>Download</span>
+              </a>
+            )}
+
+            {onOpenImageUpload && (
+              <button
+                type="button"
+                onClick={onOpenImageUpload}
+                style={{
+                  height: 24,
+                  padding: '0 8px',
+                  fontSize: 10.5,
+                  fontWeight: 500,
+                  borderRadius: 5,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  backgroundColor: 'var(--bg-surface-1)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-subtle)',
+                  cursor: 'pointer',
+                }}
+                title="Upload or replace image"
+              >
+                <Upload size={11} />
+                <span>Upload</span>
+              </button>
+            )}
+          </div>
+        ) : editorMode === 'code' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
             {role !== 'viewer' && (
               <div style={formatGroupStyle}>
@@ -1141,6 +1259,24 @@ export const Editor: React.FC<Props> = ({
                   title="Itemize List"
                 >
                   <List size={11} />
+                </button>
+
+                <div style={formatDividerStyle} />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenImageUpload) {
+                      onOpenImageUpload();
+                    } else {
+                      insertSnippet('\\begin{figure}[htbp]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{', '}\n  \\caption{Caption}\n  \\label{fig:my_label}\n\\end{figure}');
+                    }
+                  }}
+                  className="format-toolbar-btn"
+                  style={formatBtnStyle}
+                  title="Insert Figure / Image (\includegraphics)"
+                >
+                  <ImageIcon size={11} />
                 </button>
 
                 {onOpenSnippets && (
@@ -1517,8 +1653,162 @@ export const Editor: React.FC<Props> = ({
         )}
       </div>
 
-      {/* RENDER VISUAL OR CODE EDITOR */}
-      {editorMode === 'visual' ? (
+      {/* RENDER ASSET VIEWER, VISUAL, OR CODE EDITOR */}
+      {isImageFile ? (
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: 'var(--bg-app)',
+          padding: 32,
+          overflow: 'auto',
+          position: 'relative',
+        }}>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            maxWidth: '100%',
+            gap: 20,
+          }}>
+            {/* Visual Canvas Preview Frame */}
+            <div style={{
+              padding: 20,
+              borderRadius: 10,
+              backgroundColor: '#0f172a',
+              backgroundImage: 'linear-gradient(45deg, #1e293b 25%, transparent 25%), linear-gradient(-45deg, #1e293b 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1e293b 75%), linear-gradient(-45deg, transparent 75%, #1e293b 75%)',
+              backgroundSize: '20px 20px',
+              backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
+              border: '1px solid var(--border-subtle)',
+              boxShadow: '0 12px 36px rgba(0, 0, 0, 0.45)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              maxHeight: '62vh',
+              maxWidth: '90vw',
+              overflow: 'hidden',
+            }}>
+              {currentFile?.dataUrl || (currentFile?.content && currentFile.content.startsWith('data:')) ? (
+                <img
+                  src={currentFile.dataUrl || currentFile.content}
+                  alt={fileName}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '58vh',
+                    objectFit: 'contain',
+                    borderRadius: 4,
+                  }}
+                />
+              ) : (
+                <div style={{
+                  padding: 40,
+                  textAlign: 'center',
+                  color: 'var(--text-muted)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 12,
+                }}>
+                  <ImageIcon size={48} color="#64748b" />
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>
+                    Preview Not Available
+                  </div>
+                  <div style={{ fontSize: 11, maxWidth: 300 }}>
+                    {currentFile?.content || 'Binary image asset stored in project vault.'}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Asset Metadata & Action Box */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+              backgroundColor: 'var(--bg-surface-0)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 8,
+              padding: '14px 18px',
+              width: '100%',
+              maxWidth: 520,
+              boxShadow: 'var(--shadow-sm)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <ImageIcon size={14} color="#38bdf8" />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                    {fileName}
+                  </span>
+                </div>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  {currentFile?.folder ? `Folder: ${currentFile.folder}/` : 'Root Directory'}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const includePath = currentFile?.folder ? `${currentFile.folder}/${fileName.split('/').pop()}` : fileName;
+                    const cleanLabel = (fileName.split('/').pop() || 'fig').replace(/\.[^/.]+$/, '');
+                    const snippet = `\\begin{figure}[htbp]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{${includePath}}\n  \\caption{Caption}\n  \\label{fig:${cleanLabel}}\n\\end{figure}`;
+                    navigator.clipboard.writeText(snippet);
+                    setImageCopied(true);
+                    setTimeout(() => setImageCopied(false), 2000);
+                  }}
+                  className="btn-primary"
+                  style={{
+                    flex: 1,
+                    height: 32,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    borderRadius: 6,
+                    backgroundColor: imageCopied ? '#16a34a' : '#0284c7',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.15s ease',
+                  }}
+                >
+                  <Copy size={13} />
+                  <span>{imageCopied ? 'LaTeX Code Copied!' : 'Copy \\includegraphics Snippet'}</span>
+                </button>
+
+                {currentFile?.dataUrl && (
+                  <a
+                    href={currentFile.dataUrl}
+                    download={fileName.split('/').pop() || 'figure.png'}
+                    style={{
+                      height: 32,
+                      padding: '0 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      fontSize: 12,
+                      fontWeight: 500,
+                      borderRadius: 6,
+                      backgroundColor: 'var(--bg-surface-1)',
+                      border: '1px solid var(--border-subtle)',
+                      color: 'var(--text-secondary)',
+                      textDecoration: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Download size={13} />
+                    <span>Download</span>
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : editorMode === 'visual' ? (
         <VisualEditor
           code={code}
           fileName={fileName}
@@ -2023,6 +2313,46 @@ export const Editor: React.FC<Props> = ({
             onClick={handleSelect}
             onKeyUp={handleSelect}
             onDoubleClick={() => onForwardSync?.(currentCursorLine)}
+            onDragOver={(e) => {
+              if (e.dataTransfer.types && (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('application/x-moz-file'))) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = 'copy';
+              }
+            }}
+            onDrop={(e) => {
+              const droppedFiles = e.dataTransfer.files;
+              if (droppedFiles && droppedFiles.length > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const firstFile = droppedFiles[0];
+                const isImg = /\.(png|jpe?g|gif|svg|webp|pdf)$/i.test(firstFile.name);
+
+                if (onImportFiles) {
+                  onImportFiles(droppedFiles, isImg ? 'figures' : undefined);
+                }
+
+                if (isImg && role !== 'viewer') {
+                  const cleanName = firstFile.name.replace(/\s+/g, '_');
+                  const figLabel = cleanName.replace(/\.[^/.]+$/, '');
+                  const snippet = `\\begin{figure}[htbp]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{figures/${cleanName}}\n  \\caption{Caption}\n  \\label{fig:${figLabel}}\n\\end{figure}\n`;
+                  const target = e.currentTarget;
+                  const start = target.selectionStart ?? code.length;
+                  const end = target.selectionEnd ?? code.length;
+                  const newCode = code.substring(0, start) + snippet + code.substring(end);
+                  onChange(newCode);
+
+                  setTimeout(() => {
+                    if (textareaRef.current) {
+                      textareaRef.current.focus();
+                      const nextPos = start + snippet.length;
+                      textareaRef.current.setSelectionRange(nextPos, nextPos);
+                    }
+                  }, 50);
+                }
+              }
+            }}
             onScroll={(e) => {
               if (e.currentTarget.scrollTop !== 0) e.currentTarget.scrollTop = 0;
               if (e.currentTarget.scrollLeft !== 0) e.currentTarget.scrollLeft = 0;

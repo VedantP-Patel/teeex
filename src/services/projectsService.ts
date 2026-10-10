@@ -1,6 +1,7 @@
 import type { Project } from '../types/latex';
 import { STARTER_TEMPLATES } from './templates';
 import { getSupabaseClient } from './supabaseClient';
+import { getStoredSession } from './authService';
 
 const PROJECTS_STORAGE_KEY = 'teeex_saved_projects';
 const ACTIVE_PROJECT_ID_KEY = 'teeex_active_project_id';
@@ -157,14 +158,18 @@ function normalizeProject(p: any): Project {
   };
 }
 
-export function loadProjects(userEmail?: string, userName?: string): Project[] {
+export function getAllProjectsRaw(): Project[] {
   let allProjects: Project[] = [];
   const saved = localStorage.getItem(PROJECTS_STORAGE_KEY);
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        allProjects = parsed.map(normalizeProject);
+        // Filter out any corrupted or legacy 'proj-guest' / 'Sign In Required' dummy projects
+        const valid = parsed.filter(p => p.id !== 'proj-guest' && p.title !== 'Sign In Required');
+        if (valid.length > 0) {
+          allProjects = valid.map(normalizeProject);
+        }
       }
     } catch {
       localStorage.removeItem(PROJECTS_STORAGE_KEY);
@@ -177,31 +182,43 @@ export function loadProjects(userEmail?: string, userName?: string): Project[] {
     saveProjects(allProjects);
   }
 
-  if (userEmail) {
-    const targetEmail = userEmail.toLowerCase();
+  return allProjects;
+}
+
+export function loadProjects(userEmail?: string, userName?: string): Project[] {
+  const allProjects = getAllProjectsRaw();
+  const sessionUser = getStoredSession().user;
+  const targetEmail = (userEmail || sessionUser?.email || '').toLowerCase().trim();
+  const targetName = userName || sessionUser?.fullName || (targetEmail ? targetEmail.split('@')[0] : 'Author');
+
+  if (targetEmail) {
     const filtered = allProjects.filter(p => 
-      p.ownerEmail.toLowerCase() === targetEmail || 
-      p.members?.some(m => m.email.toLowerCase() === targetEmail)
+      (p.ownerEmail || '').toLowerCase() === targetEmail || 
+      p.members?.some(m => (m.email || '').toLowerCase() === targetEmail)
     );
     
     // If user has no projects, create a default one for them
     if (filtered.length === 0) {
-      const defaultProj = createProject('My First Project', userEmail, userName || userEmail.split('@')[0]);
+      const defaultProj = createProject(
+        `${targetName ? targetName + "'s" : 'My'} First Paper`,
+        targetEmail,
+        targetName
+      );
       return [defaultProj];
     }
 
     // Auto-sync existing projects if userName differs from raw email prefix
-    if (userName && userName.trim()) {
+    if (targetName && targetName.trim()) {
       let anyChanged = false;
       const updatedAll = allProjects.map(p => {
         let pChanged = false;
         const newMembers = (p.members || []).map(m => {
-          if (m.email.toLowerCase() === targetEmail && m.name !== userName) {
+          if (m.email.toLowerCase() === targetEmail && m.name !== targetName) {
             pChanged = true;
             return {
               ...m,
-              name: userName,
-              avatar: userName.substring(0, 2).toUpperCase() || m.avatar,
+              name: targetName,
+              avatar: targetName.substring(0, 2).toUpperCase() || m.avatar,
             };
           }
           return m;
@@ -214,11 +231,10 @@ export function loadProjects(userEmail?: string, userName?: string): Project[] {
       });
 
       if (anyChanged) {
-        allProjects = updatedAll;
-        saveProjects(allProjects);
-        return allProjects.filter(p => 
-          p.ownerEmail.toLowerCase() === targetEmail || 
-          p.members?.some(m => m.email.toLowerCase() === targetEmail)
+        saveProjects(updatedAll);
+        return updatedAll.filter(p => 
+          (p.ownerEmail || '').toLowerCase() === targetEmail || 
+          p.members?.some(m => (m.email || '').toLowerCase() === targetEmail)
         );
       }
     }
@@ -226,31 +242,13 @@ export function loadProjects(userEmail?: string, userName?: string): Project[] {
     return filtered;
   }
 
-  // If no userEmail provided (guest), return an empty placeholder project
-  // so they don't see the admin's demo projects.
-  return [{
-    id: 'proj-guest',
-    title: 'Sign In Required',
-    ownerId: 'usr-guest',
-    ownerEmail: 'guest@teeex.io',
-    role: 'owner',
-    createdAt: new Date().toISOString(),
-    updatedAt: 'Just now',
-    files: [{
-      id: 'main.tex',
-      name: 'main.tex',
-      type: 'tex',
-      content: '\\documentclass{article}\n\\begin{document}\nWelcome to Teeex Studio. Please sign in to view your projects.\n\\end{document}',
-      isEntry: true
-    }],
-    tags: [],
-    members: [],
-    isArchived: false,
-  }];
+  // Guest / unauthenticated state: return all projects so they can explore
+  return allProjects;
 }
 
 export function saveProjects(projects: Project[]): void {
-  localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+  const sanitized = projects.filter(p => p.id !== 'proj-guest' && p.title !== 'Sign In Required');
+  localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(sanitized));
 }
 
 export function getActiveProjectId(projects: Project[]): string {
@@ -298,7 +296,7 @@ export function createProject(
     isArchived: false,
   };
 
-  const projects = loadProjects();
+  const projects = getAllProjectsRaw();
   const updated = [newProject, ...projects];
   saveProjects(updated);
   setActiveProjectId(newId);
@@ -310,7 +308,7 @@ export function createProject(
 }
 
 export function duplicateProject(projectId: string): Project | null {
-  const projects = loadProjects();
+  const projects = getAllProjectsRaw();
   const target = projects.find(p => p.id === projectId);
   if (!target) return null;
 
@@ -335,7 +333,7 @@ export function duplicateProject(projectId: string): Project | null {
 }
 
 export function toggleArchiveProject(projectId: string): Project[] {
-  const projects = loadProjects();
+  const projects = getAllProjectsRaw();
   const updated = projects.map(p =>
     p.id === projectId ? { ...p, isArchived: !p.isArchived } : p
   );
@@ -348,7 +346,7 @@ export function toggleArchiveProject(projectId: string): Project[] {
 }
 
 export function deleteProject(projectId: string): Project[] {
-  const projects = loadProjects();
+  const projects = getAllProjectsRaw();
   const filtered = projects.filter(p => p.id !== projectId);
   saveProjects(filtered);
 
@@ -369,7 +367,7 @@ export function updateProject(
   projectId: string,
   patch: Partial<Project>
 ): Project[] {
-  const projects = loadProjects();
+  const projects = getAllProjectsRaw();
   const updated = projects.map(p => {
     if (p.id === projectId) {
       return {

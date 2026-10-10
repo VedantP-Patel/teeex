@@ -556,7 +556,7 @@ export const Navbar: React.FC<Props> = ({
                   <span>Switch Account</span>
                 </button>
 
-                {currentUser?.isAdmin && onOpenAdminUsers && (
+                {(currentUser?.isAdmin || isPlatformDev) && onOpenAdminUsers && (
                   <button
                     onClick={() => { setIsUserDropdownOpen(false); onOpenAdminUsers(); }}
                     style={dropdownItemStyle}

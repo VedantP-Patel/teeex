@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
+import { UploadCloud } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
@@ -838,6 +839,96 @@ export function App() {
     setProjects(updatedProjects);
   };
 
+  const handleImportFiles = async (fileList: FileList | File[], targetFolder?: string) => {
+    const rawFiles = Array.from(fileList);
+    if (rawFiles.length === 0) return;
+
+    const newFiles: ProjectFile[] = [];
+    const addedFolders = new Set(folders);
+
+    for (const file of rawFiles) {
+      const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|svg|webp|pdf)$/i.test(file.name);
+      const isBib = file.name.endsWith('.bib');
+      const isSty = file.name.endsWith('.sty') || file.name.endsWith('.cls');
+      const safeName = file.name.replace(/\s+/g, '_');
+
+      if (isImage) {
+        const destFolder = targetFolder || (folders.includes('figures') ? 'figures' : 'figures');
+        addedFolders.add(destFolder);
+        const resolvedName = destFolder && !safeName.startsWith(destFolder + '/')
+          ? `${destFolder}/${safeName}`
+          : safeName;
+
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        newFiles.push({
+          id: resolvedName,
+          name: resolvedName,
+          type: 'image',
+          folder: destFolder,
+          content: `[Binary Image Data: ${Math.round(file.size / 1024)} KB]`,
+          dataUrl,
+        });
+      } else {
+        const textContent = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsText(file);
+        });
+
+        const destFolder = targetFolder || (safeName.includes('/') ? safeName.split('/')[0] : undefined);
+        if (destFolder) addedFolders.add(destFolder);
+        const resolvedName = destFolder && !safeName.startsWith(destFolder + '/')
+          ? `${destFolder}/${safeName}`
+          : safeName;
+
+        newFiles.push({
+          id: resolvedName,
+          name: resolvedName,
+          type: isBib ? 'bib' : isSty ? 'sty' : 'tex',
+          folder: destFolder,
+          content: textContent,
+        });
+      }
+    }
+
+    let mergedFiles = [...files];
+    newFiles.forEach(nf => {
+      const existingIdx = mergedFiles.findIndex(f => f.id === nf.id || f.name === nf.name);
+      if (existingIdx >= 0) {
+        mergedFiles[existingIdx] = nf;
+      } else {
+        mergedFiles.push(nf);
+      }
+    });
+
+    const nextFoldersList = Array.from(addedFolders);
+    setFiles(mergedFiles);
+    setFolders(nextFoldersList);
+
+    const firstTextFile = newFiles.find(f => f.type === 'tex' || f.type === 'bib');
+    if (firstTextFile) {
+      setActiveFileId(firstTextFile.id);
+      setOpenFileIds(prev => Array.from(new Set([...prev, firstTextFile.id])));
+    } else if (newFiles.length > 0) {
+      setActiveFileId(newFiles[0].id);
+      setOpenFileIds(prev => Array.from(new Set([...prev, newFiles[0].id])));
+    }
+
+    const updatedProjects = updateProject(activeProjectId, {
+      files: mergedFiles,
+      folders: nextFoldersList,
+    });
+    setProjects(updatedProjects);
+    setTimeout(() => triggerCompile(), 100);
+  };
+
   const handleDeleteFile = (fileId: string) => {
     if (files.length <= 1) return;
     const updated = files.filter(f => f.id !== fileId);
@@ -976,6 +1067,7 @@ export function App() {
   // Auth Handlers
   const handleAuthSuccess = (user: UserProfile) => {
     setCurrentUser(user);
+    setIsAuthOpen(false);
     setSelfUser(prev => ({
       ...prev,
       name: user.fullName,
@@ -983,22 +1075,46 @@ export function App() {
       color: user.avatarColor || '#38bdf8',
     }));
     
-    // Reload projects based on new user
+    // Reload projects based on newly authenticated user
     const loadedProjects = loadProjects(user.email, user.fullName);
     setProjects(loadedProjects);
-    setActiveProjectIdState(getActiveProjectId(loadedProjects));
+    const nextActiveId = getActiveProjectId(loadedProjects);
+    const nextProj = loadedProjects.find(p => p.id === nextActiveId) || loadedProjects[0];
+    if (nextProj) {
+      setActiveProjectId(nextProj.id);
+      setActiveProjectIdState(nextProj.id);
+      setFiles(nextProj.files);
+      setFolders(nextProj.folders || ['sections', 'figures']);
+      const firstId = nextProj.files[0]?.id || 'main.tex';
+      setActiveFileId(firstId);
+      setOpenFileIds([firstId]);
+      setProjectTitle(nextProj.title);
+      setPeers(areSimulatedPeersEnabled(nextProj.id) ? DEFAULT_PEERS : []);
+      setTimeout(() => triggerCompile(), 80);
+    }
   };
 
   const handleSignOut = async () => {
     await signOutUser();
     setCurrentUser(null);
     
-    // Reload projects back to default/guest state
+    // Reload projects back to guest/default state
     const loadedProjects = loadProjects(undefined);
     setProjects(loadedProjects);
-    setActiveProjectIdState(getActiveProjectId(loadedProjects));
+    const nextActiveId = getActiveProjectId(loadedProjects);
+    const nextProj = loadedProjects.find(p => p.id === nextActiveId) || loadedProjects[0];
+    if (nextProj) {
+      setActiveProjectId(nextProj.id);
+      setActiveProjectIdState(nextProj.id);
+      setFiles(nextProj.files);
+      setFolders(nextProj.folders || ['sections', 'figures']);
+      const firstId = nextProj.files[0]?.id || 'main.tex';
+      setActiveFileId(firstId);
+      setOpenFileIds([firstId]);
+      setProjectTitle(nextProj.title);
+      setTimeout(() => triggerCompile(), 80);
+    }
     
-    // Force auth modal to reopen
     setIsAuthOpen(true);
   };
 
@@ -1032,22 +1148,117 @@ export function App() {
     };
   }, [isDraggingSplit, isSidebarOpen]);
 
-  if (!currentUser) {
-    return (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-app)' }}>
-        <AuthModal
-          isOpen={true}
-          onClose={() => {}}
-          currentUser={null}
-          onAuthSuccess={handleAuthSuccess}
-          onDeveloperStatusChanged={handleDeveloperStatusChanged}
-        />
-      </div>
-    );
-  }
+  // Global Drag & Drop Handlers for workspace files import
+  const [isDragOverApp, setIsDragOverApp] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  const handleAppDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.types.includes('Files')) {
+      dragCounterRef.current += 1;
+      setIsDragOverApp(true);
+    }
+  };
+
+  const handleAppDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDragOverApp(false);
+    }
+  };
+
+  const handleAppDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleAppDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDragOverApp(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleImportFiles(e.dataTransfer.files);
+    }
+  };
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-app)', userSelect: isDraggingSplit ? 'none' : 'auto' }}>
+    <div
+      onDragEnter={handleAppDragEnter}
+      onDragLeave={handleAppDragLeave}
+      onDragOver={handleAppDragOver}
+      onDrop={handleAppDrop}
+      style={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        backgroundColor: 'var(--bg-app)',
+        userSelect: isDraggingSplit ? 'none' : 'auto',
+        position: 'relative',
+      }}
+    >
+      {/* Global Drag and Drop Overlay Indicator */}
+      {isDragOverApp && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.78)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            pointerEvents: 'none',
+            border: '3px dashed #38bdf8',
+            margin: 8,
+            borderRadius: 'var(--radius-lg)',
+            animation: 'fadeIn 0.15s ease forwards',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 12,
+              padding: '30px 45px',
+              backgroundColor: 'var(--bg-surface-0)',
+              border: '1px solid var(--border-medium)',
+              borderRadius: 'var(--radius-lg)',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+              textAlign: 'center',
+            }}
+          >
+            <div
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: 16,
+                backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
+              }}
+            >
+              <UploadCloud size={32} color="#38bdf8" />
+            </div>
+            <div>
+              <h3 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 6px 0', color: 'var(--text-primary)' }}>
+                Drop files to import into project
+              </h3>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0, maxWidth: 360 }}>
+                Automatically imports LaTeX documents (.tex), bibliographies (.bib), and figures (.png, .jpg, .svg, .pdf) directly into your workspace.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Top Navigation */}
       <Navbar
         projectTitle={projectTitle}
@@ -1120,6 +1331,8 @@ export function App() {
             onOpenHistory={() => setIsHistoryOpen(true)}
             role={currentRole}
             onCollapse={() => setIsSidebarOpen(false)}
+            onImportFiles={handleImportFiles}
+            onOpenImageUpload={() => setIsImageUploadOpen(true)}
           />
         </div>
 
@@ -1160,6 +1373,8 @@ export function App() {
               }}
               onFormatDocument={handleFormatDocument}
               onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+              onOpenImageUpload={() => setIsImageUploadOpen(true)}
+              onImportFiles={handleImportFiles}
             />
           </div>
 

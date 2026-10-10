@@ -19,6 +19,51 @@ export function saveLocalRegisteredUser(user: UserProfile): void {
   localStorage.setItem(LOCAL_REGISTERED_USERS_KEY, JSON.stringify(users));
 }
 
+const APPROVED_EMAILS_KEY = 'teeex_approved_emails_cache';
+
+export function getApprovedEmails(): Set<string> {
+  try {
+    const list = JSON.parse(localStorage.getItem(APPROVED_EMAILS_KEY) || '[]');
+    return new Set(Array.isArray(list) ? list.map((e: string) => String(e).toLowerCase().trim()) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function markUserAsApproved(email: string): void {
+  const normalized = email.toLowerCase().trim();
+  const set = getApprovedEmails();
+  set.add(normalized);
+  try {
+    localStorage.setItem(APPROVED_EMAILS_KEY, JSON.stringify(Array.from(set)));
+  } catch (e) {
+    console.warn('Failed to save approved emails:', e);
+  }
+  approveLocalUser(normalized);
+}
+
+export function markUserAsRejected(email: string): void {
+  const normalized = email.toLowerCase().trim();
+  const set = getApprovedEmails();
+  set.delete(normalized);
+  try {
+    localStorage.setItem(APPROVED_EMAILS_KEY, JSON.stringify(Array.from(set)));
+  } catch (e) {
+    console.warn('Failed to save approved emails:', e);
+  }
+  rejectLocalUser(normalized);
+}
+
+export function isUserApproved(email: string): boolean {
+  if (!email) return false;
+  const normalized = email.toLowerCase().trim();
+  const set = getApprovedEmails();
+  if (set.has(normalized)) return true;
+  const localUsers = getLocalRegisteredUsers();
+  const found = localUsers.find(u => u.email.toLowerCase() === normalized);
+  return found?.isApproved === true;
+}
+
 export function approveLocalUser(email: string): void {
   const users = getLocalRegisteredUsers();
   const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
@@ -168,7 +213,8 @@ export async function loginWithEmail(
           .eq('id', data.user.id)
           .single();
 
-        const isApproved = profile?.is_approved === true;
+        const userEmail = data.user.email || email;
+        const isApproved = profile?.is_approved === true || isUserApproved(userEmail);
         const isAdmin = profile?.is_admin === true;
 
         if (!isApproved && !isAdmin) {

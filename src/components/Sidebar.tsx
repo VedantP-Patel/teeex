@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   FileText,
   FileCode,
@@ -17,7 +17,10 @@ import {
   Image as ImageIcon,
   PanelLeftClose,
   Search,
-  X
+  X,
+  Upload,
+  UploadCloud,
+  ImagePlus
 } from 'lucide-react';
 import type { ProjectFile, ParsedDocument, ProjectRole } from '../types/latex';
 import { extractLatexLabels } from '../services/latexParser';
@@ -41,6 +44,8 @@ interface Props {
   onCollapse?: () => void;
   activeCursorLine?: number;
   parsedDoc?: ParsedDocument;
+  onImportFiles?: (files: FileList | File[], targetFolder?: string) => void;
+  onOpenImageUpload?: () => void;
 }
 
 export const Sidebar: React.FC<Props> = ({
@@ -62,8 +67,14 @@ export const Sidebar: React.FC<Props> = ({
   onCollapse,
   activeCursorLine,
   parsedDoc,
+  onImportFiles,
+  onOpenImageUpload,
 }) => {
   const [activeTab, setActiveTab] = useState<'files' | 'outline'>('files');
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
 
   // Document Outline Filter & Search State
   const [outlineFilter, setOutlineFilter] = useState<'all' | 'sections' | 'figures' | 'tables' | 'math'>('all');
@@ -311,8 +322,50 @@ export const Sidebar: React.FC<Props> = ({
 
       {/* Files List View */}
       {activeTab === 'files' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-          {/* Header & New File / New Folder Buttons */}
+        <div
+          onDragOver={e => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+          }}
+          onDrop={e => {
+            e.preventDefault();
+            if (e.dataTransfer.files && onImportFiles) {
+              onImportFiles(e.dataTransfer.files);
+            }
+          }}
+          style={{ flex: 1, overflowY: 'auto', padding: 8 }}
+        >
+          {/* Hidden file input for general upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".tex,.bib,.sty,.cls,.png,.jpg,.jpeg,.svg,.webp,.pdf,.txt"
+            style={{ display: 'none' }}
+            onChange={e => {
+              if (e.target.files && onImportFiles) {
+                onImportFiles(e.target.files);
+              }
+              e.target.value = '';
+            }}
+          />
+
+          {/* Hidden image input for direct figure import */}
+          <input
+            ref={imageInputRef}
+            type="file"
+            multiple
+            accept=".png,.jpg,.jpeg,.svg,.webp,.pdf"
+            style={{ display: 'none' }}
+            onChange={e => {
+              if (e.target.files && onImportFiles) {
+                onImportFiles(e.target.files, 'figures');
+              }
+              e.target.value = '';
+            }}
+          />
+
+          {/* Header & New File / New Folder / Upload Buttons */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 6px 8px 6px' }}>
             <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
               WORKSPACE FILES
@@ -343,6 +396,16 @@ export const Sidebar: React.FC<Props> = ({
                 >
                   <FolderPlus size={13} color="#f59e0b" />
                   <span style={{ fontSize: 10, fontWeight: 600 }}>Folder</span>
+                </button>
+
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="btn-ghost"
+                  style={{ padding: '3px 5px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3, color: '#10b981' }}
+                  title="Upload / Import LaTeX files or figures from your computer"
+                >
+                  <Upload size={12} color="#10b981" />
+                  <span style={{ fontSize: 10, fontWeight: 600 }}>Upload</span>
                 </button>
               </div>
             )}
@@ -392,13 +455,37 @@ export const Sidebar: React.FC<Props> = ({
               const folderFiles = filesByFolder.get(folderName) || [];
               const isOpen = openFolders.has(folderName);
               const isCreatingInThisFolder = creationMode === `folder:${folderName}`;
+              const isOverThis = dragOverFolder === folderName;
 
               return (
                 <div key={folderName} style={{ marginBottom: 2 }}>
                   {/* Folder Row */}
                   <div
                     onClick={() => toggleFolder(folderName)}
-                    style={folderRowStyle}
+                    onDragOver={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      e.dataTransfer.dropEffect = 'copy';
+                      if (dragOverFolder !== folderName) setDragOverFolder(folderName);
+                    }}
+                    onDragLeave={e => {
+                      e.stopPropagation();
+                      if (dragOverFolder === folderName) setDragOverFolder(null);
+                    }}
+                    onDrop={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDragOverFolder(null);
+                      if (e.dataTransfer.files && onImportFiles) {
+                        onImportFiles(e.dataTransfer.files, folderName);
+                      }
+                    }}
+                    style={{
+                      ...folderRowStyle,
+                      backgroundColor: isOverThis ? 'rgba(56, 189, 248, 0.16)' : folderRowStyle.backgroundColor,
+                      border: isOverThis ? '1px dashed #38bdf8' : '1px solid transparent',
+                      transition: 'all 0.15s ease',
+                    }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden' }}>
                       {isOpen ? (
@@ -421,6 +508,19 @@ export const Sidebar: React.FC<Props> = ({
 
                     {role !== 'viewer' && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        {folderName === 'figures' && (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              imageInputRef.current?.click();
+                            }}
+                            className="btn-ghost"
+                            style={{ padding: 2, color: '#10b981' }}
+                            title="Upload image into figures/"
+                          >
+                            <ImagePlus size={12} color="#10b981" />
+                          </button>
+                        )}
                         <button
                           onClick={e => {
                             e.stopPropagation();
@@ -477,13 +577,41 @@ export const Sidebar: React.FC<Props> = ({
 
                       {folderFiles.length === 0 && !isCreatingInThisFolder ? (
                         <div
-                          onClick={() => {
-                            setCreationMode(`folder:${folderName}`);
-                            setNewItemName('');
+                          style={{
+                            fontSize: 10.5,
+                            color: 'var(--text-muted)',
+                            padding: '4px 6px',
+                            fontStyle: 'italic',
+                            display: 'flex',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: 5,
                           }}
-                          style={{ fontSize: 10.5, color: 'var(--text-muted)', padding: '4px 6px', fontStyle: 'italic', cursor: 'pointer' }}
                         >
-                          Empty folder &bull; <span style={{ color: '#38bdf8' }}>+ Add file</span>
+                          <span>Empty folder &bull;</span>
+                          <span
+                            onClick={() => {
+                              setCreationMode(`folder:${folderName}`);
+                              setNewItemName('');
+                            }}
+                            style={{ color: '#38bdf8', cursor: 'pointer' }}
+                          >
+                            + Add file
+                          </span>
+                          {(folderName.toLowerCase().includes('figure') || folderName.toLowerCase().includes('image')) && (
+                            <>
+                              <span>&bull;</span>
+                              <span
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onOpenImageUpload ? onOpenImageUpload() : imageInputRef.current?.click();
+                                }}
+                                style={{ color: '#10b981', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 2 }}
+                              >
+                                <UploadCloud size={10} /> + Upload image
+                              </span>
+                            </>
+                          )}
                         </div>
                       ) : (
                         folderFiles.map(f => {
