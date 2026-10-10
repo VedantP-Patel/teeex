@@ -111,6 +111,24 @@ export const LATEX_SNIPPETS: LatexSnippet[] = [
     template: '\\begin{algorithm}[H]\n  \\caption{Algorithm Name}\n  \\label{alg:label}\n  \\begin{algorithmic}[1]\n    \\State Initialize $x \\leftarrow 0$\n  \\end{algorithmic}\n\\end{algorithm}',
     cursorOffset: 34,
   },
+  {
+    id: 'env-tikz-diagram',
+    trigger: 'tikz',
+    label: '\\begin{tikzpicture}',
+    category: 'env',
+    description: 'TikZ vector graphics coordinate diagram',
+    template: '\\begin{tikzpicture}[scale=1.2]\n  \\draw[->, thick] (0,0) -- (4,0) node[right] {$x$};\n  \\draw[->, thick] (0,0) -- (0,3) node[above] {$y$};\n  \\draw[blue, thick] (1,1) rectangle (3,2);\n  \\node at (2,1.5) {Sample};\n\\end{tikzpicture}',
+    cursorOffset: 25,
+  },
+  {
+    id: 'env-tikz-flowchart',
+    trigger: 'flowchart',
+    label: '\\begin{tikzpicture} flowchart',
+    category: 'env',
+    description: 'TikZ directional process block diagram',
+    template: '\\begin{tikzpicture}\n  \\node[draw, rectangle] (A) at (0,0) {Start};\n  \\node[draw, rectangle] (B) at (3,0) {Process};\n  \\node[draw, rectangle] (C) at (6,0) {Output};\n  \\draw[->, thick] (A) -- (B);\n  \\draw[->, thick] (B) -- (C);\n\\end{tikzpicture}',
+    cursorOffset: 20,
+  },
 
   // Math Commands
   {

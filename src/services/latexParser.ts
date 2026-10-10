@@ -1,5 +1,6 @@
 import katex from 'katex';
 import type { Diagnostic, ParsedDocument, ProjectFile, LatexLabel } from '../types/latex';
+import { renderTikzToSvg } from './tikzRenderer';
 
 // High-speed KaTeX formula LRU cache (eliminates redundant formula typesetting during editing)
 const katexFormulaCache = new Map<string, string>();
@@ -472,6 +473,14 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   bodyText = bodyText.replace(/(?<!\\)\$([^\$\n]+?)(?<!\\)\$/g, (_, math) => {
     const rendered = renderKatexCached(math.trim(), false);
     return `<span class="latex-math-inline">${rendered}</span>`;
+  });
+
+  // Render TikZ Vector Graphics: \begin{tikzpicture}[...] ... \end{tikzpicture}
+  bodyText = bodyText.replace(/\\begin\{tikzpicture\}(?:\[(.*?)\])?([\s\S]*?)\\end\{tikzpicture\}/g, (_, opts, tikzContent) => {
+    const fullCode = (opts ? `[${opts}] ` : '') + (tikzContent || '');
+    const tikzLine = findSourceLine('tikzpicture', rawLines, '\\begin{tikzpicture');
+    const svg = renderTikzToSvg(fullCode);
+    return `<div class="latex-figure-container synctex-target" data-line="${tikzLine}" title="Click to jump to line ${tikzLine} in code">${svg}</div>`;
   });
 
   // Format Tables: \begin{tabular}{...} ... \end{tabular}
