@@ -197,6 +197,8 @@ export function computeLineDiff(oldContent: string, newContent: string): DiffRes
         right: { lineNumber: cur.newLineNumber!, text: cur.text, type: 'added' },
       });
       k++;
+    } else {
+      k++;
     }
   }
 

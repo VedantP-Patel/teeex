@@ -36,35 +36,35 @@ interface Props {
 export const VersionHistoryModal: React.FC<Props> = ({
   isOpen,
   onClose,
-  checkpoints,
-  currentFiles,
+  checkpoints = [],
+  currentFiles = [],
   onCreateCheckpoint,
   onRestoreCheckpoint,
   onRestoreSingleFile,
 }) => {
   const [newCheckpointName, setNewCheckpointName] = useState('');
   const [selectedCheckpointId, setSelectedCheckpointId] = useState<string>(
-    checkpoints.length > 0 ? checkpoints[0].id : ''
+    checkpoints && checkpoints.length > 0 ? checkpoints[0].id : ''
   );
   const [diffMode, setDiffMode] = useState<'split' | 'unified'>('unified');
   const [selectedFileId, setSelectedFileId] = useState<string>(() => {
-    return currentFiles.find(f => f.name.endsWith('.tex'))?.id || currentFiles[0]?.id || 'main.tex';
+    return currentFiles?.find(f => f.name.endsWith('.tex'))?.id || currentFiles?.[0]?.id || 'main.tex';
   });
   const [restoredToast, setRestoredToast] = useState<'all' | 'file' | null>(null);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
 
-  if (!isOpen) return null;
-
-  const selectedCheckpoint = checkpoints.find(c => c.id === selectedCheckpointId) || checkpoints[0];
+  const safeCheckpoints = checkpoints || [];
+  const selectedCheckpoint = safeCheckpoints.find(c => c.id === selectedCheckpointId) || safeCheckpoints[0] || null;
 
   // Resolve active file comparison
-  const currentFile = currentFiles.find(f => f.id === selectedFileId) || currentFiles[0];
-  const checkpointFile = selectedCheckpoint?.files.find(f => f.id === selectedFileId || f.name === currentFile?.name);
+  const safeCurrentFiles = currentFiles || [];
+  const currentFile = safeCurrentFiles.find(f => f.id === selectedFileId) || safeCurrentFiles[0] || null;
+  const checkpointFile = selectedCheckpoint?.files?.find(f => f.id === selectedFileId || f.name === currentFile?.name) || null;
 
   const currentContent = currentFile?.content || '';
   const checkpointContent = checkpointFile?.content || '';
 
-  // Calculate real LCS diff
+  // Calculate real LCS diff (always called unconditionally to satisfy React rules of hooks!)
   const diffResult = useMemo(() => {
     return computeLineDiff(checkpointContent, currentContent);
   }, [checkpointContent, currentContent]);
@@ -101,6 +101,9 @@ export const VersionHistoryModal: React.FC<Props> = ({
     setCopiedSnippet(true);
     setTimeout(() => setCopiedSnippet(false), 1400);
   };
+
+  // Guard: Return null AFTER all hooks are evaluated
+  if (!isOpen) return null;
 
   return (
     <div style={backdropStyle} onClick={onClose}>
@@ -184,7 +187,7 @@ export const VersionHistoryModal: React.FC<Props> = ({
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
                       <span>by {cp.author}</span>
-                      <span>{cp.files.length} file{cp.files.length > 1 ? 's' : ''}</span>
+                      <span>{cp.files?.length || 0} file{(cp.files?.length || 0) > 1 ? 's' : ''}</span>
                     </div>
                   </div>
                 );
@@ -346,7 +349,7 @@ export const VersionHistoryModal: React.FC<Props> = ({
                       {/* Split Column Headers */}
                       <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-surface-0)', position: 'sticky', top: 0, zIndex: 2 }}>
                         <div style={{ flex: 1, padding: '4px 12px', fontSize: 10, fontWeight: 700, color: '#f43f5e', borderRight: '1px solid var(--border-subtle)' }}>
-                          CHECKPOINT: {selectedCheckpoint.name}
+                          CHECKPOINT: {selectedCheckpoint?.name || 'Checkpoint'}
                         </div>
                         <div style={{ flex: 1, padding: '4px 12px', fontSize: 10, fontWeight: 700, color: '#10b981' }}>
                           CURRENT REVISION (WORKING TREE)
@@ -407,7 +410,7 @@ export const VersionHistoryModal: React.FC<Props> = ({
                 {/* Diff Action Bar */}
                 <div style={diffActionBarStyle}>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    Comparing <strong>{currentFile?.name}</strong> against <strong>{selectedCheckpoint.name}</strong>
+                    Comparing <strong>{currentFile?.name}</strong> against <strong>{selectedCheckpoint?.name || 'Checkpoint'}</strong>
                   </div>
 
                   <div style={{ display: 'flex', gap: 8 }}>
