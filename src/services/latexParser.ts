@@ -1258,6 +1258,54 @@ function findSourceLine(needle: string, rawLines: string[], hintPrefix?: string)
 }
 
 /**
+ * Expand user-defined LaTeX macros (\newcommand, \renewcommand, \def)
+ */
+function expandMacros(text: string): string {
+  const macros = new Map<string, { args: number; body: string }>();
+
+  // Extract \newcommand and \renewcommand
+  const cmdRegex = /\\(?:new|renew)command\*?\s*\{?\\([a-zA-Z]+)\}?(?:\s*\[(\d+)\])?\s*\{((?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*)\}/g;
+  let match;
+  while ((match = cmdRegex.exec(text)) !== null) {
+    const name = '\\' + match[1];
+    const args = match[2] ? parseInt(match[2], 10) : 0;
+    const body = match[3];
+    macros.set(name, { args, body });
+  }
+
+  // Extract \def\name{body} or \def\name#1{body}
+  const defRegex = /\\def\s*\\([a-zA-Z]+)(?:#1(?:#2)?)?\s*\{((?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*)\}/g;
+  while ((match = defRegex.exec(text)) !== null) {
+    const name = '\\' + match[1];
+    const args = match[0].includes('#2') ? 2 : (match[0].includes('#1') ? 1 : 0);
+    const body = match[2];
+    if (!macros.has(name)) {
+      macros.set(name, { args, body });
+    }
+  }
+
+  if (macros.size === 0) return text;
+
+  let expanded = text;
+  for (const [name, def] of macros.entries()) {
+    const escapedName = name.replace(/\\/g, '\\\\');
+    if (def.args === 0) {
+      expanded = expanded.replace(new RegExp(`${escapedName}(?:\\{\\}|\\b)`, 'g'), def.body);
+    } else if (def.args === 1) {
+      expanded = expanded.replace(new RegExp(`${escapedName}\\s*\\{([^}]+)\\}`, 'g'), (_, arg1) => {
+        return def.body.replace(/#1/g, arg1);
+      });
+    } else if (def.args === 2) {
+      expanded = expanded.replace(new RegExp(`${escapedName}\\s*\\{([^}]+)\\}\\{([^}]+)\\}`, 'g'), (_, arg1, arg2) => {
+        return def.body.replace(/#1/g, arg1).replace(/#2/g, arg2);
+      });
+    }
+  }
+
+  return expanded;
+}
+
+/**
  * Render High-Fidelity Academic Paper HTML with KaTeX Math, Figures, Tables, Minipages, TOC, and SyncTeX line anchors
  */
 export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
@@ -1291,6 +1339,9 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
       return target ? target.content : orig;
     });
   }
+
+  // Expand macros
+  cleanCode = expandMacros(cleanCode);
 
   // Detect parskip and parindent in preamble
   const hasParskipPackage = /\\usepackage(?:\s*\[[^\]]*\])?\s*\{parskip\}/i.test(cleanCode);

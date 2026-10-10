@@ -4,6 +4,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/core/busytex/:match*",
+      "destination": "https://texlyre.github.io/texlyre-busytex/core/busytex/:match*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

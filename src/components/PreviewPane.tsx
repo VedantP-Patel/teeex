@@ -16,11 +16,13 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
-  Printer
+  Printer,
+  Sparkles,
 } from 'lucide-react';
 import type { ParsedDocument } from '../types/latex';
 import { PAPER_FORMATS, type PaperFormatId } from '../services/paperFormats';
 import { paginateByHeuristic, paginateByDom } from '../services/domPaginator';
+import { PdfPreviewPane } from './PdfPreviewPane';
 
 interface Props {
   renderedHtml: string;
@@ -34,6 +36,10 @@ interface Props {
   isTwoColumn?: boolean;
   onToggleTwoColumn?: () => void;
   onExportPdf?: () => void;
+  pdfBytes?: Uint8Array | null;
+  isWasmCompiling?: boolean;
+  wasmError?: string | null;
+  documentTitle?: string;
 }
 
 /**
@@ -64,7 +70,20 @@ export const PreviewPane: React.FC<Props> = ({
   isTwoColumn: isTwoColumnProp,
   onToggleTwoColumn,
   onExportPdf,
+  pdfBytes,
+  isWasmCompiling,
+  wasmError,
+  documentTitle,
 }) => {
+  const [previewEngine, setPreviewEngine] = useState<'wasm' | 'html'>(() => {
+    return (localStorage.getItem('teeex_preview_engine') as 'wasm' | 'html') || 'wasm';
+  });
+
+  const handleToggleEngine = (engine: 'wasm' | 'html') => {
+    setPreviewEngine(engine);
+    localStorage.setItem('teeex_preview_engine', engine);
+  };
+
   const [zoom, setZoom] = useState(78);
   const [localColumnOverride, setLocalColumnOverride] = useState<boolean | null>(null);
   const [localFormat, setLocalFormat] = useState<PaperFormatId>(() => {
@@ -516,6 +535,65 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
           >
             <MousePointerClick size={10} color="#38bdf8" /> SyncTeX: Active
           </span>
+
+          {/* Engine Mode Toggle: Overleaf WASM vs Fast HTML */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            backgroundColor: 'var(--bg-surface-1)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: 5,
+            height: 24,
+            padding: 1,
+            marginLeft: 6,
+          }}>
+            <button
+              type="button"
+              onClick={() => handleToggleEngine('wasm')}
+              style={{
+                padding: '2px 8px',
+                fontSize: 10,
+                fontWeight: previewEngine === 'wasm' ? 700 : 500,
+                backgroundColor: previewEngine === 'wasm' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                color: previewEngine === 'wasm' ? '#38bdf8' : 'var(--text-muted)',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                height: '100%',
+                transition: 'all 0.15s ease',
+              }}
+              title="Overleaf Parity: Genuine pdfLaTeX WASM engine with 100% accurate PDF output"
+            >
+              <Sparkles size={11} color={previewEngine === 'wasm' ? '#38bdf8' : 'var(--text-muted)'} />
+              <span>Overleaf WASM</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleToggleEngine('html')}
+              style={{
+                padding: '2px 8px',
+                fontSize: 10,
+                fontWeight: previewEngine === 'html' ? 700 : 500,
+                backgroundColor: previewEngine === 'html' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                color: previewEngine === 'html' ? '#38bdf8' : 'var(--text-muted)',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                height: '100%',
+                transition: 'all 0.15s ease',
+              }}
+              title="Instant HTML: Fast DOM-based preview while typing"
+            >
+              <FileText size={10} />
+              <span>Fast HTML</span>
+            </button>
+          </div>
         </div>
 
         {/* Controls: Format, Column mode, Zoom, Print */}
@@ -845,13 +923,24 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
         </div>
       </div>
 
-      {/* Paper Sheet View Container (PDF Surrounding Area) */}
-      <div
-        ref={viewportRef}
-        onScroll={handleViewportScroll}
-        style={sheetViewportStyle}
-        className="sheet-viewport"
-      >
+      {previewEngine === 'wasm' ? (
+        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+          <PdfPreviewPane
+            pdfBytes={pdfBytes ?? null}
+            isCompiling={isWasmCompiling || false}
+            compileError={wasmError}
+            onExportPdf={onExportPdf}
+            documentTitle={documentTitle}
+          />
+        </div>
+      ) : (
+        /* Paper Sheet View Container (PDF Surrounding Area) */
+        <div
+          ref={viewportRef}
+          onScroll={handleViewportScroll}
+          style={sheetViewportStyle}
+          className="sheet-viewport"
+        >
         <div
           ref={sheetRef}
           onClick={handlePreviewInteraction}
@@ -1123,6 +1212,7 @@ function findSelectedTextLine(query: string, rawCode: string): number | null {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 };

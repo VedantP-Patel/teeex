@@ -38,6 +38,7 @@ import { encryptText, decryptText } from './services/encryptionService';
 import { exportDocumentAsPdf } from './services/pdfExporter';
 import { type PaperFormatId } from './services/paperFormats';
 import { verifyShareKey } from './services/shareSecurityService';
+import { useLatexCompiler } from './hooks/useLatexCompiler';
 
 import type {
   ProjectFile,
@@ -46,6 +47,7 @@ import type {
   SuggestedFix,
   Template,
   ReviewComment,
+  Diagnostic,
   Project,
   ProjectRole,
   UserProfile,
@@ -324,6 +326,14 @@ export function App() {
   const [splitPercent, setSplitPercent] = useState<number>(50);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
 
+  // WebAssembly Overleaf-Parity LaTeX Compilation Engine
+  const wasmCompiler = useLatexCompiler({
+    code: activeFile?.content || '',
+    files,
+    debounceMs: 700,
+    autoCompile: activeFile?.name.endsWith('.tex') ?? false,
+  });
+
   // Real-Time High-Performance Live Compilation Pipeline
   // Diagnoses LaTeX syntax, parses AST, renders KaTeX/HTML, and measures REAL latency
   const liveCompileResult = useMemo(() => {
@@ -348,12 +358,60 @@ export function App() {
     };
   }, [activeFile.content, activeFile.name, files]);
 
-  const diagnostics = liveCompileResult.diagnostics;
   const parsedDoc = liveCompileResult.parsedDoc;
   const renderedHtml = liveCompileResult.renderedHtml;
 
+  // Diagnostics: merge pdfLaTeX WASM diagnostics with instant KaTeX parser diagnostics
+  const diagnostics = useMemo(() => {
+    const parserDiags = liveCompileResult.diagnostics;
+    if (!wasmCompiler.result) return parserDiags;
+
+    const wasmDiags: Diagnostic[] = wasmCompiler.result.errors.map((err, idx) => ({
+      id: `wasm-err-${idx}`,
+      line: err.line,
+      column: 1,
+      severity: 'error' as const,
+      message: err.message,
+      rule: 'pdfLaTeX',
+      rawLog: err.sourceContext,
+    }));
+
+    const wasmWarns: Diagnostic[] = wasmCompiler.result.warnings.map((warn, idx) => ({
+      id: `wasm-warn-${idx}`,
+      line: warn.line,
+      column: 1,
+      severity: 'warning' as const,
+      message: warn.message,
+      rule: 'pdfLaTeX',
+    }));
+
+    return [...wasmDiags, ...wasmWarns, ...parserDiags];
+  }, [liveCompileResult.diagnostics, wasmCompiler.result]);
+
   // Keep compileState live, accurate and synced with actual engine performance
   useEffect(() => {
+    if (wasmCompiler.isCompiling) {
+      setCompileState(prev => ({
+        ...prev,
+        status: 'compiling',
+      }));
+      return;
+    }
+
+    if (wasmCompiler.result) {
+      const errCount = wasmCompiler.result.errors.length;
+      const warnCount = wasmCompiler.result.warnings.length;
+      setCompileState({
+        status: wasmCompiler.result.success ? 'success' : 'error',
+        durationMs: wasmCompiler.result.durationMs,
+        errorCount: errCount,
+        warningCount: warnCount,
+        timestamp: wasmCompiler.lastCompiledAt || new Date().toLocaleTimeString(),
+        rawLogs: wasmCompiler.result.log ? wasmCompiler.result.log.split(/\r?\n/).filter(Boolean) : ['WASM typeset completed.'],
+      });
+      return;
+    }
+
     const errCount = diagnostics.filter(d => d.severity === 'error').length;
     const warnCount = diagnostics.filter(d => d.severity === 'warning').length;
 
@@ -365,7 +423,7 @@ export function App() {
       warningCount: warnCount,
       timestamp: new Date().toLocaleTimeString(),
     }));
-  }, [liveCompileResult.durationMs, diagnostics]);
+  }, [wasmCompiler.isCompiling, wasmCompiler.result, wasmCompiler.lastCompiledAt, diagnostics, liveCompileResult.durationMs]);
 
   // Document Stats
   const wordCount = useMemo(() => {
@@ -378,48 +436,11 @@ export function App() {
     return parsedDoc.mathBlocks.length;
   }, [parsedDoc.mathBlocks]);
 
-  // Run Manual Full Compilation Pass (measures real parsing & typeset execution)
+  // Run Manual Full Compilation Pass with genuine TeX Live WASM
   const triggerCompile = useCallback(() => {
     setCompileState(prev => ({ ...prev, status: 'compiling' }));
-
-    requestAnimationFrame(() => {
-      const t0 = performance.now();
-      const isTex = activeFile.name.endsWith('.tex');
-      const diags = isTex ? diagnoseLatex(activeFile.content) : [];
-      parseLatexDocument(activeFile.content, files);
-      renderLatexToHtml(activeFile.content, files);
-      const t1 = performance.now();
-
-      const elapsed = t1 - t0;
-      const duration = elapsed < 10 ? Number(elapsed.toFixed(1)) : Math.round(elapsed);
-
-      const errCount = diags.filter(d => d.severity === 'error').length;
-      const warnCount = diags.filter(d => d.severity === 'warning').length;
-
-      const logs: string[] = [
-        `This is pdfTeX, Version 3.141592653-2.6-1.40.24 (TeX Live 2026)`,
-        `entering extended mode`,
-        `(${activeFile.name} LaTeX2e <2026-06-01>`,
-      ];
-
-      if (errCount > 0) {
-        logs.push(`! ${errCount} syntax error(s) detected during parse pass.`);
-      } else {
-        logs.push(`Output written on ${activeFile.name.replace('.tex', '')}.pdf (1 page, ${Math.floor(wordCount * 12 + 18000)} bytes).`);
-        logs.push(`SyncTeX database written to ${activeFile.name.replace('.tex', '')}.synctex.gz`);
-        logs.push(`Typeset completed in ${duration}ms.`);
-      }
-
-      setCompileState({
-        status: errCount > 0 ? 'error' : 'success',
-        durationMs: Math.max(0.5, duration),
-        timestamp: new Date().toLocaleTimeString(),
-        errorCount: errCount,
-        warningCount: warnCount,
-        rawLogs: logs,
-      });
-    });
-  }, [activeFile.name, activeFile.content, files, wordCount]);
+    wasmCompiler.triggerCompile();
+  }, [wasmCompiler]);
 
   // Real-time Collaboration sync listener
   useEffect(() => {
@@ -748,8 +769,21 @@ export function App() {
     setTimeout(() => triggerCompile(), 50);
   }, []);
 
-  // Export pristine publication PDF isolated from IDE UI
+  // Export pristine publication PDF isolated from IDE UI (uses authentic WASM bytes if available)
   const handleExportPdf = useCallback(() => {
+    if (wasmCompiler.result?.pdfBytes) {
+      const blob = new Blob([wasmCompiler.result.pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(projectTitle || parsedDoc.title || 'document').replace(/\s+/g, '_')}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return;
+    }
+
     const sheet = document.querySelector('.latex-paper-sheet') as HTMLElement;
     exportDocumentAsPdf({
       title: projectTitle || parsedDoc.title || 'LaTeX Document',
@@ -757,7 +791,7 @@ export function App() {
       format: paperFormat,
       isTwoColumn: isTwoColumn,
     });
-  }, [projectTitle, parsedDoc.title, paperFormat, isTwoColumn]);
+  }, [wasmCompiler.result?.pdfBytes, projectTitle, parsedDoc.title, paperFormat, isTwoColumn]);
 
   // Export full project as .zip package
   const handleExportZip = () => {
@@ -1413,6 +1447,10 @@ export function App() {
               isTwoColumn={isTwoColumn}
               onToggleTwoColumn={handleToggleTwoColumn}
               onExportPdf={handleExportPdf}
+              pdfBytes={wasmCompiler.result?.pdfBytes}
+              isWasmCompiling={wasmCompiler.isCompiling}
+              wasmError={wasmCompiler.result && !wasmCompiler.result.success ? wasmCompiler.result.errors[0]?.message : null}
+              documentTitle={projectTitle || parsedDoc.title || 'document'}
             />
           </div>
         </div>
