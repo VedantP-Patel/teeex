@@ -12,12 +12,30 @@
  */
 
 import { execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SOURCE_DIR = join(ROOT, 'public', 'core', 'busytex');
+const LOCAL_RELEASE = join(ROOT, 'tmp-busytex-assets', 'busytex');
+const PUBLIC_DIR = join(ROOT, 'public', 'core', 'busytex');
+const SOURCE_DIR = existsSync(LOCAL_RELEASE) ? LOCAL_RELEASE : PUBLIC_DIR;
+
+const FILES_TO_UPLOAD = [
+  'busytex_worker.js',
+  'busytex_pipeline.js',
+  'busytex_biber.js',
+  'busytex.js',
+  'busytex.wasm',
+  'texlive-basic.js',
+  'texlive-basic.data',
+  'texlive-recommended.js',
+  'texlive-recommended.data',
+  'biber.js',
+  'biber.wasm',
+  'biber.data',
+];
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -34,20 +52,12 @@ function mib(bytes) {
 async function main() {
   console.log('\n  Teeex Cloudflare R2 Asset Uploader');
   console.log(`  bucket  ${BUCKET}`);
-  console.log(`  source  public/core/busytex\n`);
+  console.log(`  source  ${SOURCE_DIR}\n`);
 
-  let files;
-  try {
-    files = (await readdir(SOURCE_DIR)).filter(
-      (f) => !f.startsWith('.') && !f.endsWith('.partial')
-    );
-  } catch (err) {
-    console.error(`Cannot read ${SOURCE_DIR}: ${err.message}`);
-    process.exit(1);
-  }
+  const files = FILES_TO_UPLOAD.filter((f) => existsSync(join(SOURCE_DIR, f)));
 
   if (files.length === 0) {
-    console.error('No assets found in public/core/busytex/. Run "npm run engine" first.');
+    console.error(`No assets found in ${SOURCE_DIR}. Run "npm run engine:full" first.`);
     process.exit(1);
   }
 
