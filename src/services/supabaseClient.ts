@@ -8,13 +8,16 @@ export interface CloudProject {
   updatedAt: string;
 }
 
+const DEFAULT_SUPABASE_URL = 'https://quwiahdywsdnrqeucwwi.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1d2lhaGR5d3NkbnJxZXVjd3dpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE1Mjc1NjgsImV4cCI6MjEwNzEwMzU2OH0.4TeIrKs8jj1AZr4CTm26uVFI9VYHM-7sbSH3zhjvLNs';
+
 let supabaseInstance: SupabaseClient | null = null;
 
 export function getSupabaseClient(): SupabaseClient | null {
   if (supabaseInstance) return supabaseInstance;
 
-  const envUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+  const envUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || DEFAULT_SUPABASE_URL;
+  const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || DEFAULT_SUPABASE_ANON_KEY;
 
   const savedUrl = localStorage.getItem('teeex_supabase_url') || envUrl;
   const savedKey = localStorage.getItem('teeex_supabase_anon_key') || envKey;
