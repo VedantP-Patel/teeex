@@ -26,6 +26,7 @@ import {
   toEngineFiles,
 } from './texProject';
 import { parseTexLog, type CompileDiagnostic } from './texLog';
+import { getBundledPackages } from './bundledPackages';
 
 export { resolveEntryFile } from './texProject';
 
@@ -91,7 +92,13 @@ const DEFAULT_REMOTE_ENDPOINT = 'https://texlive2026.texlyre.org';
 function remoteEndpoint(): string | undefined {
   const configured = import.meta.env.VITE_TEXLIVE_REMOTE_ENDPOINT;
   if (configured === 'off') return undefined;
-  return (configured || DEFAULT_REMOTE_ENDPOINT).replace(/\/+$/, '');
+  if (configured) return configured.replace(/\/+$/, '');
+  // Route through Cloudflare Pages edge proxy for 1-year immutable caching,
+  // 404 negative caching, same-origin HTTP/2, and zero WAN latency
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}/api/texlive`;
+  }
+  return DEFAULT_REMOTE_ENDPOINT;
 }
 
 interface QueuedRequest {
@@ -142,6 +149,9 @@ export class TexEngineService {
    * blocking their first compile.
    */
   prewarm(engine: EngineId = 'pdflatex'): void {
+    if (typeof window !== 'undefined') {
+      void getBundledPackages().catch(() => {});
+    }
     void this.ensureRunner(engine).catch(() => {
       // Surfaced through status; nothing to do here.
     });
@@ -192,6 +202,17 @@ export class TexEngineService {
     try {
       const runner = new BusyTexRunner(config);
       await runner.initialize(true); // off the main thread
+
+      // Pre-seed academic packages (IEEEtran, cite, acmart) & font metrics into WASM kpathsea
+      try {
+        const bundled = await getBundledPackages();
+        if (bundled.length > 0) {
+          await runner.writeTexliveRemoteFiles(bundled);
+        }
+      } catch (_bundledErr) {
+        // Non-fatal, compiler will fall back to remote endpoint
+      }
+
       this.runners.set(engine, runner);
       this.setStatus({ phase: 'ready', progress: 100, engine });
       return runner;

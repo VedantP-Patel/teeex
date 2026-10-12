@@ -25,6 +25,15 @@ export default defineConfig({
    * an exact path. Self-hosting a version-pinned subset removes that.
    */
   assetsInclude: ['**/*.wasm'],
+  server: {
+    proxy: {
+      '/api/texlive': {
+        target: 'https://texlive2026.texlyre.org',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/texlive/, ''),
+      },
+    },
+  },
   build: {
     rollupOptions: {
       output: {

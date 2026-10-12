@@ -8,6 +8,7 @@
 
 import type { ProjectFile } from '../types/latex';
 import { mountVirtualTeXFileSystem } from './virtualFileSystem';
+import { getCachedPackageContent } from './bundledPackages';
 
 /** A file as the engine's virtual filesystem expects it. */
 export interface EngineFile {
@@ -66,6 +67,43 @@ export function toEngineFiles(
     if (seen.has(alias)) continue;
     seen.add(alias);
     out.push({ path: alias, content: entry.content });
+  }
+
+  // Pre-seed academic classes and styles directly into working directory if referenced
+  const entryFile = files.find((file) => file.name === entryPath);
+  const entryContent = entryFile?.content || '';
+
+  if (
+    /\\documentclass\s*(?:\[[^\]]*\])?\s*\{[^}]*\bIEEEtran\b[^}]*\}/i.test(entryContent) &&
+    !seen.has('IEEEtran.cls')
+  ) {
+    const cached = getCachedPackageContent('IEEEtran.cls');
+    if (cached) {
+      seen.add('IEEEtran.cls');
+      out.push({ path: 'IEEEtran.cls', content: cached });
+    }
+  }
+
+  if (
+    /\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bcite\b[^}]*\}/i.test(entryContent) &&
+    !seen.has('cite.sty')
+  ) {
+    const cached = getCachedPackageContent('cite.sty');
+    if (cached) {
+      seen.add('cite.sty');
+      out.push({ path: 'cite.sty', content: cached });
+    }
+  }
+
+  if (
+    /\\documentclass\s*(?:\[[^\]]*\])?\s*\{[^}]*\bacmart\b[^}]*\}/i.test(entryContent) &&
+    !seen.has('acmart.cls')
+  ) {
+    const cached = getCachedPackageContent('acmart.cls');
+    if (cached) {
+      seen.add('acmart.cls');
+      out.push({ path: 'acmart.cls', content: cached });
+    }
   }
 
   return out;
