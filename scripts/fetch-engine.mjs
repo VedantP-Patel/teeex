@@ -89,7 +89,7 @@ const option = (name, fallback) => {
 };
 
 const profileName = option('profile', 'full');
-const baseUrl = 'local-release:texlyre-busytex@1.4.0';
+const configuredBaseUrl = process.env.TEEEX_ENGINE_BASE_URL || DEFAULT_BASE_URL;
 const LOCAL_RELEASE = join(ROOT, 'tmp-busytex-assets', 'busytex');
 const force = flag('force');
 const verifyOnly = flag('verify');
@@ -118,11 +118,20 @@ async function readManifest() {
   }
 }
 
+/** Check if a local file exists and is non-empty */
+async function getLocalFileInfo(filePath) {
+  try {
+    const s = await stat(filePath);
+    return s.isFile() && s.size > 0 ? s : null;
+  } catch {
+    return null;
+  }
+}
+
 /** True when every file in the profile is present at its recorded size. */
 async function isProvisioned(manifest) {
   if (!manifest) return false;
   if (manifest.engineVersion !== ENGINE_VERSION) return false;
-  if (manifest.baseUrl !== baseUrl) return false;
 
   for (const name of files) {
     const recorded = manifest.files?.[name];
@@ -138,45 +147,82 @@ async function isProvisioned(manifest) {
 }
 
 /**
- * Streams one asset to disk via a temp file so an interrupted run never leaves
+ * Downloads or copies an asset to disk via a temp file so an interrupted run never leaves
  * a truncated .wasm or .data behind — those fail at WebAssembly instantiation
  * with messages that point nowhere near the real cause.
  */
 async function download(name) {
-  const source = join(LOCAL_RELEASE, name);
+  const localSource = join(LOCAL_RELEASE, name);
   const target = join(DEST, name);
   const temp = `${target}.partial`;
 
+  const localInfo = await getLocalFileInfo(localSource);
+
   try {
-    const sourceInfo = await stat(source);
-    if (!sourceInfo.isFile() || sourceInfo.size === 0) {
-      throw new Error(`Missing or empty local release asset: ${source}`);
+    if (localInfo) {
+      await pipeline(
+        createReadStream(localSource),
+        createWriteStream(temp)
+      );
+
+      const copied = await stat(temp);
+      if (copied.size !== localInfo.size) {
+        await rm(temp, { force: true });
+        throw new Error(
+          `Size mismatch copying ${name}: source=${localInfo.size}, copied=${copied.size}`
+        );
+      }
+      await rename(temp, target);
+      return { bytes: copied.size, sha256: null, source: 'local' };
     }
 
+    // Remote download fallback
+    const url = `${configuredBaseUrl.replace(/\/+$/, '')}/${name}`;
+    const res = await fetch(url);
+    if (!res.ok || !res.body) {
+      throw new Error(`HTTP ${res.status} ${res.statusText} fetching ${url}`);
+    }
+
+    const contentEncoding = res.headers.get('content-encoding');
+    const rawContentLength = res.headers.get('content-length');
+    // Node fetch automatically decompresses gzip/br/deflate, so Content-Length
+    // reflects the compressed wire bytes while downloaded.size is uncompressed bytes.
+    const expectedLength = !contentEncoding && rawContentLength
+      ? parseInt(rawContentLength, 10)
+      : null;
+
     await pipeline(
-      createReadStream(source),
+      Readable.fromWeb(res.body),
       createWriteStream(temp)
     );
 
-    const copied = await stat(temp);
-    if (copied.size !== sourceInfo.size) {
+    const downloaded = await stat(temp);
+    if (expectedLength && downloaded.size !== expectedLength) {
       await rm(temp, { force: true });
       throw new Error(
-        `Size mismatch copying ${name}: source=${sourceInfo.size}, copied=${copied.size}`
+        `Size mismatch downloading ${name}: expected=${expectedLength}, downloaded=${downloaded.size}`
       );
+    }
+    if (downloaded.size === 0) {
+      await rm(temp, { force: true });
+      throw new Error(`Downloaded zero-byte asset: ${name}`);
     }
 
     await rename(temp, target);
-    return { bytes: copied.size, sha256: null };
+    return { bytes: downloaded.size, sha256: null, source: 'remote' };
   } catch (error) {
     await rm(temp, { force: true }).catch(() => {});
     throw error;
   }
 }
+
 async function main() {
+  const hasLocalRelease = (await getLocalFileInfo(join(LOCAL_RELEASE, 'busytex_worker.js'))) !== null;
+  const baseUrl = hasLocalRelease ? 'local-release:texlyre-busytex@1.4.0' : configuredBaseUrl;
+
   console.log('\n  Teeex TeX engine assets');
   console.log(`  profile  ${profileName} (${files.length} files)`);
-  console.log('  source   local official release assets');
+  console.log(`  source   ${hasLocalRelease ? 'local official release assets' : configuredBaseUrl}`);
   console.log('  dest     public/core/busytex\n');
 
   await mkdir(DEST, { recursive: true });
@@ -195,18 +241,22 @@ async function main() {
         if (error?.code !== 'ENOENT') throw error;
       }
 
-      if (force || !info || !info.isFile() || info.size === 0) {
+      const localSourceInfo = await getLocalFileInfo(join(LOCAL_RELEASE, name));
+
+      // Re-download/copy if forced, missing, empty, or differs from local source (when local exists)
+      const needsFetch =
+        force ||
+        !info ||
+        !info.isFile() ||
+        info.size === 0 ||
+        (localSourceInfo && info.size !== localSourceInfo.size);
+
+      if (needsFetch) {
         await download(name);
         info = await stat(join(DEST, name));
       }
 
-      const sourceInfo = await stat(join(LOCAL_RELEASE, name));
-      if (info.size !== sourceInfo.size) {
-        await download(name);
-        info = await stat(join(DEST, name));
-      }
-
-      if (!info.isFile() || info.size === 0) {
+      if (!info || !info.isFile() || info.size === 0) {
         fail(`Missing or empty engine asset: ${name}`);
       }
 
@@ -254,10 +304,10 @@ async function main() {
   );
 
   console.log(
-    `\n  Validated ${files.length} local assets, ${mib(totalBytes)} total.`
+    `\n  Validated ${files.length} engine assets, ${mib(totalBytes)} total.`
   );
-  console.log('  No remote downloads required.\n');
 }
+
 main().catch((error) => {
   console.error('\n  FATAL: Engine provisioning failed.');
   console.error(error?.stack || error);
