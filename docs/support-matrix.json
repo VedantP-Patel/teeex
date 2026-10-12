@@ -1,0 +1,298 @@
+{
+  "updated": "2026-10-11",
+  "statusVocabulary": {
+    "not-implemented": "No code path exists.",
+    "implemented-unverified": "Code written and reviewed, but never executed. Makes no claim of working.",
+    "verified": "Covered by a passing automated test that exercises the stage named.",
+    "partial": "Works for a stated subset; the limitation is recorded in `limitations`.",
+    "n/a": "Not applicable at this stage for this capability."
+  },
+
+  "framing": {
+    "note": "Under this architecture, LaTeX syntax support is not an application feature — TeX Live 2026 parses and typesets the document, so the parser/semantic/layout stages for LaTeX constructs are the engine's, not ours. Enumerating a few hundred LaTeX commands as 'supported' here would restate TeX's own capabilities while hiding the only things that are genuinely ours to get right: whether the engine is reachable, whether the project is mounted correctly, whether the artifact is displayed and exported faithfully, and which package sets actually resolve.",
+    "soWhatIsTracked": [
+      "Engine capabilities we invoke and must configure correctly.",
+      "Application capabilities: mounting, display, export, synchronisation, diagnostics.",
+      "Package-set availability, which bounds which documents can compile at all.",
+      "The draft outline's coverage, which is explicitly non-authoritative."
+    ],
+    "honesty": "A capability is `verified` only where a named automated test exercises the stage. As of 2026-10-11 the suite passes (tsc clean, 93 unit/fuzz, 3 e2e) — see docs/project-state.json verificationStatus."
+  },
+
+  "capabilities": [
+    {
+      "id": "engine.pdflatex",
+      "capability": "pdfLaTeX typesetting",
+      "spec": "TeX Live 2026 (pdfTeX) via texlyre-busytex 1.4.0",
+      "stages": { "invocation": "verified", "artifact": "verified", "preview": "verified", "export": "verified" },
+      "tests": ["tests/unit/texProject.test.ts", "tests/e2e/latex-workflow.spec.ts", "tests/e2e/pdf-fidelity.spec.ts"],
+      "limitations": ["Compile latency is seconds, not milliseconds (~11s total for the e2e load+compile+render+download)."],
+      "overall": "verified"
+    },
+    {
+      "id": "engine.xelatex",
+      "capability": "XeLaTeX typesetting",
+      "spec": "TeX Live 2026 (XeTeX) + dvipdfmx",
+      "stages": { "invocation": "implemented-unverified", "artifact": "not-implemented", "preview": "n/a", "export": "n/a" },
+      "tests": [],
+      "limitations": ["Requires the `full` engine profile; not provisioned by default.", "No UI to select it yet."],
+      "overall": "partial"
+    },
+    {
+      "id": "engine.lualatex",
+      "capability": "LuaLaTeX typesetting",
+      "spec": "TeX Live 2026 (LuaHBTeX)",
+      "stages": { "invocation": "implemented-unverified", "artifact": "not-implemented", "preview": "n/a", "export": "n/a" },
+      "tests": [],
+      "limitations": ["Requires the `full` engine profile.", "No UI to select it yet."],
+      "overall": "partial"
+    },
+    {
+      "id": "engine.bibtex",
+      "capability": "BibTeX bibliography pass",
+      "spec": "bibtex8, TeX Live 2026",
+      "stages": { "detection": "verified", "invocation": "implemented-unverified", "artifact": "implemented-unverified" },
+      "tests": ["tests/unit/texProject.test.ts::needsBibtex"],
+      "limitations": ["Runs only when a .bib exists and the source references it, to avoid spurious 'no \\citation commands' diagnostics."],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "engine.biber",
+      "capability": "Biber bibliography pass (biblatex)",
+      "spec": "biber, TeX Live 2026",
+      "stages": { "detection": "not-implemented", "invocation": "not-implemented" },
+      "tests": [],
+      "limitations": ["Biber assets are provisioned but never requested; \\addbibresource currently routes to the BibTeX pass, which is wrong for biblatex."],
+      "overall": "not-implemented"
+    },
+    {
+      "id": "engine.makeindex",
+      "capability": "Index generation",
+      "spec": "makeindex, TeX Live 2026",
+      "stages": { "detection": "verified", "invocation": "implemented-unverified" },
+      "tests": ["tests/unit/texProject.test.ts::needsMakeindex"],
+      "limitations": [],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "engine.multipass",
+      "capability": "Repeat passes to settle cross-references, TOC and labels",
+      "spec": "LaTeX requires >=2 passes; `rerun: true`",
+      "stages": { "invocation": "implemented-unverified", "detection": "implemented-unverified" },
+      "tests": ["tests/unit/texLog.test.ts::rerun"],
+      "limitations": ["Rerun is always requested rather than driven by the log's rerun signal, so simple documents pay for an extra pass."],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "packages.basic",
+      "capability": "texlive-basic package set",
+      "spec": "Preloaded data package",
+      "stages": { "provisioning": "implemented-unverified", "resolution": "implemented-unverified" },
+      "tests": [],
+      "limitations": ["Byte size not yet measured."],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "packages.remote",
+      "capability": "On-demand resolution of any other TeX Live 2026 package",
+      "spec": "GET /<format_id>/<filename> against VITE_TEXLIVE_REMOTE_ENDPOINT",
+      "stages": { "configuration": "implemented-unverified", "resolution": "partial" },
+      "tests": ["tests/e2e/remote-packages.spec.ts"],
+      "limitations": [
+        "Classes outside texlive-basic (verified: IEEEtran) do resolve and compile. Whether a given document hits the remote endpoint or a locally-provisioned larger package set is not distinguished by the test, so the remote path specifically is not independently confirmed.",
+        "Endpoint CORS policy unverified (project-state Q1).",
+        "Default endpoint is third-party; self-hosting documented but untested.",
+        "Unavailable offline, which bounds offline compilation to the provisioned set."
+      ],
+      "overall": "partial"
+    },
+    {
+      "id": "project.entry",
+      "capability": "Compile the project entry file, not the open editor file",
+      "spec": "Teeex: explicit isEntry, then main.tex, then \\documentclass detection",
+      "stages": { "resolution": "verified", "invocation": "implemented-unverified" },
+      "tests": ["tests/unit/texProject.test.ts::resolveEntryFile"],
+      "limitations": ["No UI to set the entry file explicitly; detection only."],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "project.multifile",
+      "capability": "\\input / \\include across project files",
+      "spec": "LaTeX2e; resolved by the engine from the mounted filesystem",
+      "stages": { "mounting": "verified", "resolution": "implemented-unverified" },
+      "tests": ["tests/unit/texProject.test.ts::toEngineFiles"],
+      "limitations": [],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "project.graphics",
+      "capability": "\\includegraphics with uploaded figures",
+      "spec": "graphicx; PNG/JPEG/PDF",
+      "stages": { "mounting": "verified", "resolution": "implemented-unverified", "preview": "implemented-unverified", "export": "implemented-unverified" },
+      "tests": ["tests/unit/texProject.test.ts::binary"],
+      "limitations": ["SVG is not a pdfLaTeX-native format and will fail without conversion; not yet handled or diagnosed."],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "preview.render",
+      "capability": "Render the compiled PDF",
+      "spec": "pdf.js 6.4.299, local worker, local CMaps and standard fonts",
+      "stages": { "worker": "verified", "raster": "verified", "geometry": "verified" },
+      "tests": ["tests/e2e/pdf-fidelity.spec.ts"],
+      "limitations": ["The preview canvas is confirmed to be a non-blank raster of the shipped page at device-pixel ratio; a pixel/perceptual diff against an independent raster is not yet written."],
+      "overall": "verified"
+    },
+    {
+      "id": "preview.mixedPageSizes",
+      "capability": "Per-page geometry, including mixed sizes and rotation",
+      "spec": "Each page's own MediaBox and /Rotate",
+      "stages": { "geometry": "implemented-unverified", "layout": "implemented-unverified" },
+      "tests": [],
+      "limitations": [],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "preview.textLayer",
+      "capability": "Selectable, searchable text over the page",
+      "spec": "pdf.js TextLayer",
+      "stages": { "render": "implemented-unverified", "zoomUpdate": "implemented-unverified" },
+      "tests": [],
+      "limitations": ["In-document search UI not built; the layer only enables native selection."],
+      "overall": "partial"
+    },
+    {
+      "id": "preview.annotations",
+      "capability": "Clickable links and annotations",
+      "spec": "pdf.js AnnotationLayer",
+      "stages": { "read": "implemented-unverified", "render": "not-implemented" },
+      "tests": [],
+      "limitations": ["Annotations are fetched but no layer is rendered, so hyperref links are not yet clickable."],
+      "overall": "not-implemented"
+    },
+    {
+      "id": "preview.virtualisation",
+      "capability": "Large-document scrolling",
+      "spec": "Teeex: render only pages within one viewport of view",
+      "stages": { "windowing": "implemented-unverified", "cancellation": "implemented-unverified" },
+      "tests": [],
+      "limitations": ["Frame time on a long document not yet measured."],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "preview.continuity",
+      "capability": "Scroll position and last-good build preserved across recompiles",
+      "spec": "Teeex",
+      "stages": { "anchor": "implemented-unverified", "staleIndicator": "implemented-unverified" },
+      "tests": [],
+      "limitations": [],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "export.pdf",
+      "capability": "Export the compiled PDF",
+      "spec": "Teeex: byte-identical to the previewed artifact",
+      "stages": { "bytes": "verified", "filename": "verified" },
+      "tests": ["tests/e2e/latex-workflow.spec.ts", "tests/e2e/pdf-fidelity.spec.ts", "tests/unit/documentClass.test.ts::pdfFileName"],
+      "limitations": ["The download is verified to be a valid %PDF whose extracted text matches the source. Strict byte-identity between the download and the viewer's buffer is guaranteed by construction (same Uint8Array) but not separately asserted."],
+      "overall": "verified"
+    },
+    {
+      "id": "sync.forward",
+      "capability": "Editor line to page location",
+      "spec": "SyncTeX v1",
+      "stages": { "parse": "verified", "query": "verified", "ui": "implemented-unverified" },
+      "tests": ["tests/unit/synctex.test.ts::forwardSync"],
+      "limitations": ["Verified against a synthetic SyncTeX file, not yet against real engine output (project-state Q2, Q3)."],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "sync.inverse",
+      "capability": "Page click to source file and line",
+      "spec": "SyncTeX v1",
+      "stages": { "parse": "verified", "query": "verified", "ui": "implemented-unverified" },
+      "tests": ["tests/unit/synctex.test.ts::inverseSync"],
+      "limitations": ["Same as sync.forward."],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "diagnostics.errors",
+      "capability": "Structured errors with file, line and actionable hint",
+      "spec": "pdfTeX log format",
+      "stages": { "unwrap": "verified", "attribution": "verified", "classification": "verified", "ui": "implemented-unverified" },
+      "tests": ["tests/unit/texLog.test.ts"],
+      "limitations": ["Line unwrapping at column 79 is heuristic (project-state Q5)."],
+      "overall": "verified"
+    },
+    {
+      "id": "diagnostics.warnings",
+      "capability": "Undefined citations/references, duplicate labels, rerun, font substitution",
+      "spec": "LaTeX2e warning formats",
+      "stages": { "parse": "verified", "classification": "verified", "ui": "implemented-unverified" },
+      "tests": ["tests/unit/texLog.test.ts"],
+      "limitations": [],
+      "overall": "verified"
+    },
+    {
+      "id": "diagnostics.badboxes",
+      "capability": "Overfull/underfull boxes with line ranges",
+      "spec": "TeX bad-box reports",
+      "stages": { "parse": "verified", "ui": "implemented-unverified" },
+      "tests": ["tests/unit/texLog.test.ts"],
+      "limitations": [],
+      "overall": "verified"
+    },
+    {
+      "id": "diagnostics.missingGlyph",
+      "capability": "Report characters absent from the selected font",
+      "spec": "TeX 'Missing character' reports",
+      "stages": { "parse": "verified", "ui": "implemented-unverified" },
+      "tests": ["tests/unit/texLog.test.ts"],
+      "limitations": [],
+      "overall": "verified"
+    },
+    {
+      "id": "diagnostics.robustness",
+      "capability": "Malformed log and SyncTeX input never crash or hang",
+      "spec": "Teeex",
+      "stages": { "fuzz": "implemented-unverified" },
+      "tests": ["tests/fuzz/parsers.fuzz.test.ts"],
+      "limitations": [],
+      "overall": "implemented-unverified"
+    },
+    {
+      "id": "format.presets",
+      "capability": "Switch academic format by rewriting \\documentclass",
+      "spec": "Teeex; IEEEtran / acmart / sn-jnl / article",
+      "stages": { "transform": "verified", "compile": "partial" },
+      "tests": ["tests/unit/documentClass.test.ts", "tests/e2e/remote-packages.spec.ts"],
+      "limitations": [
+        "IEEEtran: verified end to end — resolves and typesets a genuine two-column PDF.",
+        "article/arxiv (standard article class): in the bundled set, compile verified by the other e2e specs.",
+        "acmart and sn-jnl: KNOWN FAILING to compile in practical time (not in the provisioned set; every dependency fetched individually from the remote endpoint; preview did not appear within 300s). They are now tagged resolution:'remote-heavy' and selecting them raises an explicit UI notice (formatResolutionNotice) so the user is told what to expect instead of the document silently hanging. Tracked as test.fixme in remote-packages.spec.ts. Treat as not reliably working until a document actually compiles."
+      ],
+      "overall": "partial"
+    },
+    {
+      "id": "outline.draft",
+      "capability": "Instant HTML skim of the source",
+      "spec": "Teeex; explicitly non-authoritative",
+      "stages": { "render": "implemented-unverified" },
+      "tests": [],
+      "limitations": [
+        "Built on 232 chained regex passes (C12): brace-unaware macro arguments, comment stripping ahead of verbatim stashing, non-recursive \\input, non-greedy body extraction.",
+        "Makes no claim about line breaking, spacing, pagination or typography — by design.",
+        "Runs on the main thread (C13)."
+      ],
+      "overall": "partial"
+    }
+  ],
+
+  "notCovered": [
+    "Differential preview-vs-PDF raster comparison (Playwright suite not yet written).",
+    "Golden-image regression for any fixture.",
+    "External PDF viewer compatibility checks.",
+    "Accessibility audit of the viewer.",
+    "Cross-browser and cross-platform validation.",
+    "Any performance measurement at all."
+  ]
+}

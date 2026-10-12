@@ -97,7 +97,7 @@ export interface ParsedDocument {
 export interface Template {
   id: string;
   name: string;
-  category: 'Academic Paper' | 'Resume / CV' | 'Presentation' | 'Report';
+  category: 'Academic Paper' | 'Resume / CV' | 'Report';
   description: string;
   badge: string;
   files: ProjectFile[];

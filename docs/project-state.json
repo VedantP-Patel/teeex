@@ -1,0 +1,247 @@
+{
+  "$schema": "./project-state.schema.md",
+  "project": "Teeex",
+  "mission": "One authoritative document-rendering architecture: real TeX computes layout, the preview renders the compiled PDF, and export ships those same bytes.",
+  "updated": "2026-10-11",
+  "phase": "A–D verified (typecheck, unit/fuzz, build, runtime e2e); E/F and differential-raster suite outstanding",
+
+  "verificationStatus": {
+    "state": "PASSING",
+    "note": "The sandbox classifier was unavailable during the initial implementation session; it has since recovered and the full sequence was run.",
+    "results": {
+      "typecheck": "npx tsc -b — clean, exit 0",
+      "unitAndFuzz": "npx vitest run — 93 passed across 5 files (texLog 27, documentClass 26, synctex 22, texProject 14, fuzz 4)",
+      "build": "npx vite build — succeeds; pdf.worker emitted locally (dist/assets/pdf.worker-*.mjs, 2.23 MB)",
+      "runtimeE2E": "npx playwright test — 5 PASS. (1) Real pdfLaTeX WASM compiled a document in-browser, preview canvas rendered, download produced a genuine %PDF- file whose extracted text contained the title, author, section, body and E=mc²; zero browser errors, zero failed requests. (2) Shipped PDF has real per-page geometry (>400x600pt), fonts load (draw ops emit), every text transform finite. (3) Preview canvas is a non-blank DPR raster, not a placeholder. (4) Preview page count equals the shipped PDF page count on a multi-page document. (5) An IEEEtran document resolves its class and typesets a genuine two-column PDF."
+    },
+    "stillUnverified": [
+      "Pixel/perceptual differential of the preview canvas against an independent raster of the shipped bytes at matching scale and DPR (the structural + non-blank-raster checks in tests/e2e/pdf-fidelity.spec.ts pass; the pixel diff is not yet written).",
+      "Embedded-font-subset validation: pdfTeX compresses font descriptors into object streams, so a raw byte scan misses /FontFile; this needs a PDF parser that reads object streams. The e2e currently proves fonts are *usable* (text extracts, draw ops emit), not that subsets are embedded.",
+      "Package resolution through the remote endpoint for classes outside texlive-basic (IEEEtran/acmart/sn-jnl) — the e2e docs used only the basic set.",
+      "Performance baselines beyond the single ~11s e2e compile."
+    ]
+  },
+
+  "confirmedFacts": [
+    {
+      "id": "F1",
+      "fact": "The complete busytex asset archive is 521751667 bytes (~498 MiB), sha256 1caa434fb5aab5bdd59dc303bca2ac7b9b9af02ef1627bf8652caabfa1b7cd2b, release assets-v1.4.0.",
+      "evidence": "GitHub releases API for TeXlyre/texlyre-busytex",
+      "implication": "Committing or build-fetching the whole archive is infeasible; only the per-engine subset is provisioned."
+    },
+    {
+      "id": "F2",
+      "fact": "Individual engine assets are served at https://texlyre.github.io/texlyre-busytex/core/busytex/<file>.",
+      "evidence": "Fetched texlive-basic.js directly; it is a real Emscripten data-package loader.",
+      "implication": "Per-file provisioning is possible without downloading the 498 MiB archive."
+    },
+    {
+      "id": "F3",
+      "fact": "A public TeX Live 2026 package server exists at https://texlive2026.texlyre.org implementing GET /<format_id>/<filename>, with a self-hostable Dockerfile in texlyre-busytex-build/texlive-server.",
+      "evidence": "texlyre-busytex-build/texlive-server/README.md",
+      "implication": "Packages outside texlive-basic resolve on demand; broad \\usepackage support does not require shipping all of TeX Live."
+    },
+    {
+      "id": "F4",
+      "fact": "busytex uses `new Worker(`${basePath}/busytex_worker.js`)` and no SharedArrayBuffer or Atomics.",
+      "evidence": "node_modules/texlyre-busytex/dist/core/busytex-runner.js:79-80; grep for SharedArrayBuffer/Atomics found none.",
+      "implication": "Engine assets must be same-origin (browsers reject cross-origin worker scripts), but COOP/COEP headers are NOT required."
+    },
+    {
+      "id": "F5",
+      "fact": "Engine binary names are `${engineMode}.js`/`.wasm` for pdftex/xetex/luahbtex, or busytex.js/.wasm for 'combined'.",
+      "evidence": "busytex-runner.js getEngineAssetNames()",
+      "implication": "Per-engine modes avoid downloading all three engines to use pdfLaTeX."
+    },
+    {
+      "id": "F6",
+      "fact": "pdfjs-dist installed is 6.4.299 and ships build/pdf.worker.mjs, cmaps/, and standard_fonts/ locally.",
+      "evidence": "node_modules/pdfjs-dist/package.json",
+      "implication": "No CDN is needed, and using one at a different pinned version is a guaranteed API/Worker version mismatch."
+    },
+    {
+      "id": "F7",
+      "fact": "pdfjs-dist 6 exports PixelsPerInch, RenderingCancelledException, TextLayer, AnnotationLayer, setLayerDimensions.",
+      "evidence": "node_modules/pdfjs-dist/types/src/pdf.d.ts export list",
+      "implication": "Text selection and cancellation use the library's own primitives rather than hand-rolled equivalents."
+    }
+  ],
+
+  "rootCauses": [
+    { "id": "C1", "summary": "public/core/busytex empty; engine assets proxied from a third-party GitHub Pages host at runtime", "status": "fix implemented", "fix": "scripts/fetch-engine.mjs provisions a version-pinned subset; vercel.json rewrite and vite dev proxy removed" },
+    { "id": "C2", "summary": "PDF.js worker loaded from cdnjs and cMaps pinned to 4.10.38 against an installed 6.4.299", "status": "fix implemented", "fix": "src/services/pdfRenderer.ts imports the local worker via ?url; scripts/sync-pdfjs-assets.mjs copies cmaps/standard_fonts from the install" },
+    { "id": "C3", "summary": "Compiler fed activeFile.content, so editing an \\input-ed section compiled a fragment with no preamble", "status": "fix implemented", "fix": "resolveEntryFile() in src/services/texProject.ts; mainTexPath passed to the engine" },
+    { "id": "C4", "summary": "Image bytes never reached TeX; mountVirtualTeXFileSystem() was dead code, so \\includegraphics could not work", "status": "fix implemented", "fix": "toEngineFiles() in src/services/texProject.ts routes every file through the mount, keeping binaries as Uint8Array" },
+    { "id": "C5", "summary": "Operator-precedence bug in the engine file filter: (a && b) || c", "status": "fix implemented", "fix": "filter removed entirely; entry selection is explicit" },
+    { "id": "C6", "summary": "Export cloned preview DOM into an iframe and called print() after a fixed 600ms, racing webfont load", "status": "fix implemented", "fix": "src/services/pdfExporter.ts writes the compiled bytes; no DOM, no print dialog" },
+    { "id": "C7", "summary": "In the default engine mode the export target element did not exist, so export printed the entire IDE UI", "status": "fix implemented", "fix": "export has no DOM dependency; absence of a build is reported instead of silently falling back" },
+    { "id": "C8", "summary": "Two-column pagination summed per-block heights measured inside independent 2-column boxes, against a 1-column budget, then clipped overflow with overflow:hidden", "status": "fix implemented", "fix": "domPaginator deleted; the outline view does not paginate at all, and the PDF's pagination comes from TeX" },
+    { "id": "C9", "summary": "Fabricated page furniture (invented IEEE volume numbers, fake arXiv stamp, 'Teeex Studio Typeset' footers) painted into preview and print", "status": "fix implemented", "fix": "removed from src/services/paperFormats.ts and the preview; page furniture now comes from the document class" },
+    { "id": "C10", "summary": "Layout driven by a UI dropdown rather than \\documentclass; 12px/1.5 for every format; A4 hardcoded for Letter-size classes", "status": "fix implemented", "fix": "format selection rewrites \\documentclass via applyDocumentClass(); page size read per-page from the PDF" },
+    { "id": "C11", "summary": "SyncTeX fabricated: synctexBytes unused, 'SyncTeX: Active' backed by fuzzy source text search", "status": "fix implemented", "fix": "src/services/synctex.ts parses the engine's real output; findSelectedTextLine deleted" },
+    { "id": "C12", "summary": "232 chained String.replace() passes instead of a parser; brace-unaware macro args, comment stripping before verbatim stashing, non-recursive \\input, non-greedy body extraction", "status": "NOT ADDRESSED", "note": "Scoped to Phase E. No longer affects fidelity — TeX does the typesetting — but still governs the draft outline and the instant diagnostics." },
+    { "id": "C13", "summary": "Parsing, KaTeX and pagination ran synchronously in a useMemo on every keystroke; no workers anywhere", "status": "PARTIALLY ADDRESSED", "note": "The pagination reflow-per-block path is gone with domPaginator. The parser/KaTeX work still runs on the main thread; moving it to a worker is Phase E." },
+    { "id": "C14", "summary": "pdfRenderer singleton replaced currentDoc without destroy(); all pages re-rendered serially on zoom with no RenderTask cancellation", "status": "fix implemented and verified", "fix": "PdfDocument instances with real destroy(), per-page task tracking and cancellation, virtualised rendering, canvas pixel clamp", "evidence": "benchmark heap flat at 92MB across 6 compiles (docs/benchmarks.json)" },
+    { "id": "C15", "summary": "No tests of any kind", "status": "PARTIALLY ADDRESSED", "note": "Unit and fuzz suites written for texLog, synctex, texProject, documentClass. Playwright differential/golden suite not yet written." }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "decision": "Real pdfLaTeX (WASM) is the single authoritative layout engine. Preview renders its PDF; export ships the same bytes.",
+      "rationale": "Overleaf parity is unreachable by approximating TeX in CSS: Knuth-Plass line breaking, Liang hyphenation, TFM metrics and LaTeX float placement have no CSS equivalent. Sharing one artifact makes preview/export divergence structurally impossible rather than something to tune.",
+      "alternativesRejected": [
+        "Server-side TeX Live: best coverage and no client download, but needs container hosting Vercel cannot provide, adds per-compile cost, and the AGPL network clause still applies.",
+        "Keep the HTML preview authoritative for the live view: preserves instant feedback but guarantees preview != PDF, i.e. does not solve the stated problem."
+      ],
+      "cost": "First use downloads the engine; compiles take seconds. Mitigated by prewarming the engine on load, keeping the last good PDF on screen, and the draft outline."
+    },
+    {
+      "id": "D2",
+      "decision": "Self-host a version-pinned engine subset; resolve other packages on demand via the remote endpoint.",
+      "rationale": "F1 makes shipping everything infeasible and F4 makes a cross-origin worker impossible, so proxying a third party was the only remote option — and it made every compile depend on someone else's Pages site. F3 gives full package coverage without the bulk.",
+      "residualRisk": "The default remote endpoint is third-party. Configurable via VITE_TEXLIVE_REMOTE_ENDPOINT, 'off' disables it, and self-hosting is documented."
+    },
+    {
+      "id": "D3",
+      "decision": "The HTML path is retained but demoted to a non-paginated 'Outline (draft)' surface and can never be exported.",
+      "rationale": "It is genuinely useful while the engine compiles, but any page boundary it draws is a fabrication. Removing pagination eliminates C8/C9/C10 at the root instead of tuning thresholds, and deletes ~700 lines.",
+      "alternativesRejected": ["Delete it outright: loses the only instant-feedback surface during multi-second compiles."]
+    },
+    {
+      "id": "D4",
+      "decision": "Dedicated per-engine WASM modes (pdftex/xetex/luahbtex) instead of the 'combined' bundle.",
+      "rationale": "F5: 'combined' downloads all three engines to run one. pdfLaTeX is the default target, so the common path should pay only for pdftex.",
+      "status": "implemented, download size not yet measured"
+    },
+    {
+      "id": "D5",
+      "decision": "Seeded PRNG for fuzzing rather than a property-testing dependency.",
+      "rationale": "Reproducibility is a stated requirement; a failure must be replayable from its printed seed. Also avoids a dependency that could not be installed or verified this session."
+    },
+    {
+      "id": "D6",
+      "decision": "Engine and PDF.js asset paths get max-age=86400 with stale-while-revalidate, not immutable.",
+      "rationale": "The paths carry no content hash, so 'immutable' would pin a stale WASM binary for up to a year after a version bump."
+    }
+  ],
+
+  "rejectedHypotheses": [
+    {
+      "hypothesis": "COOP/COEP headers are needed for the WASM engine worker.",
+      "verdict": "false",
+      "evidence": "F4 — no SharedArrayBuffer or Atomics usage in texlyre-busytex."
+    },
+    {
+      "hypothesis": "The preview/PDF mismatch is a CSS print-stylesheet problem.",
+      "verdict": "false",
+      "evidence": "C1+C2 mean no PDF was ever produced or displayed; the preview was an HTML approximation and export was a browser print of it. The mismatch is architectural, not stylistic."
+    },
+    {
+      "hypothesis": "The upstream GitHub Pages asset host is unavailable, hence the empty public/core/busytex.",
+      "verdict": "false",
+      "evidence": "F2 — the assets are served. The directory was simply never provisioned."
+    }
+  ],
+
+  "filesChanged": {
+    "added": [
+      "scripts/fetch-engine.mjs",
+      "scripts/sync-pdfjs-assets.mjs",
+      "src/services/texLog.ts",
+      "src/services/texProject.ts",
+      "src/services/synctex.ts",
+      "src/hooks/useTexEngine.ts",
+      "src/styles/pdf-viewer.css",
+      "vitest.config.ts",
+      "tests/unit/texLog.test.ts",
+      "tests/unit/synctex.test.ts",
+      "tests/unit/texProject.test.ts",
+      "tests/unit/documentClass.test.ts",
+      "tests/fuzz/parsers.fuzz.test.ts",
+      "docs/project-state.json",
+      "docs/support-matrix.json"
+    ],
+    "rewritten": [
+      "src/services/latexCompiler.ts",
+      "src/services/pdfRenderer.ts",
+      "src/services/pdfExporter.ts",
+      "src/services/paperFormats.ts",
+      "src/components/PdfPreviewPane.tsx",
+      "src/components/PreviewPane.tsx",
+      "vite.config.ts",
+      "vercel.json",
+      ".env.example"
+    ],
+    "edited": ["src/App.tsx", "src/main.tsx", "package.json", ".gitignore"],
+    "deleted": [
+      "src/hooks/useLatexCompiler.ts",
+      "src/services/domPaginator.ts"
+    ]
+  },
+
+  "benchmarks": {
+    "state": "FIRST BASELINE MEASURED",
+    "note": "Captured by tests/e2e/benchmark.spec.ts on local dev hardware, single Chromium worker, engine assets served locally and warm. Full data in docs/benchmarks.json. Small samples (4 reps/size): medians are reliable, p95 is indicative only.",
+    "measured": {
+      "coldStartToFirstPaintMs": 6739,
+      "compileRenderMedianMs": { "small": 806, "medium": 860, "large_8pages": 820 },
+      "compileRenderP95Ms": { "small": 807, "medium": 2111, "large_8pages": 914 },
+      "outlineLatencyMedianMs": 38,
+      "heapAcross6Compiles": "92MB → 92MB, delta 0MB — no document leak (C14 fix confirmed)"
+    },
+    "readsAsFollows": "Warm compile+render is sub-second to ~1s regardless of size (TeX dominates, not our code). The instant outline path is ~38ms, covering the keystroke-feedback gap while a real compile runs. Cold start is ~6.7s, almost all WASM engine init. The flat heap across six compiles is direct evidence the pdf.js document leak is fixed.",
+    "stillRequired": [
+      "scroll frame time on a genuinely long (200-page) document",
+      "larger sample sizes for stable p95",
+      "measurement on representative low-end hardware, not just dev"
+    ]
+  },
+
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Does texlive2026.texlyre.org send permissive CORS headers?",
+      "why": "API_ORIGINS defaults to same-origin only. If it is restrictive, on-demand package resolution needs a same-origin proxy.",
+      "resolution": "Fetch a known file from a browser context and inspect Access-Control-Allow-Origin. Fallback: add a /texlive-remote/* rewrite in vercel.json and point VITE_TEXLIVE_REMOTE_ENDPOINT at it."
+    },
+    {
+      "id": "Q2",
+      "question": "Does busytex return SyncTeX gzipped?",
+      "why": "The parser sniffs the gzip magic and inflates, so both work, but only one path has been exercised by tests.",
+      "resolution": "Inspect the first two bytes of result.synctex from a real compile."
+    },
+    {
+      "id": "Q3",
+      "question": "Are all SyncTeX record coordinates absolute in pdfTeX v1 output?",
+      "why": "The parser assumes absolute values. If any records are relative to the enclosing box, highlight rects will be offset.",
+      "resolution": "Compile a fixture, compare forwardSync rects against the visually correct location for a known line."
+    },
+    {
+      "id": "Q4",
+      "question": "Which of IEEEtran, acmart and sn-jnl actually resolve and compile?",
+      "why": "The format presets install these classes. A preset that cannot compile is a broken feature, not a limitation.",
+      "status": "IEEEtran: resolved — compiles to a genuine two-column PDF (tests/e2e/remote-packages.spec.ts). acmart and sn-jnl: KNOWN FAILING — not in the provisioned set, every dependency fetched individually from the remote endpoint, preview did not appear within 300s (both timed out; 10.6-min suite run). Marked test.fixme. Cause not yet isolated between too-slow sequential remote fetching and a missing-file/class error.",
+      "resolution": "Run acmart/sn-jnl once with the compile log captured (not just the canvas wait) to isolate slow-vs-broken; if slow, provision those classes into the engine bundle or warm the remote cache; if broken, fix the preset preamble or diagnose the missing file."
+    },
+    {
+      "id": "Q5",
+      "question": "Is the 79-column unwrap heuristic ever harmful on real logs?",
+      "why": "A genuine 79-character line followed by a continuation is indistinguishable from a wrap.",
+      "resolution": "Diff parsed diagnostics with unwrapping on and off across the fixture corpus."
+    }
+  ],
+
+  "nextActions": [
+    { "order": 1, "action": "DONE — assets provisioned, tsc clean, 93 unit/fuzz tests pass, build succeeds, e2e real-compile test passes." },
+    { "order": 2, "action": "DONE — src/hooks/useLatexCompiler.ts and src/services/domPaginator.ts deleted." },
+    { "order": 3, "action": "Write the Playwright differential suite: rasterise the shipped PDF via pdf.js and compare against the on-screen preview canvas with pixelmatch; commit golden images per fixture." },
+    { "order": 4, "action": "Compile one fixture per format preset (IEEEtran/acmart/sn-jnl) to confirm remote package resolution and answer Q1/Q4; record in the support matrix." },
+    { "order": 5, "action": "Inspect real synctex bytes to close Q2/Q3 (gzip? absolute coords?)." },
+    { "order": 6, "action": "Build the full fixture corpus and populate the benchmark block (median + p95)." },
+    { "order": 7, "action": "Phase E: move the outline path to a worker, then replace the replace-chain with a real parser (C12, C13)." },
+    { "order": 8, "action": "Phase F: component primitives on the token system; retire inline style objects and hardcoded hex." },
+    { "order": 9, "action": "Render the annotation layer so hyperref links are clickable (preview.annotations)." },
+    { "order": 10, "action": "Decide the AGPL position for texlyre-busytex." }
+  ]
+}

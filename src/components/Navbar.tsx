@@ -23,7 +23,6 @@ import {
   Eye,
   Plus,
   Lock,
-  BookMarked,
   WifiOff,
   ShieldCheck,
   Code,
@@ -46,7 +45,6 @@ interface Props {
   onOpenSymbols: () => void;
   onOpenTemplates: () => void;
   onOpenImageUpload: () => void;
-  onOpenDoiModal?: () => void;
   onOpenSupabase: () => void;
   isCloudConnected: boolean;
   onExportPdf: () => void;
@@ -87,7 +85,6 @@ export const Navbar: React.FC<Props> = ({
   onOpenSymbols,
   onOpenTemplates,
   onOpenImageUpload,
-  onOpenDoiModal,
   onOpenSupabase,
   isCloudConnected,
   onExportPdf,
@@ -429,19 +426,6 @@ export const Navbar: React.FC<Props> = ({
                     </div>
                     <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\equation</span>
                   </button>
-
-                  {onOpenDoiModal && (
-                    <button
-                      onClick={() => { setIsInsertDropdownOpen(false); onOpenDoiModal(); }}
-                      style={dropdownItemStyle}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                        <BookMarked size={13} color="#f59e0b" />
-                        <span>DOI Citation</span>
-                      </div>
-                      <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\cite</span>
-                    </button>
-                  )}
                 </div>
               </div>
             )}

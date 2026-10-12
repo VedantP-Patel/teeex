@@ -4,8 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/sync-pdfjs-assets.mjs && node scripts/fetch-engine.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/sync-pdfjs-assets.mjs && node scripts/fetch-engine.mjs",
     "build": "tsc -b && vite build",
+    "engine": "node scripts/fetch-engine.mjs",
+    "engine:full": "node scripts/fetch-engine.mjs --profile full",
+    "engine:verify": "node scripts/fetch-engine.mjs --profile full --verify",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "lint": "oxlint",
     "preview": "vite preview"
   },
@@ -20,6 +28,7 @@
     "texlyre-busytex": "^1.4.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@types/jszip": "^3.4.0",
     "@types/katex": "^0.16.8",
     "@types/node": "^24.13.3",
@@ -27,7 +36,10 @@
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "oxlint": "^1.81.0",
+    "pixelmatch": "^8.0.0",
+    "pngjs": "^7.0.0",
     "typescript": "~6.0.2",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "vitest": "^5.0.3"
   }
 }

@@ -1,1326 +1,172 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { createPortal } from 'react-dom';
-import {
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
-  FileCheck,
-  Columns,
-  Square,
-  MousePointerClick,
-  BookOpen,
-  ChevronDown,
-  Check,
-  Layers,
-  Grid,
-  ChevronLeft,
-  ChevronRight,
-  FileText,
-  Printer,
-  Sparkles,
-} from 'lucide-react';
+/**
+ * Teeex — preview shell.
+ *
+ * Hosts the two preview surfaces and makes the distinction between them
+ * explicit:
+ *
+ *   PDF      the compiled document. Authoritative: the same bytes export
+ *            ships, rendered by pdf.js. This is what the document *is*.
+ *
+ *   Outline  a draft HTML skim of the source, shown for structural orientation
+ *            while the engine compiles. It makes no claim about layout,
+ *            pagination, or typography, and cannot be exported.
+ *
+ * The outline deliberately does not paginate. The previous implementation drew
+ * fake A4 page boundaries with invented running heads and footers, and split
+ * content across them using per-block height measurements that are not valid
+ * under CSS multi-column layout — then clipped the overflow with
+ * `overflow: hidden`, silently deleting content. Presenting one continuous
+ * column removes the entire class of problems instead of tuning it: nothing
+ * about the outline now implies it knows where a page ends, because it does
+ * not, and only the engine does.
+ */
+
+import React, { useCallback, useState } from 'react';
+import { FileCode2, FileText } from 'lucide-react';
 import type { ParsedDocument } from '../types/latex';
-import { PAPER_FORMATS, type PaperFormatId } from '../services/paperFormats';
-import { paginateByHeuristic, paginateByDom } from '../services/domPaginator';
+import type { SyncTexIndex, ForwardMatch } from '../services/synctex';
+import type { EngineStatus } from '../services/latexCompiler';
 import { PdfPreviewPane } from './PdfPreviewPane';
 
+type Surface = 'pdf' | 'outline';
+
+const SURFACE_STORAGE_KEY = 'teeex_preview_surface';
+
 interface Props {
+  /** Draft HTML rendering of the source, for the outline surface. */
   renderedHtml: string;
   parsedDoc: ParsedDocument;
+  documentTitle: string;
+
+  pdf: Uint8Array | null;
+  status: EngineStatus;
+  isCompiling: boolean;
+  isStale: boolean;
+  errorSummary?: string | null;
+  onCompile: () => void;
+
+  syncTexIndex?: SyncTexIndex | null;
+  forwardTarget?: ForwardMatch | null;
+  onInverseSync?: (file: string, line: number) => void;
+  /** Outline click → source line, from the parser's recorded line anchors. */
   onJumpToLine?: (line: number) => void;
-  rawCode?: string;
-  forwardTargetLine?: number | null;
-  onClearForwardTargetLine?: () => void;
-  paperFormat?: PaperFormatId;
-  onFormatChange?: (format: PaperFormatId) => void;
-  isTwoColumn?: boolean;
-  onToggleTwoColumn?: () => void;
-  onExportPdf?: () => void;
-  pdfBytes?: Uint8Array | null;
-  isWasmCompiling?: boolean;
-  wasmError?: string | null;
-  documentTitle?: string;
 }
 
-/**
- * Compute the academic header height for the first page (title + authors + date).
- * Used to reduce available content space on page 1.
- */
-function estimateAcademicHeaderHeight(parsedDoc: ParsedDocument): number {
-  let h = 0;
-  if (!parsedDoc.hasTitlePage) {
-    h += 32; // meta header
-    h += 28; // title H1
-    if (parsedDoc.authors.length > 0) h += 22;
-    if (parsedDoc.date) h += 18;
-    h += 24; // bottom border + margin
+function readStoredSurface(): Surface {
+  try {
+    return localStorage.getItem(SURFACE_STORAGE_KEY) === 'outline' ? 'outline' : 'pdf';
+  } catch {
+    return 'pdf';
   }
-  return h;
 }
 
-export const PreviewPane: React.FC<Props> = ({
+export function PreviewPane({
   renderedHtml,
   parsedDoc,
-  onJumpToLine,
-  rawCode,
-  forwardTargetLine,
-  onClearForwardTargetLine,
-  paperFormat,
-  onFormatChange,
-  isTwoColumn: isTwoColumnProp,
-  onToggleTwoColumn,
-  onExportPdf,
-  pdfBytes,
-  isWasmCompiling,
-  wasmError,
   documentTitle,
-}) => {
-  const [previewEngine, setPreviewEngine] = useState<'wasm' | 'html'>(() => {
-    return (localStorage.getItem('teeex_preview_engine') as 'wasm' | 'html') || 'wasm';
-  });
+  pdf,
+  status,
+  isCompiling,
+  isStale,
+  errorSummary,
+  onCompile,
+  syncTexIndex,
+  forwardTarget,
+  onInverseSync,
+  onJumpToLine,
+}: Props) {
+  const [surface, setSurface] = useState<Surface>(readStoredSurface);
 
-  const handleToggleEngine = (engine: 'wasm' | 'html') => {
-    setPreviewEngine(engine);
-    localStorage.setItem('teeex_preview_engine', engine);
-  };
-
-  const [zoom, setZoom] = useState(78);
-  const [localColumnOverride, setLocalColumnOverride] = useState<boolean | null>(null);
-  const [localFormat, setLocalFormat] = useState<PaperFormatId>(() => {
-    return (localStorage.getItem('teeex_paper_format') as PaperFormatId) || 'ieee';
-  });
-  const [isFormatMenuOpen, setIsFormatMenuOpen] = useState(false);
-  const [formatMenuCoords, setFormatMenuCoords] = useState<{ top: number; right: number } | null>(null);
-
-  const activeFormat = paperFormat || localFormat;
-  const currentFormatConfig = PAPER_FORMATS[activeFormat] || PAPER_FORMATS.ieee;
-  const isTwoCol = isTwoColumnProp !== undefined
-    ? isTwoColumnProp
-    : (localColumnOverride !== null ? localColumnOverride : (currentFormatConfig.defaultColumns === 2));
-
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const viewportRef = useRef<HTMLDivElement>(null);
-  const formatMenuRef = useRef<HTMLDivElement>(null);
-  const formatButtonRef = useRef<HTMLButtonElement>(null);
-
-  // Sheet View vs Flow View State
-  const [previewMode, setPreviewMode] = useState<'sheet' | 'flow'>(() => {
-    return (localStorage.getItem('teeex_preview_mode') as 'sheet' | 'flow') || 'sheet';
-  });
-  const [showMarginGuides, setShowMarginGuides] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-
-  // Use heuristic pagination as fast initial render, then update with DOM-measured pagination
-  const [domPages, setDomPages] = useState<string[] | null>(null);
-  const domPaginationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const heuristicPages = useMemo(() => {
-    if (previewMode === 'flow') return [renderedHtml];
-    return paginateByHeuristic(renderedHtml, isTwoCol, !!parsedDoc.hasTitlePage, estimateAcademicHeaderHeight(parsedDoc));
-  }, [renderedHtml, isTwoCol, parsedDoc, previewMode]);
-
-  // DOM-based precise pagination: runs after initial render with a small debounce
-  useEffect(() => {
-    if (previewMode !== 'sheet' || !renderedHtml) {
-      setDomPages(null);
-      return;
+  const selectSurface = useCallback((next: Surface) => {
+    setSurface(next);
+    try {
+      localStorage.setItem(SURFACE_STORAGE_KEY, next);
+    } catch {
+      // A blocked localStorage only costs the remembered choice.
     }
+  }, []);
 
-    // Reset DOM pages when content changes (show heuristic pages immediately)
-    setDomPages(null);
-
-    // Debounce to avoid thrashing while user types
-    if (domPaginationTimerRef.current) {
-      clearTimeout(domPaginationTimerRef.current);
-    }
-
-    domPaginationTimerRef.current = setTimeout(() => {
-      try {
-        const headerHeight = estimateAcademicHeaderHeight(parsedDoc);
-        // A4 at 96dpi = 1122px. Subtract padding (18mm*2 = ~136px) and header+footer (~72px)
-        const paddingPx = 136; // 18mm top + 18mm bottom ≈ 136px
-        const headerFooterPx = 32 + (parsedDoc.hasTitlePage ? 0 : headerHeight);
-        const contentHeight = 1122 - paddingPx - headerFooterPx - 32; // extra safety margin
-
-        const result = paginateByDom({
-          html: renderedHtml,
-          pageContentHeight: contentHeight,
-          isTwoCol,
-          hasAcademicHeader: !parsedDoc.hasTitlePage,
-          academicHeaderHeight: headerHeight,
-          padding: currentFormatConfig.padding,
-          fontFamily: currentFormatConfig.fontFamily,
-          fontSize: currentFormatConfig.fontSize,
-          lineHeight: currentFormatConfig.lineHeight,
-          columnGap: currentFormatConfig.columnGap,
-        });
-        setDomPages(result);
-      } catch (e) {
-        console.warn('[Teeex] DOM pagination failed, using heuristic fallback:', e);
-        setDomPages(null);
-      }
-    }, 300); // 300ms debounce
-
-    return () => {
-      if (domPaginationTimerRef.current) clearTimeout(domPaginationTimerRef.current);
-    };
-  }, [renderedHtml, isTwoCol, parsedDoc, previewMode, currentFormatConfig]);
-
-  // Use DOM pages when available, otherwise heuristic
-  const pages = domPages || heuristicPages;
-
-  const handleTogglePreviewMode = (mode: 'sheet' | 'flow') => {
-    setPreviewMode(mode);
-    localStorage.setItem('teeex_preview_mode', mode);
-    setDomPages(null);
-  };
-
-  useEffect(() => {
-    if (previewMode === 'sheet') {
-      setTotalPages(Math.max(1, pages.length));
-      if (currentPage > pages.length) {
-        setCurrentPage(Math.max(1, pages.length));
-      }
-    } else if (sheetRef.current) {
-      const pageHeight = 1122;
-      const h = sheetRef.current.scrollHeight;
-      const calculatedPages = Math.max(1, Math.ceil(h / pageHeight));
-      setTotalPages(calculatedPages);
-    }
-  }, [previewMode, pages.length, currentPage, renderedHtml, activeFormat, isTwoCol, zoom]);
-
-  const scrollToPage = (pageNum: number) => {
-    setCurrentPage(pageNum);
-    if (viewportRef.current) {
-      if (previewMode === 'sheet') {
-        const pageEl = viewportRef.current.querySelector<HTMLElement>(`[data-page-index="${pageNum - 1}"]`);
-        if (pageEl) {
-          pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          return;
-        }
-      }
-      const pageHeight = 1122 * (zoom / 100);
-      viewportRef.current.scrollTo({
-        top: (pageNum - 1) * pageHeight,
-        behavior: 'smooth',
-      });
-    }
-  };
-
-  const handleViewportScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const top = e.currentTarget.scrollTop;
-    if (previewMode === 'sheet' && viewportRef.current) {
-      const pageEls = Array.from(viewportRef.current.querySelectorAll<HTMLElement>('.latex-paper-page'));
-      if (pageEls.length > 0) {
-        const viewportTop = viewportRef.current.getBoundingClientRect().top;
-        let activeIdx = 0;
-        for (let i = 0; i < pageEls.length; i++) {
-          const rect = pageEls[i].getBoundingClientRect();
-          if (rect.top - viewportTop <= 150) {
-            activeIdx = i;
-          }
-        }
-        const p = activeIdx + 1;
-        if (p !== currentPage) {
-          setCurrentPage(p);
-        }
-        return;
-      }
-    }
-    const pageHeight = 1122 * (zoom / 100);
-    const p = Math.min(totalPages, Math.max(1, Math.floor(top / pageHeight) + 1));
-    if (p !== currentPage) {
-      setCurrentPage(p);
-    }
-  };
-
-  const toggleFormatMenu = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!isFormatMenuOpen && formatButtonRef.current) {
-      const rect = formatButtonRef.current.getBoundingClientRect();
-      setFormatMenuCoords({
-        top: rect.bottom + 5,
-        right: Math.max(10, window.innerWidth - rect.right),
-      });
-    }
-    setIsFormatMenuOpen(prev => !prev);
-  };
-
-  // Close format menu on outside click or window resize
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        formatMenuRef.current &&
-        !formatMenuRef.current.contains(e.target as Node) &&
-        formatButtonRef.current &&
-        !formatButtonRef.current.contains(e.target as Node)
-      ) {
-        setIsFormatMenuOpen(false);
-      }
-    };
-    if (isFormatMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      const handleResize = () => setIsFormatMenuOpen(false);
-      window.addEventListener('resize', handleResize);
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-        window.removeEventListener('resize', handleResize);
-      };
-    }
-  }, [isFormatMenuOpen]);
-
-  const handleSelectFormat = (fmt: PaperFormatId) => {
-    setLocalFormat(fmt);
-    localStorage.setItem('teeex_paper_format', fmt);
-    onFormatChange?.(fmt);
-    setIsFormatMenuOpen(false);
-  };
-
-  const handleZoom = (delta: number) => {
-    setZoom(prev => Math.min(160, Math.max(60, prev + delta)));
-  };
-
-  // Forward SyncTeX: Code -> Preview
-  useEffect(() => {
-    if (forwardTargetLine && sheetRef.current) {
-      const sheet = sheetRef.current;
-      const allLineEls = Array.from(sheet.querySelectorAll<HTMLElement>('[data-line]'));
-      if (allLineEls.length > 0) {
-        let matchedEl: HTMLElement | null = null;
-        let bestDiff = Infinity;
-
-        for (const el of allLineEls) {
-          const l = parseInt(el.dataset.line || '0', 10);
-          if (l === forwardTargetLine) {
-            matchedEl = el;
-            break;
-          }
-          if (l <= forwardTargetLine) {
-            const diff = forwardTargetLine - l;
-            if (diff < bestDiff) {
-              bestDiff = diff;
-              matchedEl = el;
-            }
-          }
-        }
-
-        if (!matchedEl) matchedEl = allLineEls[0];
-
-        if (matchedEl) {
-          matchedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          matchedEl.classList.remove('synctex-forward-pulse');
-          void matchedEl.offsetWidth; // trigger reflow
-          matchedEl.classList.add('synctex-forward-pulse');
-          const timer = setTimeout(() => {
-            matchedEl?.classList.remove('synctex-forward-pulse');
-          }, 2500);
-          onClearForwardTargetLine?.();
-          return () => clearTimeout(timer);
-        }
-      }
-      onClearForwardTargetLine?.();
-    }
-  }, [forwardTargetLine, onClearForwardTargetLine]);
-
-/**
- * Accurately finds the source code line for selected / highlighted text or clicked snippets
- */
-function findSelectedTextLine(query: string, rawCode: string): number | null {
-  if (!query || !rawCode) return null;
-  const rawLines = rawCode.split('\n');
-
-  // Strip excessive whitespace, bracket markers, punctuation for fuzzy matching
-  const clean = query
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (clean.length < 2) return null;
-
-  // 1. Direct exact chunk search (first 25 characters)
-  const cleanChunk = clean.replace(/[\[\](){}<>.,;:?!'"“”‘’]/g, '').trim().slice(0, 25);
-  if (cleanChunk.length >= 4) {
-    const idx = rawLines.findIndex(l => l.includes(cleanChunk));
-    if (idx !== -1) return idx + 1;
-
-    const lowerIdx = rawLines.findIndex(l => l.toLowerCase().includes(cleanChunk.toLowerCase()));
-    if (lowerIdx !== -1) return lowerIdx + 1;
-  }
-
-  // 2. Multi-word phrase search
-  const words = clean
-    .replace(/[^\w\s-]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length >= 3 && !w.startsWith('\\'));
-
-  if (words.length >= 2) {
-    // Try first 2-3 words phrase
-    for (let count = Math.min(4, words.length); count >= 2; count--) {
-      const phrase = words.slice(0, count).join(' ').toLowerCase();
-      const pIdx = rawLines.findIndex(l => l.toLowerCase().includes(phrase));
-      if (pIdx !== -1) return pIdx + 1;
-    }
-
-    // Match line containing the highest density of query words
-    let bestLine = -1;
-    let maxMatch = 0;
-    const testWords = words.slice(0, 6).map(w => w.toLowerCase());
-
-    for (let i = 0; i < rawLines.length; i++) {
-      const lineLower = rawLines[i].toLowerCase();
-      let matchCount = 0;
-      for (const w of testWords) {
-        if (lineLower.includes(w)) matchCount++;
-      }
-      if (matchCount > maxMatch && matchCount >= 2) {
-        maxMatch = matchCount;
-        bestLine = i + 1;
-      }
-    }
-
-    if (bestLine !== -1) return bestLine;
-  } else if (words.length === 1 && words[0].length >= 4) {
-    const single = words[0].toLowerCase();
-    const sIdx = rawLines.findIndex(l => l.toLowerCase().includes(single));
-    if (sIdx !== -1) return sIdx + 1;
-  }
-
-  // 3. Fallback: search anywhere in lines using first 15 chars of raw query
-  const rawPrefix = query.trim().slice(0, 15);
-  if (rawPrefix.length >= 4) {
-    const rIdx = rawLines.findIndex(l => l.includes(rawPrefix));
-    if (rIdx !== -1) return rIdx + 1;
-  }
-
-  return null;
-}
-
-  // Universal SyncTeX Interaction Handler: handles click, double-click, AND mouse selection/highlight
-  const handlePreviewInteraction = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!onJumpToLine) return;
-
-    // 1. Check if the user selected / highlighted any text in the preview pane
-    const selection = window.getSelection();
-    const selectedText = selection ? selection.toString().trim() : '';
-
-    if (selectedText.length > 0 && rawCode) {
-      const line = findSelectedTextLine(selectedText, rawCode);
-      if (line !== null) {
-        onJumpToLine(line);
-        return;
-      }
-    }
-
-    const target = e.target as HTMLElement;
-
-    // 1b. Table of Contents navigation: jump to line and scroll preview to target heading
-    const tocItem = target.closest('.latex-toc-item') as HTMLElement | null;
-    if (tocItem) {
-      const targetLine = tocItem.dataset.targetLine ? parseInt(tocItem.dataset.targetLine, 10) : undefined;
-      if (targetLine && !isNaN(targetLine)) {
-        onJumpToLine(targetLine);
-        const headingEl = sheetRef.current?.querySelector(`[data-line="${targetLine}"]`);
-        if (headingEl) {
-          headingEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-        return;
-      }
-    }
-
-    // 2. Direct data-line attribute on the target or any parent element
-    const lineEl = target.closest('[data-line]') as HTMLElement | null;
-    if (lineEl && lineEl.dataset.line) {
-      const line = parseInt(lineEl.dataset.line, 10);
-      if (!isNaN(line) && line > 0) {
-        onJumpToLine(line);
-        return;
-      }
-    }
-
-    // 3. Heading fallback: match text against parsed sections
-    const heading = target.closest('h2, h3, h4');
-    if (heading) {
-      const headingText = heading.textContent?.trim().toLowerCase() || '';
-      const matched = parsedDoc.sections.find(s =>
-        headingText.includes(s.title.toLowerCase()) ||
-        s.title.toLowerCase().includes(headingText)
-      );
-      if (matched) {
-        onJumpToLine(matched.line);
-        return;
-      }
-    }
-
-    // 4. Math equation fallback
-    const mathBlock = target.closest('.latex-math-display');
-    if (mathBlock) {
-      const mathText = mathBlock.textContent?.trim() || '';
-      const matchedMath = parsedDoc.mathBlocks.find(m =>
-        mathText.includes(m.latex.slice(0, 10))
-      );
-      if (matchedMath) {
-        onJumpToLine(matchedMath.line);
-        return;
-      } else if (parsedDoc.mathBlocks.length > 0) {
-        onJumpToLine(parsedDoc.mathBlocks[0].line);
-        return;
-      }
-    }
-
-    // 5. Text fallback: search clicked element text in rawCode
-    if (rawCode) {
-      const rawText = target.textContent?.trim() || '';
-      if (rawText.length > 3) {
-        const line = findSelectedTextLine(rawText, rawCode);
-        if (line !== null) {
-          onJumpToLine(line);
-          return;
-        }
-      }
-    }
-  };
+  /**
+   * Outline → source. Uses the `data-line` anchors the parser emits, which
+   * record the actual source line a block came from. This replaces a fuzzy
+   * substring/word-density search over the source that was previously labelled
+   * "SyncTeX" — real source mapping for the compiled document now comes from
+   * the engine's own SyncTeX output, on the PDF surface.
+   */
+  const handleOutlineClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!onJumpToLine) return;
+      const anchor = (event.target as HTMLElement).closest<HTMLElement>('[data-line]');
+      const line = Number.parseInt(anchor?.dataset.line ?? '', 10);
+      if (Number.isFinite(line) && line > 0) onJumpToLine(line);
+    },
+    [onJumpToLine],
+  );
 
   return (
-    <div
-      style={previewContainerStyle}
-      className="preview-container"
-    >
-      {/* Top Toolbar */}
-      <div
-        style={previewToolbarStyle}
-        className="preview-toolbar toolbar-scrollbar"
-        onWheel={(e) => {
-          if (e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY;
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
-          <FileCheck size={13} color="#10b981" />
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-            Preview
-          </span>
-          <span
-            style={{
-              fontSize: 9.5,
-              padding: '1.5px 6px',
-              borderRadius: 999,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              fontWeight: 600,
-              backgroundColor: 'rgba(16, 185, 129, 0.12)',
-              color: '#10b981',
-              border: '1px solid rgba(16, 185, 129, 0.25)',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            <span style={{ width: 4.5, height: 4.5, borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }} />
-            Live
-          </span>
-          <span
-            style={{
-              fontSize: 9.5,
-              padding: '1.5px 7px',
-              borderRadius: 999,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              fontWeight: 600,
-              backgroundColor: 'rgba(56, 189, 248, 0.12)',
-              color: '#38bdf8',
-              border: '1px solid rgba(56, 189, 248, 0.25)',
-              marginLeft: 2,
-              whiteSpace: 'nowrap',
-              cursor: 'help',
-            }}
-            title="SyncTeX: Click or double-click any section in the preview to jump to that line in LaTeX code!"
-          >
-            <MousePointerClick size={10} color="#38bdf8" /> SyncTeX: Active
-          </span>
-
-          {/* Engine Mode Toggle: Overleaf WASM vs Fast HTML */}
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            backgroundColor: 'var(--bg-surface-1)',
-            border: '1px solid var(--border-medium)',
-            borderRadius: 5,
-            height: 24,
-            padding: 1,
-            marginLeft: 6,
-          }}>
-            <button
-              type="button"
-              onClick={() => handleToggleEngine('wasm')}
-              style={{
-                padding: '2px 8px',
-                fontSize: 10,
-                fontWeight: previewEngine === 'wasm' ? 700 : 500,
-                backgroundColor: previewEngine === 'wasm' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                color: previewEngine === 'wasm' ? '#38bdf8' : 'var(--text-muted)',
-                border: 'none',
-                borderRadius: 4,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                height: '100%',
-                transition: 'all 0.15s ease',
-              }}
-              title="Overleaf Parity: Genuine pdfLaTeX WASM engine with 100% accurate PDF output"
-            >
-              <Sparkles size={11} color={previewEngine === 'wasm' ? '#38bdf8' : 'var(--text-muted)'} />
-              <span>Overleaf WASM</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleToggleEngine('html')}
-              style={{
-                padding: '2px 8px',
-                fontSize: 10,
-                fontWeight: previewEngine === 'html' ? 700 : 500,
-                backgroundColor: previewEngine === 'html' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                color: previewEngine === 'html' ? '#38bdf8' : 'var(--text-muted)',
-                border: 'none',
-                borderRadius: 4,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                height: '100%',
-                transition: 'all 0.15s ease',
-              }}
-              title="Instant HTML: Fast DOM-based preview while typing"
-            >
-              <FileText size={10} />
-              <span>Fast HTML</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Controls: Format, Column mode, Zoom, Print */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
-          {/* Standard Format Selector Dropdown */}
-          <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-            <button
-              ref={formatButtonRef}
-              type="button"
-              onClick={toggleFormatMenu}
-              style={{
-                padding: '2px 8px',
-                fontSize: 10.5,
-                fontWeight: 600,
-                color: 'var(--text-primary)',
-                backgroundColor: isFormatMenuOpen ? 'var(--bg-surface-elevated)' : 'var(--bg-surface-1)',
-                border: isFormatMenuOpen ? '1px solid #38bdf8' : '1px solid var(--border-medium)',
-                borderRadius: 5,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                whiteSpace: 'nowrap',
-                cursor: 'pointer',
-                height: 24,
-                transition: 'all 0.15s ease',
-              }}
-              title="Academic publication format"
-            >
-              <BookOpen size={11} color="#38bdf8" />
-              <span style={{ whiteSpace: 'nowrap' }}>{currentFormatConfig.badge}</span>
-              <ChevronDown size={10} color="var(--text-muted)" />
-            </button>
-
-            {isFormatMenuOpen && formatMenuCoords && createPortal(
-              <div
-                ref={formatMenuRef}
-                style={{
-                  position: 'fixed',
-                  top: formatMenuCoords.top,
-                  right: formatMenuCoords.right,
-                  zIndex: 99999,
-                  backgroundColor: 'var(--bg-surface-1)',
-                  border: '1px solid var(--border-medium)',
-                  borderRadius: 'var(--radius-sm)',
-                  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.55)',
-                  width: 280,
-                  padding: 6,
-                  backdropFilter: 'blur(16px)',
-                }}
-              >
-                <div
-                  style={{
-                    padding: '6px 8px 6px 8px',
-                    borderBottom: '1px solid var(--border-subtle)',
-                    marginBottom: 4,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <BookOpen size={12} color="#38bdf8" />
-                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-primary)' }}>
-                      Academic Publication Format
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-                    Typesetting & layout standards
-                  </div>
-                </div>
-                {(Object.keys(PAPER_FORMATS) as PaperFormatId[]).map(fid => {
-                  const fmt = PAPER_FORMATS[fid];
-                  const isSelected = activeFormat === fid;
-                  return (
-                    <div
-                      key={fid}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleSelectFormat(fid);
-                      }}
-                      style={{
-                        padding: '6px 8px',
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                        backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
-                        marginBottom: 2,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 2,
-                        transition: 'background 0.15s ease',
-                      }}
-                      className="hover:bg-active"
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 11, fontWeight: isSelected ? 700 : 500, color: isSelected ? '#38bdf8' : 'var(--text-primary)' }}>
-                          {fmt.name}
-                        </span>
-                        {isSelected && <Check size={12} color="#38bdf8" />}
-                      </div>
-                      <div style={{ fontSize: 9.5, color: 'var(--text-muted)', lineHeight: 1.3 }}>
-                        {fmt.description}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>,
-              document.body
-            )}
-          </div>
-
-          {/* View Mode Toggle: Sheet vs Flow */}
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            backgroundColor: 'var(--bg-surface-1)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 5,
-            height: 24,
-            padding: 1,
-          }}>
-            <button
-              type="button"
-              onClick={() => handleTogglePreviewMode('sheet')}
-              style={{
-                padding: '2px 7px',
-                fontSize: 10,
-                fontWeight: previewMode === 'sheet' ? 700 : 500,
-                backgroundColor: previewMode === 'sheet' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
-                color: previewMode === 'sheet' ? '#38bdf8' : 'var(--text-muted)',
-                border: 'none',
-                borderRadius: 4,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 3,
-                height: '100%',
-              }}
-              title="Paged Sheet View: Discrete academic paper pages with margins and headers"
-            >
-              <Layers size={10} />
-              <span>Sheet</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleTogglePreviewMode('flow')}
-              style={{
-                padding: '2px 7px',
-                fontSize: 10,
-                fontWeight: previewMode === 'flow' ? 700 : 500,
-                backgroundColor: previewMode === 'flow' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
-                color: previewMode === 'flow' ? '#38bdf8' : 'var(--text-muted)',
-                border: 'none',
-                borderRadius: 4,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 3,
-                height: '100%',
-              }}
-              title="Continuous Flow View: Single continuous scrollable canvas"
-            >
-              <FileText size={10} />
-              <span>Flow</span>
-            </button>
-          </div>
-
-          {/* Margins Guide Toggle (in Sheet mode) */}
-          {previewMode === 'sheet' && (
-            <button
-              type="button"
-              onClick={() => setShowMarginGuides(prev => !prev)}
-              style={{
-                padding: '2px 7px',
-                fontSize: 10,
-                fontWeight: showMarginGuides ? 700 : 500,
-                color: showMarginGuides ? '#10b981' : 'var(--text-muted)',
-                backgroundColor: showMarginGuides ? 'rgba(16, 185, 129, 0.12)' : 'var(--bg-surface-1)',
-                border: showMarginGuides ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border-subtle)',
-                borderRadius: 5,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                cursor: 'pointer',
-                height: 24,
-                whiteSpace: 'nowrap',
-                transition: 'all 0.15s ease',
-              }}
-              title="Toggle printable 1-inch margin guidelines"
-            >
-              <Grid size={11} />
-              <span>Margins</span>
-            </button>
-          )}
-
-          {/* Page Navigation in Sheet Mode */}
-          {previewMode === 'sheet' && (
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              backgroundColor: 'var(--bg-surface-1)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 5,
-              height: 24,
-              padding: '0 3px',
-              gap: 2,
-            }}>
-              <button
-                type="button"
-                onClick={() => scrollToPage(Math.max(1, currentPage - 1))}
-                className="btn-ghost"
-                style={{ padding: '1px 3px', height: '100%', display: 'flex', alignItems: 'center' }}
-                title="Previous Page"
-                disabled={currentPage <= 1}
-              >
-                <ChevronLeft size={11} />
-              </button>
-              <span style={{ fontSize: 9.5, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-primary)', padding: '0 2px' }}>
-                p. {currentPage} / {totalPages}
-              </span>
-              <button
-                type="button"
-                onClick={() => scrollToPage(Math.min(totalPages, currentPage + 1))}
-                className="btn-ghost"
-                style={{ padding: '1px 3px', height: '100%', display: 'flex', alignItems: 'center' }}
-                title="Next Page"
-                disabled={currentPage >= totalPages}
-              >
-                <ChevronRight size={11} />
-              </button>
-            </div>
-          )}
-
-          {/* Column Toggle Button */}
-          <button
-            type="button"
-            onClick={onToggleTwoColumn || (() => setLocalColumnOverride(!isTwoCol))}
-            style={{
-              padding: '2px 7px',
-              fontSize: 10.5,
-              fontWeight: 500,
-              color: 'var(--text-secondary)',
-              backgroundColor: 'var(--bg-surface-1)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 5,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              whiteSpace: 'nowrap',
-              cursor: 'pointer',
-              height: 24,
-              transition: 'all 0.15s ease',
-            }}
-            title={`Toggle column layout (currently ${isTwoCol ? '2-Column' : '1-Column'})`}
-          >
-            {isTwoCol ? <Columns size={12} color="#38bdf8" /> : <Square size={12} />}
-            <span style={{ whiteSpace: 'nowrap' }}>{isTwoCol ? '2-Col' : '1-Col'}</span>
-          </button>
-
-          <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', flexShrink: 0 }} />
-
-          {/* Zoom Segmented Controls */}
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            backgroundColor: 'var(--bg-surface-1)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 5,
-            height: 24,
-            overflow: 'hidden',
-            whiteSpace: 'nowrap',
-          }}>
-            <button
-              type="button"
-              onClick={() => handleZoom(-10)}
-              className="btn-ghost"
-              style={{ padding: '2px 5px', height: '100%', borderRadius: 0, display: 'flex', alignItems: 'center' }}
-              title="Zoom Out"
-            >
-              <ZoomOut size={11} />
-            </button>
-            <span style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', minWidth: 32, textAlign: 'center', color: 'var(--text-primary)', fontWeight: 600, padding: '0 2px' }}>
-              {zoom}%
-            </span>
-            <button
-              type="button"
-              onClick={() => handleZoom(10)}
-              className="btn-ghost"
-              style={{ padding: '2px 5px', height: '100%', borderRadius: 0, display: 'flex', alignItems: 'center' }}
-              title="Zoom In"
-            >
-              <ZoomIn size={11} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setZoom(78)}
-              className="btn-ghost"
-              style={{ padding: '2px 5px', height: '100%', borderRadius: 0, borderLeft: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center' }}
-              title="Fit Page (78%)"
-            >
-              <Maximize2 size={10} />
-            </button>
-          </div>
-
-          {/* Export PDF Button */}
-          {onExportPdf && (
-            <button
-              type="button"
-              onClick={onExportPdf}
-              style={{
-                padding: '2px 8px',
-                fontSize: 10.5,
-                fontWeight: 600,
-                color: '#38bdf8',
-                backgroundColor: 'rgba(56, 189, 248, 0.1)',
-                border: '1px solid rgba(56, 189, 248, 0.3)',
-                borderRadius: 5,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                cursor: 'pointer',
-                height: 24,
-                transition: 'all 0.15s ease',
-              }}
-              title="Export publication-quality A4 PDF"
-            >
-              <Printer size={11} color="#38bdf8" />
-              <span>PDF</span>
-            </button>
-          )}
-        </div>
+    <div className="preview-shell">
+      <div className="preview-surface-switch" role="tablist" aria-label="Preview surface">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={surface === 'pdf'}
+          className={`preview-surface-tab${surface === 'pdf' ? ' is-active' : ''}`}
+          onClick={() => selectSurface('pdf')}
+          title="The compiled document — identical to the exported PDF"
+        >
+          <FileText size={12} />
+          PDF
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={surface === 'outline'}
+          className={`preview-surface-tab${surface === 'outline' ? ' is-active' : ''}`}
+          onClick={() => selectSurface('outline')}
+          title="Draft structural skim of the source. Not a layout preview."
+        >
+          <FileCode2 size={12} />
+          Outline
+        </button>
       </div>
 
-      {previewEngine === 'wasm' ? (
-        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-          <PdfPreviewPane
-            pdfBytes={pdfBytes ?? null}
-            isCompiling={isWasmCompiling || false}
-            compileError={wasmError}
-            onExportPdf={onExportPdf}
-            documentTitle={documentTitle}
-          />
-        </div>
+      {surface === 'pdf' ? (
+        <PdfPreviewPane
+          pdf={pdf}
+          status={status}
+          isCompiling={isCompiling}
+          isStale={isStale}
+          errorSummary={errorSummary}
+          documentTitle={documentTitle}
+          onCompile={onCompile}
+          syncTexIndex={syncTexIndex}
+          forwardTarget={forwardTarget}
+          onInverseSync={onInverseSync}
+        />
       ) : (
-        /* Paper Sheet View Container (PDF Surrounding Area) */
-        <div
-          ref={viewportRef}
-          onScroll={handleViewportScroll}
-          style={sheetViewportStyle}
-          className="sheet-viewport"
-        >
-        <div
-          ref={sheetRef}
-          onClick={handlePreviewInteraction}
-          onMouseUp={handlePreviewInteraction}
-          onDoubleClick={handlePreviewInteraction}
-          style={{
-            ...paperSheetStyle,
-            fontFamily: currentFormatConfig.fontFamily,
-            fontSize: currentFormatConfig.fontSize,
-            lineHeight: currentFormatConfig.lineHeight,
-            padding: previewMode === 'sheet' ? 0 : currentFormatConfig.padding,
-            backgroundColor: previewMode === 'sheet' ? 'transparent' : 'var(--paper-bg)',
-            boxShadow: previewMode === 'sheet' ? 'none' : (previewMode === 'flow' ? '0 4px 16px rgba(0,0,0,0.2)' : '0 18px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05)'),
-            maxWidth: previewMode === 'flow' ? '860px' : currentFormatConfig.maxWidth,
-            width: previewMode === 'flow' ? '100%' : '210mm',
-            transform: `scale(${zoom / 100})`,
-            transformOrigin: 'top center',
-          }}
-          className={`latex-paper-sheet format-${activeFormat} ${previewMode === 'sheet' ? 'preview-mode-sheet' : 'preview-mode-flow'}`}
-        >
-          {previewMode === 'flow' ? (
-            <>
-              {/* Printable 1-Inch Margin Boundaries */}
-              {showMarginGuides && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '18mm',
-                    left: '18mm',
-                    right: '18mm',
-                    bottom: '18mm',
-                    border: '1px dashed rgba(56, 189, 248, 0.45)',
-                    pointerEvents: 'none',
-                    zIndex: 20,
-                  }}
-                >
-                  <span style={{
-                    position: 'absolute',
-                    top: 2,
-                    right: 4,
-                    fontSize: 8,
-                    fontFamily: 'monospace',
-                    color: '#38bdf8',
-                    opacity: 0.8,
-                    fontWeight: 600,
-                  }}>
-                    1-Inch Margin Guide
-                  </span>
-                </div>
+        <div className="outline-pane">
+          <p className="outline-notice">
+            Draft outline of your source, for orientation while the document
+            compiles. Line breaks, spacing, and page boundaries here are not the
+            document's — switch to <strong>PDF</strong> for the real layout.
+          </p>
+
+          <div className="outline-scroll">
+            <article className="outline-sheet" onClick={handleOutlineClick}>
+              {parsedDoc.title && <h1 className="outline-title">{parsedDoc.title}</h1>}
+              {parsedDoc.authors.length > 0 && (
+                <p className="outline-authors">{parsedDoc.authors.join(' · ')}</p>
               )}
-
-              {/* Format Metadata Header */}
-              <div className="paper-meta-header synctex-target" data-line="1">
-                <span>{currentFormatConfig.headerMeta}</span>
-                <span style={{ fontWeight: 700 }}>{currentFormatConfig.badge}</span>
-              </div>
-
-              {/* Academic Header (Title & Authors) */}
-              {!parsedDoc.hasTitlePage && (
-                <div style={academicHeaderStyle}>
-                  <h1
-                    style={{ ...paperTitleStyle, cursor: 'pointer' }}
-                    className="synctex-target"
-                    data-line={parsedDoc.titleLine || 1}
-                    title={`Click to jump to line ${parsedDoc.titleLine || 1} in code`}
-                  >
-                    {parsedDoc.title}
-                  </h1>
-                  <div
-                    style={{ ...paperAuthorBlockStyle, cursor: 'pointer' }}
-                    className="synctex-target"
-                    data-line={parsedDoc.authorLine || 1}
-                    title={`Click to jump to line ${parsedDoc.authorLine || 1} in code`}
-                  >
-                    {parsedDoc.authors.map((auth, idx) => (
-                      <span key={idx} style={paperAuthorNameStyle}>
-                        {auth}
-                      </span>
-                    ))}
-                  </div>
-                  {parsedDoc.date && (
-                    <div
-                      style={{ ...paperDateStyle, cursor: 'pointer' }}
-                      className="synctex-target"
-                      data-line={parsedDoc.dateLine || 1}
-                      title={`Click to jump to line ${parsedDoc.dateLine || 1} in code`}
-                    >
-                      {parsedDoc.date}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Body Content with 2-Column or 1-Column styling */}
               <div
-                style={{
-                  ...paperBodyStyle,
-                  columnCount: isTwoCol ? 2 : 1,
-                  columnGap: isTwoCol ? currentFormatConfig.columnGap : 'normal',
-                  columnRule: isTwoCol && activeFormat === 'ieee' ? '1px solid #cbd5e1' : 'none',
-                }}
-                className="paper-body"
+                className="outline-body latex-paper-sheet"
+                // The draft renderer produces this markup from the source; it is
+                // not user-supplied HTML.
                 dangerouslySetInnerHTML={{ __html: renderedHtml }}
               />
-
-              {/* Academic Footnote / Page Number */}
-              <div
-                style={{ ...paperFooterStyle, cursor: 'pointer' }}
-                className="synctex-target"
-                data-line="1"
-                title="Click to jump to document preamble"
-              >
-                <span>{currentFormatConfig.footerMeta}</span>
-                <span>Page {currentPage} of {totalPages}</span>
-              </div>
-            </>
-          ) : (
-            /* Discrete Page Sheets */
-            pages.map((pageHtml, pIdx) => {
-              const isTitlePage = pageHtml.includes('latex-titlepage');
-              const isFirstPage = pIdx === 0 && !parsedDoc.hasTitlePage;
-
-              return (
-                <div
-                  key={pIdx}
-                  data-page-index={pIdx}
-                  className="latex-paper-page"
-                  style={{
-                    width: '210mm',
-                    height: '297mm',
-                    maxHeight: '297mm',
-                    boxSizing: 'border-box',
-                    backgroundColor: 'var(--paper-bg)',
-                    color: 'var(--paper-text)',
-                    boxShadow: '0 18px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05)',
-                    borderRadius: 2,
-                    padding: isTitlePage ? '30px 20px' : currentFormatConfig.padding,
-                    marginBottom: pIdx === pages.length - 1 ? 0 : 32,
-                    position: 'relative',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden',
-                  }}
-                >
-                  {/* Printable 1-Inch Margin Boundaries */}
-                  {showMarginGuides && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '18mm',
-                        left: '18mm',
-                        right: '18mm',
-                        bottom: '18mm',
-                        border: '1px dashed rgba(56, 189, 248, 0.45)',
-                        pointerEvents: 'none',
-                        zIndex: 20,
-                      }}
-                    >
-                      <span style={{
-                        position: 'absolute',
-                        top: 2,
-                        right: 4,
-                        fontSize: 8,
-                        fontFamily: 'monospace',
-                        color: '#38bdf8',
-                        opacity: 0.8,
-                        fontWeight: 600,
-                      }}>
-                        1-Inch Margin Guide
-                      </span>
-                    </div>
-                  )}
-
-                  {/* UI Page Badge Pill Tag (Removed during PDF export) */}
-                  <div
-                    className="latex-page-pill-tag no-print"
-                    style={{
-                      position: 'absolute',
-                      top: -20,
-                      right: 0,
-                      fontSize: 9.5,
-                      fontWeight: 600,
-                      fontFamily: 'var(--font-mono)',
-                      color: 'var(--text-muted)',
-                      backgroundColor: 'var(--bg-surface-1)',
-                      padding: '1px 8px',
-                      borderRadius: '6px 6px 0 0',
-                      border: '1px solid var(--border-subtle)',
-                      borderBottom: 'none',
-                      userSelect: 'none',
-                    }}
-                  >
-                    Page {pIdx + 1} of {pages.length}
-                  </div>
-
-                  {/* Format Metadata Header (omitted on titlepage) */}
-                  {!isTitlePage && (
-                    <div className="paper-meta-header synctex-target" data-line="1">
-                      <span>{pIdx === 0 ? currentFormatConfig.headerMeta : (parsedDoc.title || currentFormatConfig.headerMeta)}</span>
-                      <span style={{ fontWeight: 700 }}>{currentFormatConfig.badge}</span>
-                    </div>
-                  )}
-
-                  {/* Academic Header (Title & Authors) only on the primary first page if no dedicated title page */}
-                  {isFirstPage && (
-                    <div style={academicHeaderStyle}>
-                      <h1
-                        style={{ ...paperTitleStyle, cursor: 'pointer' }}
-                        className="synctex-target"
-                        data-line={parsedDoc.titleLine || 1}
-                        title={`Click to jump to line ${parsedDoc.titleLine || 1} in code`}
-                      >
-                        {parsedDoc.title}
-                      </h1>
-                      <div
-                        style={{ ...paperAuthorBlockStyle, cursor: 'pointer' }}
-                        className="synctex-target"
-                        data-line={parsedDoc.authorLine || 1}
-                        title={`Click to jump to line ${parsedDoc.authorLine || 1} in code`}
-                      >
-                        {parsedDoc.authors.map((auth, idx) => (
-                          <span key={idx} style={paperAuthorNameStyle}>
-                            {auth}
-                          </span>
-                        ))}
-                      </div>
-                      {parsedDoc.date && (
-                        <div
-                          style={{ ...paperDateStyle, cursor: 'pointer' }}
-                          className="synctex-target"
-                          data-line={parsedDoc.dateLine || 1}
-                          title={`Click to jump to line ${parsedDoc.dateLine || 1} in code`}
-                        >
-                          {parsedDoc.date}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Body Content with 2-Column or 1-Column styling */}
-                  <div
-                    style={{
-                      ...paperBodyStyle,
-                      flex: 1,
-                      minHeight: 0,
-                      columnCount: (isTwoCol && !isTitlePage) ? 2 : 1,
-                      columnGap: isTwoCol ? currentFormatConfig.columnGap : 'normal',
-                      columnRule: isTwoCol && activeFormat === 'ieee' ? '1px solid #cbd5e1' : 'none',
-                    }}
-                    className="paper-body"
-                    dangerouslySetInnerHTML={{ __html: pageHtml }}
-                  />
-
-                  {/* Academic Footnote / Page Number Footer (omitted on titlepage) */}
-                  {!isTitlePage && (
-                    <div
-                      style={{ ...paperFooterStyle, cursor: 'pointer' }}
-                      className="synctex-target"
-                      data-line="1"
-                      title="Click to jump to document preamble"
-                    >
-                      <span>{currentFormatConfig.footerMeta}</span>
-                      <span>Page {pIdx + 1} of {pages.length}</span>
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
+            </article>
+          </div>
         </div>
-      </div>
       )}
     </div>
   );
-};
-
-const previewContainerStyle: React.CSSProperties = {
-  flex: 1,
-  height: '100%',
-  display: 'flex',
-  flexDirection: 'column',
-  backgroundColor: 'var(--bg-app)',
-  borderLeft: '1px solid var(--border-subtle)',
-  overflow: 'hidden',
-};
-
-const previewToolbarStyle: React.CSSProperties = {
-  height: 38,
-  backgroundColor: 'var(--bg-surface-0)',
-  borderBottom: '1px solid var(--border-subtle)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  padding: '0 10px',
-  flexShrink: 0,
-  overflowX: 'auto',
-  overflowY: 'hidden',
-  whiteSpace: 'nowrap',
-  gap: 8,
-};
-
-const sheetViewportStyle: React.CSSProperties = {
-  flex: 1,
-  overflowY: 'auto',
-  overflowX: 'auto',
-  padding: '20px 14px',
-  display: 'flex',
-  justifyContent: 'center',
-  alignItems: 'flex-start',
-  backgroundColor: 'var(--bg-app)',
-};
-
-const paperSheetStyle: React.CSSProperties = {
-  width: '210mm',
-  minHeight: '297mm',
-  maxWidth: '210mm',
-  boxSizing: 'border-box',
-  backgroundColor: 'var(--paper-bg)',
-  color: 'var(--paper-text)',
-  boxShadow: 'var(--paper-shadow)',
-  borderRadius: 2,
-  fontFamily: 'var(--paper-font-serif)',
-  lineHeight: 1.5,
-  fontSize: '12px',
-  transition: 'transform 0.15s ease, box-shadow 0.45s cubic-bezier(0.25, 1, 0.5, 1), background-color 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
-  position: 'relative',
-  display: 'flex',
-  flexDirection: 'column',
-  cursor: 'default',
-};
-
-const academicHeaderStyle: React.CSSProperties = {
-  textAlign: 'center',
-  marginBottom: 18,
-  paddingBottom: 12,
-  borderBottom: '1px solid #e5e7eb',
-};
-
-const paperTitleStyle: React.CSSProperties = {
-  fontSize: '20px',
-  fontWeight: 700,
-  letterSpacing: '-0.01em',
-  marginBottom: 8,
-  lineHeight: 1.25,
-  color: '#111827',
-};
-
-const paperAuthorBlockStyle: React.CSSProperties = {
-  display: 'flex',
-  justifyContent: 'center',
-  flexWrap: 'wrap',
-  gap: '16px',
-  fontSize: '13px',
-  fontStyle: 'italic',
-  color: '#374151',
-  marginBottom: 6,
-};
-
-const paperAuthorNameStyle: React.CSSProperties = {
-  fontWeight: 500,
-};
-
-const paperDateStyle: React.CSSProperties = {
-  fontSize: '11px',
-  color: '#6b7280',
-  marginTop: 4,
-};
-
-const paperBodyStyle: React.CSSProperties = {
-  flex: 1,
-  textAlign: 'justify',
-};
-
-const paperFooterStyle: React.CSSProperties = {
-  marginTop: 32,
-  paddingTop: 12,
-  borderTop: '1px solid #e5e7eb',
-  display: 'flex',
-  justifyContent: 'space-between',
-  fontSize: 10,
-  color: '#9ca3af',
-  fontFamily: 'var(--font-ui)',
-};
+}

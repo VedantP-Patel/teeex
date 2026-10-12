@@ -434,7 +434,7 @@ export const VisualEditor: React.FC<Props> = ({
                 type="text"
                 value={doc.authors}
                 onChange={e => handleUpdateAuthors(e.target.value)}
-                placeholder="Dr. Elena Rostova and Dr. Marcus Chen..."
+                placeholder="Author One and Author Two..."
                 style={authorsInputStyle}
               />
             </div>

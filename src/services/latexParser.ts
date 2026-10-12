@@ -2226,33 +2226,6 @@ function escapeHtml(str: string): string {
     .replace(/>/g, '&gt;');
 }
 
-export interface BeamerSlide {
-  title: string;
-  content: string;
-  slideNumber: number;
-}
-
-export function extractBeamerSlides(code: string): BeamerSlide[] {
-  const slides: BeamerSlide[] = [];
-  const frameRegex = /\\begin\{frame\}(?:\[.*?\])?(?:\{([^}]+)\})?([\s\S]*?)\\end\{frame\}/g;
-  let match: RegExpExecArray | null;
-  let num = 1;
-
-  while ((match = frameRegex.exec(code)) !== null) {
-    const rawTitle = match[1] || '';
-    const body = match[2] || '';
-    const frameTitleMatch = body.match(/\\frametitle\{([^}]+)\}/);
-    const title = cleanLatexInline(frameTitleMatch ? frameTitleMatch[1] : rawTitle) || `Slide ${num}`;
-    slides.push({
-      title,
-      content: body.replace(/\\frametitle\{[^}]+\}/g, '').trim(),
-      slideNumber: num++,
-    });
-  }
-
-  return slides;
-}
-
 export function extractLatexLabels(files: ProjectFile[]): LatexLabel[] {
   const labels: LatexLabel[] = [];
 

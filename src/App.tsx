@@ -19,11 +19,10 @@ const WordCountModal = lazy(() => import('./components/modals/WordCountModal').t
 const AuthModal = lazy(() => import('./components/modals/AuthModal').then(m => ({ default: m.AuthModal })));
 const ProjectsDashboardModal = lazy(() => import('./components/modals/ProjectsDashboardModal').then(m => ({ default: m.ProjectsDashboardModal })));
 const DeveloperUnlockModal = lazy(() => import('./components/modals/DeveloperUnlockModal').then(m => ({ default: m.DeveloperUnlockModal })));
-const DoiImportModal = lazy(() => import('./components/modals/DoiImportModal').then(m => ({ default: m.DoiImportModal })));
+const CommandPaletteModal = lazy(() => import('./components/modals/CommandPaletteModal').then(m => ({ default: m.CommandPaletteModal })));
 const AuditLogModal = lazy(() => import('./components/modals/AuditLogModal').then(m => ({ default: m.AuditLogModal })));
 const EncryptionModal = lazy(() => import('./components/modals/EncryptionModal').then(m => ({ default: m.EncryptionModal })));
 const AdminUsersModal = lazy(() => import('./components/modals/AdminUsersModal').then(m => ({ default: m.AdminUsersModal })));
-const CommandPaletteModal = lazy(() => import('./components/modals/CommandPaletteModal').then(m => ({ default: m.CommandPaletteModal })));
 import { formatLatexCode } from './services/latexFormatter';
 import {
   isPlatformDeveloper,
@@ -35,10 +34,11 @@ import {
 import { logAuditAction } from './services/auditService';
 import { saveProjectOffline } from './services/offlineStorageService';
 import { encryptText, decryptText } from './services/encryptionService';
-import { exportDocumentAsPdf } from './services/pdfExporter';
-import { type PaperFormatId } from './services/paperFormats';
+import { downloadPdf } from './services/pdfExporter';
+import { applyDocumentClass, formatResolutionNotice, setTwoColumn, type PaperFormatId } from './services/paperFormats';
 import { verifyShareKey } from './services/shareSecurityService';
-import { useLatexCompiler } from './hooks/useLatexCompiler';
+import { useTexEngine } from './hooks/useTexEngine';
+import { parseSyncTex, forwardSync, type SyncTexIndex, type ForwardMatch } from './services/synctex';
 
 import type {
   ProjectFile,
@@ -128,7 +128,7 @@ export function App() {
   const [folders, setFolders] = useState<string[]>(() => activeProject?.folders || ['sections', 'figures']);
   const [activeFileId, setActiveFileId] = useState<string>(() => activeProject?.files?.[0]?.id || 'main.tex');
   const [openFileIds, setOpenFileIds] = useState<string[]>(() => [activeProject?.files?.[0]?.id || 'main.tex']);
-  const [projectTitle, setProjectTitle] = useState<string>(() => activeProject?.title || 'Neural Quantum State Tomography');
+  const [projectTitle, setProjectTitle] = useState<string>(() => activeProject?.title || 'Untitled Project');
   const [paperFormat, setPaperFormat] = useState<PaperFormatId>(() => {
     return (localStorage.getItem('teeex_paper_format') as PaperFormatId) || 'ieee';
   });
@@ -138,10 +138,31 @@ export function App() {
     return true; // Default standard format is 2-column (IEEE Transactions)
   });
 
+  // Column count belongs to the document class, not to the viewer: LaTeX
+  // derives column width, gutter and float placement from it. So the toggle
+  // amends `\documentclass` and lets the engine re-typeset, rather than
+  // restyling a preview that the exported PDF would not match.
   const handleToggleTwoColumn = useCallback(() => {
     setIsTwoColumn(prev => {
       const next = !prev;
-      localStorage.setItem('teeex_column_mode', next ? '2' : '1');
+      try {
+        localStorage.setItem('teeex_column_mode', next ? '2' : '1');
+      } catch {
+        // Losing the remembered choice is harmless.
+      }
+
+      setFiles(files => {
+        const entry =
+          files.find(f => f.name.endsWith('.tex') && f.isEntry) ??
+          files.find(f => f.name === 'main.tex') ??
+          files.find(f => /\\documentclass/.test(f.content));
+        if (!entry) return files;
+
+        const updated = setTwoColumn(entry.content, next);
+        if (updated === entry.content) return files;
+        return files.map(f => (f.id === entry.id ? { ...f, content: updated } : f));
+      });
+
       return next;
     });
   }, []);
@@ -178,30 +199,14 @@ export function App() {
   }, [activeProject, currentUser, roomId]);
 
   // Checkpoints State (Time Machine)
-  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([
-    {
-      id: 'checkpoint-init',
-      name: 'Initial IEEE Draft',
-      timestamp: 'Today, 00:15',
-      author: currentUser?.fullName || 'Dr. Elena Rostova',
-      files: activeProject.files,
-    }
-  ]);
+  // Version checkpoints start empty — a new project has no history until the
+  // author creates a checkpoint. (Previously seeded with a fake "Dr. Elena
+  // Rostova" draft, which made an empty project look like someone else's work.)
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
 
-  // Review Comments State (Google Docs style)
-  const [comments, setComments] = useState<ReviewComment[]>([
-    {
-      id: 'comment-1',
-      fileId: 'main.tex',
-      line: 14,
-      authorName: 'Dr. Elena Rostova',
-      authorAvatar: 'ER',
-      authorColor: '#10b981',
-      text: 'Should we cite the 2026 PhysRev quantum benchmark paper here?',
-      createdAt: '10 mins ago',
-      resolved: false,
-    }
-  ]);
+  // Review comments start empty. (Previously seeded with a fabricated reviewer
+  // comment attributed to a person who does not exist.)
+  const [comments, setComments] = useState<ReviewComment[]>([]);
 
   // Cloud & Supabase State (automatically detected from Vercel)
   const [isCloudConnected, setIsCloudConnected] = useState(() => isSupabaseConnected());
@@ -266,6 +271,17 @@ export function App() {
   const [targetLine, setTargetLine] = useState<number | null>(null);
   const [forwardTargetLine, setForwardTargetLine] = useState<number | null>(null);
 
+  // Transient notices. Used where an action cannot be completed and the reason
+  // belongs to the user's intent rather than to the document — e.g. asking to
+  // export before any successful build exists.
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
   // Compilation State
   const [compileState, setCompileState] = useState<CompileState>({
     status: 'success',
@@ -286,7 +302,6 @@ export function App() {
   const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isWordCountOpen, setIsWordCountOpen] = useState(false);
-  const [isDoiModalOpen, setIsDoiModalOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isEncryptionModalOpen, setIsEncryptionModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -294,45 +309,120 @@ export function App() {
   // Offline PWA & Airplane mode state
   const [isOffline, setIsOffline] = useState<boolean>(() => !navigator.onLine);
 
-  // Track Changes & Reviewer Suggestions
-  const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([
-    {
-      id: 'change-1',
-      fileId: 'main.tex',
-      type: 'insertion',
-      authorName: 'Dr. Elena Rostova',
-      authorColor: '#10b981',
-      timestamp: '15 mins ago',
-      line: 18,
-      text: '\\cite{rostova2026benchmarks}',
-      status: 'pending',
-    },
-    {
-      id: 'change-2',
-      fileId: 'main.tex',
-      type: 'deletion',
-      authorName: 'Marcus Chen',
-      authorColor: '#f59e0b',
-      timestamp: '30 mins ago',
-      line: 29,
-      text: 'classical heuristics',
-      originalText: 'classical heuristics',
-      status: 'pending',
-    }
-  ]);
+  // Tracked changes start empty — real suggestions come from collaborators via
+  // the collaboration hub, not from fabricated reviewers. (Previously seeded
+  // with changes attributed to people who do not exist.)
+  const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
 
   // Split Pane & Sidebar Layout
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [splitPercent, setSplitPercent] = useState<number>(50);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
 
-  // WebAssembly Overleaf-Parity LaTeX Compilation Engine
-  const wasmCompiler = useLatexCompiler({
-    code: activeFile?.content || '',
-    files,
-    debounceMs: 700,
-    autoCompile: activeFile?.name.endsWith('.tex') ?? false,
-  });
+  // The authoritative layout engine: real pdfLaTeX. Always compiles the
+  // project entry file with every project file mounted, never whichever file
+  // happens to be open in the editor.
+  const texEngineView = useTexEngine({ files });
+
+  // Real SyncTeX index, parsed from the engine's own output. Replaces the
+  // fuzzy source-text search that was previously labelled "SyncTeX".
+  const [syncTexIndex, setSyncTexIndex] = useState<SyncTexIndex | null>(null);
+
+  useEffect(() => {
+    const synctex = texEngineView.outcome?.synctex;
+    if (!synctex) return;
+
+    let cancelled = false;
+    void parseSyncTex(synctex)
+      .then((index) => {
+        if (!cancelled) setSyncTexIndex(index);
+      })
+      .catch(() => {
+        // Without SyncTeX the preview simply loses click-to-source; the
+        // document itself is unaffected, so this is not surfaced as an error.
+        if (!cancelled) setSyncTexIndex(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [texEngineView.outcome?.synctex]);
+
+  // Forward sync: where the editor caret maps to in the compiled page. Only
+  // meaningful once a build with SyncTeX output exists.
+  const forwardTarget = useMemo<ForwardMatch | null>(() => {
+    if (!syncTexIndex || forwardTargetLine === null) return null;
+    return forwardSync(syncTexIndex, activeFile.name, forwardTargetLine);
+  }, [syncTexIndex, forwardTargetLine, activeFile.name]);
+
+  // Inverse sync: a click in the PDF resolves to a file and line via the
+  // engine's own record, so it works inside tables, math, and macro output
+  // where text matching cannot.
+  const handleInverseSync = useCallback(
+    (file: string, line: number) => {
+      const target =
+        files.find(f => f.name === file) ??
+        files.find(f => f.name.endsWith(`/${file}`));
+
+      if (target) {
+        setActiveFileId(target.id);
+        setOpenFileIds(open => (open.includes(target.id) ? open : [...open, target.id]));
+      }
+      setTargetLine(line);
+    },
+    [files],
+  );
+
+  /** First engine error, for compact status surfaces. */
+  const engineErrorSummary = useMemo(() => {
+    const outcome = texEngineView.outcome;
+    if (!outcome || outcome.ok) return null;
+    const firstError = outcome.diagnostics.find(d => d.severity === 'error');
+    if (!firstError) return null;
+    const where = firstError.line ? ` (${firstError.file ?? ''}:${firstError.line})` : '';
+    return `${firstError.message}${where}`;
+  }, [texEngineView.outcome]);
+
+  /**
+   * Switching academic format rewrites the document's `\documentclass` and adds
+   * the packages that class needs, then lets the engine re-typeset.
+   *
+   * This used to set a UI-only preference that restyled an HTML mock without
+   * touching the source, so the "format" shown had no relationship to what
+   * LaTeX would produce. Changing the document is the only version of this
+   * feature that can be correct.
+   */
+  const handleSelectFormat = useCallback((format: PaperFormatId) => {
+    setPaperFormat(format);
+    try {
+      localStorage.setItem('teeex_paper_format', format);
+    } catch {
+      // Losing the remembered choice is harmless.
+    }
+
+    setFiles(prev => {
+      const entry =
+        prev.find(f => f.name.endsWith('.tex') && f.isEntry) ??
+        prev.find(f => f.name === 'main.tex') ??
+        prev.find(f => /\\documentclass/.test(f.content));
+
+      if (!entry) {
+        setToast('No document with a \\documentclass to switch. Add one first.');
+        return prev;
+      }
+
+      const next = applyDocumentClass(entry.content, format);
+      if (next === entry.content) return prev;
+      return prev.map(f => (f.id === entry.id ? { ...f, content: next } : f));
+    });
+
+    // Be honest when a preset's class is not in the bundled set and will pull a
+    // large dependency tree (acmart, sn-jnl): the user has just rewritten their
+    // document to it, so tell them what the next compile will do rather than
+    // letting it silently hang.
+    const notice = formatResolutionNotice(format);
+    if (notice) setToast(notice);
+  }, []);
 
   // Real-Time High-Performance Live Compilation Pipeline
   // Diagnoses LaTeX syntax, parses AST, renders KaTeX/HTML, and measures REAL latency
@@ -361,69 +451,49 @@ export function App() {
   const parsedDoc = liveCompileResult.parsedDoc;
   const renderedHtml = liveCompileResult.renderedHtml;
 
-  // Diagnostics: merge pdfLaTeX WASM diagnostics with instant KaTeX parser diagnostics
+  // Diagnostics: the engine is authoritative about the document, so its
+  // findings lead. The draft parser's checks are kept because they are
+  // available instantly while a compile is still running.
   const diagnostics = useMemo(() => {
     const parserDiags = liveCompileResult.diagnostics;
-    if (!wasmCompiler.result) return parserDiags;
+    const outcome = texEngineView.outcome;
+    if (!outcome || outcome.diagnostics.length === 0) return parserDiags;
 
-    const wasmDiags: Diagnostic[] = wasmCompiler.result.errors.map((err, idx) => ({
-      id: `wasm-err-${idx}`,
-      line: err.line,
+    const engineDiags: Diagnostic[] = outcome.diagnostics.map((item) => ({
+      id: item.id,
+      line: item.line ?? 1,
       column: 1,
-      severity: 'error' as const,
-      message: err.message,
-      rule: 'pdfLaTeX',
-      rawLog: err.sourceContext,
+      severity: item.severity,
+      message: item.hint ? `${item.message} — ${item.hint}` : item.message,
+      rule: item.code,
+      rawLog: item.context ?? item.raw,
     }));
 
-    const wasmWarns: Diagnostic[] = wasmCompiler.result.warnings.map((warn, idx) => ({
-      id: `wasm-warn-${idx}`,
-      line: warn.line,
-      column: 1,
-      severity: 'warning' as const,
-      message: warn.message,
-      rule: 'pdfLaTeX',
-    }));
+    return [...engineDiags, ...parserDiags];
+  }, [liveCompileResult.diagnostics, texEngineView.outcome]);
 
-    return [...wasmDiags, ...wasmWarns, ...parserDiags];
-  }, [liveCompileResult.diagnostics, wasmCompiler.result]);
-
-  // Keep compileState live, accurate and synced with actual engine performance
+  // Compile state reflects the engine, which is the only thing that actually
+  // typesets the document.
   useEffect(() => {
-    if (wasmCompiler.isCompiling) {
-      setCompileState(prev => ({
-        ...prev,
-        status: 'compiling',
-      }));
+    if (texEngineView.isCompiling) {
+      setCompileState(prev => ({ ...prev, status: 'compiling' }));
       return;
     }
 
-    if (wasmCompiler.result) {
-      const errCount = wasmCompiler.result.errors.length;
-      const warnCount = wasmCompiler.result.warnings.length;
-      setCompileState({
-        status: wasmCompiler.result.success ? 'success' : 'error',
-        durationMs: wasmCompiler.result.durationMs,
-        errorCount: errCount,
-        warningCount: warnCount,
-        timestamp: wasmCompiler.lastCompiledAt || new Date().toLocaleTimeString(),
-        rawLogs: wasmCompiler.result.log ? wasmCompiler.result.log.split(/\r?\n/).filter(Boolean) : ['WASM typeset completed.'],
-      });
-      return;
-    }
+    const outcome = texEngineView.outcome;
+    if (!outcome) return;
 
-    const errCount = diagnostics.filter(d => d.severity === 'error').length;
-    const warnCount = diagnostics.filter(d => d.severity === 'warning').length;
-
-    setCompileState(prev => ({
-      ...prev,
-      status: errCount > 0 ? 'error' : 'success',
-      durationMs: liveCompileResult.durationMs,
-      errorCount: errCount,
-      warningCount: warnCount,
-      timestamp: new Date().toLocaleTimeString(),
-    }));
-  }, [wasmCompiler.isCompiling, wasmCompiler.result, wasmCompiler.lastCompiledAt, diagnostics, liveCompileResult.durationMs]);
+    setCompileState({
+      status: outcome.ok ? 'success' : 'error',
+      durationMs: outcome.durationMs,
+      errorCount: outcome.diagnostics.filter(d => d.severity === 'error').length,
+      warningCount: outcome.diagnostics.filter(d => d.severity === 'warning').length,
+      timestamp: texEngineView.lastCompiledAt
+        ? new Date(texEngineView.lastCompiledAt).toLocaleTimeString()
+        : new Date().toLocaleTimeString(),
+      rawLogs: outcome.log ? outcome.log.split(/\r?\n/).filter(Boolean) : [],
+    });
+  }, [texEngineView.isCompiling, texEngineView.outcome, texEngineView.lastCompiledAt]);
 
   // Document Stats
   const wordCount = useMemo(() => {
@@ -436,11 +506,11 @@ export function App() {
     return parsedDoc.mathBlocks.length;
   }, [parsedDoc.mathBlocks]);
 
-  // Run Manual Full Compilation Pass with genuine TeX Live WASM
+  // Run a full typesetting pass immediately, bypassing the edit debounce.
   const triggerCompile = useCallback(() => {
     setCompileState(prev => ({ ...prev, status: 'compiling' }));
-    wasmCompiler.triggerCompile();
-  }, [wasmCompiler]);
+    texEngineView.compile();
+  }, [texEngineView]);
 
   // Real-time Collaboration sync listener
   useEffect(() => {
@@ -565,35 +635,7 @@ export function App() {
     setTrackedChanges(prev => [newChange, ...prev]);
   }, []);
 
-  // DOI BibTeX Citation Importer Handler
-  const handleAddBibtexEntry = useCallback((bibtex: string, key: string) => {
-    setFiles(prev => {
-      const bibFile = prev.find(f => f.name.endsWith('.bib'));
-      if (bibFile) {
-        return prev.map(f => f.id === bibFile.id ? { ...f, content: f.content.trim() + '\n\n' + bibtex } : f);
-      } else {
-        const newBib: ProjectFile = {
-          id: 'references.bib',
-          name: 'references.bib',
-          type: 'bib',
-          content: `% BibTeX References\n\n${bibtex}\n`,
-          isEntry: false,
-        };
-        return [...prev, newBib];
-      }
-    });
-
-    logAuditAction(
-      activeProjectId,
-      'DOCUMENT_UPDATE',
-      `Imported DOI citation @${key} via CrossRef`,
-      currentUser?.fullName || 'Current User',
-      currentRole,
-      'document'
-    );
-
-    setIsDoiModalOpen(false);
-  }, [activeProjectId, currentUser, currentRole]);
+  // Insert the format document handler below.
 
   // Client-Side E2EE Document Encryption Handler
   const handleToggleEncryption = useCallback(async (enabled: boolean, passphrase: string, salt: string) => {
@@ -769,29 +811,26 @@ export function App() {
     setTimeout(() => triggerCompile(), 50);
   }, []);
 
-  // Export pristine publication PDF isolated from IDE UI (uses authentic WASM bytes if available)
+  // Export writes out the exact bytes the engine produced and the preview is
+  // showing. There is no alternative rendering path to fall back to: if no
+  // successful build exists, say so rather than printing an approximation.
   const handleExportPdf = useCallback(() => {
-    if (wasmCompiler.result?.pdfBytes) {
-      const blob = new Blob([wasmCompiler.result.pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${(projectTitle || parsedDoc.title || 'document').replace(/\s+/g, '_')}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+    const bytes = texEngineView.pdf;
+    if (!bytes) {
+      setToast(
+        texEngineView.isCompiling
+          ? 'Still typesetting — the PDF will be ready in a moment.'
+          : 'No successful build to export yet. Fix the errors in the diagnostics panel, then recompile.',
+      );
       return;
     }
 
-    const sheet = document.querySelector('.latex-paper-sheet') as HTMLElement;
-    exportDocumentAsPdf({
-      title: projectTitle || parsedDoc.title || 'LaTeX Document',
-      element: sheet,
-      format: paperFormat,
-      isTwoColumn: isTwoColumn,
-    });
-  }, [wasmCompiler.result?.pdfBytes, projectTitle, parsedDoc.title, paperFormat, isTwoColumn]);
+    try {
+      downloadPdf(bytes, projectTitle || parsedDoc.title || 'document');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'The PDF could not be exported.');
+    }
+  }, [texEngineView.pdf, texEngineView.isCompiling, projectTitle, parsedDoc.title]);
 
   // Export full project as .zip package
   const handleExportZip = () => {
@@ -1019,8 +1058,8 @@ export function App() {
   const handleCreateProject = (title: string, templateId?: string) => {
     const newProj = createProject(
       title,
-      currentUser?.email || 'elena.rostova@teeex.io',
-      currentUser?.fullName || 'Dr. Elena Rostova',
+      currentUser?.email || 'you@teeex.local',
+      currentUser?.fullName || 'You',
       templateId
     );
     setProjects(loadProjects());
@@ -1330,7 +1369,6 @@ export function App() {
         onLockPlatformDev={handleLockPlatformDev}
         isDevDemoActive={isDevDemoActive}
         onToggleDevDemoMode={handleToggleDevDemoMode}
-        onOpenDoiModal={() => setIsDoiModalOpen(true)}
         isEncrypted={!!activeProject?.isEncrypted}
         isOffline={isOffline}
       />
@@ -1438,19 +1476,17 @@ export function App() {
             <PreviewPane
               renderedHtml={renderedHtml}
               parsedDoc={parsedDoc}
-              onJumpToLine={setTargetLine}
-              rawCode={activeFile.content}
-              forwardTargetLine={forwardTargetLine}
-              onClearForwardTargetLine={() => setForwardTargetLine(null)}
-              paperFormat={paperFormat}
-              onFormatChange={setPaperFormat}
-              isTwoColumn={isTwoColumn}
-              onToggleTwoColumn={handleToggleTwoColumn}
-              onExportPdf={handleExportPdf}
-              pdfBytes={wasmCompiler.result?.pdfBytes}
-              isWasmCompiling={wasmCompiler.isCompiling}
-              wasmError={wasmCompiler.result && !wasmCompiler.result.success ? wasmCompiler.result.errors[0]?.message : null}
               documentTitle={projectTitle || parsedDoc.title || 'document'}
+              pdf={texEngineView.pdf}
+              status={texEngineView.status}
+              isCompiling={texEngineView.isCompiling}
+              isStale={texEngineView.isStale}
+              errorSummary={engineErrorSummary}
+              onCompile={triggerCompile}
+              syncTexIndex={syncTexIndex}
+              forwardTarget={forwardTarget}
+              onInverseSync={handleInverseSync}
+              onJumpToLine={setTargetLine}
             />
           </div>
         </div>
@@ -1463,6 +1499,15 @@ export function App() {
         onJumpToLine={setTargetLine}
         rawLogs={compileState.rawLogs}
       />
+
+      {toast && (
+        <div className="app-toast" role="status" aria-live="polite">
+          <span>{toast}</span>
+          <button type="button" onClick={() => setToast(null)} aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Modals: Lazy-loaded on demand with Suspense */}
       <Suspense fallback={null}>
@@ -1593,15 +1638,6 @@ export function App() {
           />
         )}
 
-        {/* DOI 1-Click BibTeX Citation Importer */}
-        {isDoiModalOpen && (
-          <DoiImportModal
-            isOpen={isDoiModalOpen}
-            onClose={() => setIsDoiModalOpen(false)}
-            onAddBibtexEntry={handleAddBibtexEntry}
-          />
-        )}
-
         {/* Client-Side E2EE Document Vault Modal */}
         {isEncryptionModalOpen && (
           <EncryptionModal
@@ -1645,7 +1681,7 @@ export function App() {
             onToggleTwoColumn={handleToggleTwoColumn}
             isTwoColumn={isTwoColumn}
             activeFormat={paperFormat}
-            onSelectFormat={setPaperFormat}
+            onSelectFormat={handleSelectFormat}
             theme={theme}
             onToggleTheme={toggleTheme}
             onExportPdf={handleExportPdf}

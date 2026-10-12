@@ -28,3 +28,25 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Build-provisioned runtime assets.
+# The TeX engine subset (~tens of MB of WASM + TeX Live data) and PDF.js CMaps
+# are fetched by scripts/fetch-engine.mjs and scripts/sync-pdfjs-assets.mjs
+# during prebuild. They are pinned by version, so committing them would just
+# put large binaries in history for no benefit.
+public/core/busytex/
+public/pdfjs/
+
+# Test artifacts
+/test-results/
+/playwright-report/
+/coverage/
+tests/**/__diff__/
+
+# Scratch / debug backups (local experiments, never committed)
+*.before-*
+*.backup
+*.diagnostic-backup
+*.pre-diagnostic-restore
+busytex-test.*
+tmp-busytex-assets/

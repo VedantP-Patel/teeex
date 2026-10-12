@@ -98,37 +98,6 @@ const ACADEMIC_CV_TEX = `\\documentclass{article}
 
 \\end{document}`;
 
-const BEAMER_DECK_TEX = `\\documentclass{beamer}
-
-\\title{Topological Phases of Quantum Matter}
-\\author{Dr. Elena Rostova}
-\\date{October 2026}
-
-\\begin{document}
-
-\\maketitle
-
-\\section{Motivation}
-\\begin{itemize}
-\\item Decoherence presents the primary bottleneck in contemporary quantum computing.
-\\item Topological quantum computation protects quantum information by encoding it non-locally.
-\\end{itemize}
-
-\\section{The Kitaev Honeycomb Model}
-The Hamiltonian of the spin-$1/2$ honeycomb lattice with directional Ising couplings is:
-\\begin{equation}
-H = -J_x \\sum_{x\\text{-links}} \\sigma_j^x \\sigma_k^x - J_y \\sum_{y\\text{-links}} \\sigma_j^y \\sigma_k^y - J_z \\sum_{z\\text{-links}} \\sigma_j^z \\sigma_k^z
-\\end{equation}
-
-\\section{Key Findings}
-\\begin{itemize}
-\\item Exact solution via representation in terms of four Majorana fermions per site.
-\\item Emergence of a gapped $Z_2$ spin liquid phase with Abelian anyons.
-\\item Introduction of magnetic fields produces non-Abelian Ising anyons with chiral Majorana edge modes.
-\\end{itemize}
-
-\\end{document}`;
-
 export const STARTER_TEMPLATES: Template[] = [
   {
     id: 'ieee-conference',
@@ -165,22 +134,6 @@ export const STARTER_TEMPLATES: Template[] = [
         type: 'tex',
         isEntry: true,
         content: ACADEMIC_CV_TEX,
-      }
-    ]
-  },
-  {
-    id: 'beamer-presentation',
-    name: 'Academic Presentation Deck',
-    category: 'Presentation',
-    description: 'Slide-deck layout for research talks, defense presentations, and conferences.',
-    badge: 'Presentation',
-    files: [
-      {
-        id: 'main.tex',
-        name: 'main.tex',
-        type: 'tex',
-        isEntry: true,
-        content: BEAMER_DECK_TEX,
       }
     ]
   }

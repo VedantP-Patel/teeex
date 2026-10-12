@@ -1,29 +1,46 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
   worker: {
-    // Use ES module format for workers to allow modern imports
     format: 'es',
   },
   optimizeDeps: {
-    // Exclude texlyre-busytex from pre-bundling — it serves WASM assets
+    /**
+     * Both of these ship their own workers and WASM and resolve sibling assets
+     * at runtime; dependency pre-bundling rewrites those paths and breaks the
+     * lookups.
+     */
     exclude: ['texlyre-busytex', 'pdfjs-dist'],
   },
-  server: {
-    proxy: {
-      '/core/busytex': {
-        target: 'https://texlyre.github.io/texlyre-busytex/core/busytex',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/core\/busytex/, ''),
-      },
+  /**
+   * The TeX engine (`/core/busytex/*`) and PDF.js CMaps (`/pdfjs/*`) are served
+   * from `public/`, provisioned by the prebuild scripts.
+   *
+   * There is deliberately no dev proxy to a third-party host here. The engine's
+   * Web Worker must be same-origin — browsers refuse cross-origin worker
+   * scripts — so proxying was the only way to use a remote origin, and it made
+   * local development depend on someone else's GitHub Pages site staying up at
+   * an exact path. Self-hosting a version-pinned subset removes that.
+   */
+  assetsInclude: ['**/*.wasm'],
+  /**
+   * Mirror the production Content-Security-Policy (vercel.json) on `vite
+   * preview` so the built app is served under the same policy it will face in
+   * production, and CSP breakage is caught here rather than after deploy. NOT
+   * applied to the dev server, whose HMR needs inline scripts the prod policy
+   * forbids. Keep this string in sync with vercel.json.
+   */
+  preview: {
+    headers: {
+      'Content-Security-Policy':
+        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob: https://texlive2026.texlyre.org https://*.supabase.co wss://*.supabase.co https://fonts.googleapis.com https://fonts.gstatic.com; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
     },
   },
-  assetsInclude: ['**/*.wasm'],
   define: {
-    // Automatically map Vercel's native Supabase integration environment variables
+    // Map Vercel's native Supabase integration variables, which are not
+    // VITE_-prefixed and so are not picked up by Vite's own env handling.
     'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(
       process.env.VITE_SUPABASE_URL ||
       process.env.SUPABASE_URL ||

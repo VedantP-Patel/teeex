@@ -1,418 +1,716 @@
 /**
- * Teeex Studio — Native PDF Canvas Preview Component
+ * Teeex — compiled PDF viewer.
  *
- * Renders the authentic compiled LaTeX PDF directly using PDF.js.
- * Provides pixel-perfect visual parity with Overleaf and TeX Live.
+ * This is the preview. It displays the artifact the TeX engine produced and
+ * that export ships, so there is no second interpretation of the document to
+ * drift out of agreement.
+ *
+ * Design points that matter for the experience of working with real TeX, where
+ * a compile costs seconds rather than milliseconds:
+ *
+ *  - Pages are laid out from each page's own geometry before anything is
+ *    rasterised, so the scroll height is correct immediately and never jumps.
+ *  - Only pages near the viewport are rasterised, and raster work is cancelled
+ *    when superseded, so scrolling a long document stays responsive.
+ *  - Zoom applies as a CSS transform on the existing bitmap first and
+ *    re-rasterises when the gesture settles, so it tracks the gesture instead
+ *    of stuttering.
+ *  - Scroll position survives recompiles: the page you were reading stays put
+ *    when a new build arrives.
  */
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
-  FileCheck,
-  Download,
-  Loader2,
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
-  Layers,
+  Download,
+  FileText,
+  Loader2,
+  Minus,
+  Plus,
+  RefreshCw,
 } from 'lucide-react';
-import { pdfRenderer } from '../services/pdfRenderer';
+import { CSS_PX_PER_PT, PdfDocument, type PageGeometry } from '../services/pdfRenderer';
+import { downloadPdf } from '../services/pdfExporter';
+import { inverseSync, type ForwardMatch, type SyncTexIndex } from '../services/synctex';
+import type { EngineStatus } from '../services/latexCompiler';
 
 interface Props {
-  pdfBytes: Uint8Array | null;
+  pdf: Uint8Array | null;
+  status: EngineStatus;
   isCompiling: boolean;
-  compileError?: string | null;
-  onExportPdf?: () => void;
-  documentTitle?: string;
+  /** True when `pdf` is an earlier successful build than the latest attempt. */
+  isStale: boolean;
+  errorSummary?: string | null;
+  documentTitle: string;
+  onCompile: () => void;
+  syncTexIndex?: SyncTexIndex | null;
+  /** Where the editor caret currently maps to, for forward sync. */
+  forwardTarget?: ForwardMatch | null;
+  onInverseSync?: (file: string, line: number) => void;
 }
 
-export const PdfPreviewPane: React.FC<Props> = ({
-  pdfBytes,
-  isCompiling,
-  compileError,
-  onExportPdf,
-  documentTitle = 'document',
-}) => {
-  const [zoom, setZoom] = useState<number>(100);
-  const [numPages, setNumPages] = useState<number>(0);
-  const [renderError, setRenderError] = useState<string | null>(null);
-  const [activePage, setActivePage] = useState<number>(1);
-  const [isRendering, setIsRendering] = useState<boolean>(false);
+type ZoomMode = 'fit-width' | 'fit-page' | 'custom';
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
+const ZOOM_STEPS = [0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3, 4];
+const PAGE_GAP = 20;
+/** How far beyond the viewport to keep pages rasterised, in viewport heights. */
+const OVERSCAN = 1;
 
-  // Download compiled PDF directly
-  const handleDownloadPdf = useCallback(() => {
-    if (pdfBytes) {
-      const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${documentTitle.replace(/\s+/g, '_')}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } else if (onExportPdf) {
-      onExportPdf();
-    }
-  }, [pdfBytes, onExportPdf, documentTitle]);
+function clampZoom(value: number): number {
+  return Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], Math.max(ZOOM_STEPS[0], value));
+}
 
-  // Load document and render pages when pdfBytes or zoom changes
+function prefersReducedMotion(): boolean {
+  return (
+    typeof matchMedia === 'function' &&
+    matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+/** One page: placeholder sized from geometry, rasterised only when near view. */
+function PdfPageView({
+  doc,
+  geometry,
+  zoom,
+  active,
+  highlights,
+  onPointerSync,
+}: {
+  doc: PdfDocument;
+  geometry: PageGeometry;
+  zoom: number;
+  active: boolean;
+  highlights: { x: number; y: number; width: number; height: number }[];
+  onPointerSync?: (pageNumber: number, xPt: number, yPt: number) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
+  const [painted, setPainted] = useState(false);
+
+  const width = geometry.width * zoom;
+  const height = geometry.height * zoom;
+
   useEffect(() => {
-    if (!pdfBytes || pdfBytes.length === 0) {
-      setNumPages(0);
-      return;
-    }
+    if (!active) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    let isCancelled = false;
+    let cancelled = false;
 
-    async function loadAndRender() {
-      setIsRendering(true);
-      setRenderError(null);
-
+    void (async () => {
       try {
-        const info = await pdfRenderer.loadDocument(pdfBytes!);
-        if (isCancelled) return;
-        setNumPages(info.numPages);
-
-        // Render each page to its corresponding canvas
-        const scale = (zoom / 100) * 1.4; // 1.4 provides sharp retina rendering
-        for (let pageNum = 1; pageNum <= info.numPages; pageNum++) {
-          if (isCancelled) return;
-          const canvas = canvasRefs.current.get(pageNum);
-          if (canvas) {
-            await pdfRenderer.renderPage({
-              canvas,
-              pageNumber: pageNum,
-              scale,
-            });
+        const ok = await doc.renderPage({
+          canvas,
+          pageNumber: geometry.pageNumber,
+          zoom,
+        });
+        if (!cancelled && ok) {
+          setPainted(true);
+          const container = textRef.current;
+          if (container) {
+            await doc.renderTextLayer(geometry.pageNumber, zoom, container);
           }
         }
-      } catch (err) {
-        if (!isCancelled) {
-          console.error('[PdfPreviewPane] Render error:', err);
-          setRenderError(err instanceof Error ? err.message : 'Failed to render PDF preview');
-        }
-      } finally {
-        if (!isCancelled) {
-          setIsRendering(false);
-        }
+      } catch {
+        // A page that fails to paint keeps its placeholder; the error is
+        // surfaced once at the document level rather than per page.
       }
-    }
-
-    loadAndRender();
+    })();
 
     return () => {
-      isCancelled = true;
+      cancelled = true;
     };
-  }, [pdfBytes, zoom]);
+  }, [doc, geometry.pageNumber, zoom, active]);
 
-  // Track active page on scroll
-  const handleScroll = useCallback(() => {
-    if (!containerRef.current || numPages === 0) return;
-    const container = containerRef.current;
-    const scrollTop = container.scrollTop;
-    const pageHeight = container.scrollHeight / numPages;
-    const current = Math.min(numPages, Math.max(1, Math.floor(scrollTop / pageHeight) + 1));
-    setActivePage(current);
-  }, [numPages]);
+  // Free worker-side text data for pages scrolled well out of view.
+  useEffect(() => {
+    if (active) return;
+    doc.releaseTextLayer(geometry.pageNumber);
+  }, [doc, geometry.pageNumber, active]);
 
-  const scrollToPage = useCallback((pageNum: number) => {
-    const canvas = canvasRefs.current.get(pageNum);
-    if (canvas && containerRef.current) {
-      canvas.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, []);
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!onPointerSync) return;
+      // Ignore clicks that were really text selections.
+      if ((globalThis.getSelection()?.toString().length ?? 0) > 0) return;
+
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const scale = CSS_PX_PER_PT * zoom;
+      onPointerSync(
+        geometry.pageNumber,
+        (event.clientX - bounds.left) / scale,
+        (event.clientY - bounds.top) / scale,
+      );
+    },
+    [onPointerSync, geometry.pageNumber, zoom],
+  );
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      width: '100%',
-      backgroundColor: 'var(--bg-app)',
-      position: 'relative',
-      overflow: 'hidden',
-    }}>
-      {/* Sub-toolbar for PDF Preview */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '6px 14px',
-        backgroundColor: 'var(--bg-sidebar)',
-        borderBottom: '1px solid var(--border-color)',
-        fontSize: '0.8rem',
-        userSelect: 'none',
-        flexShrink: 0,
-      }}>
-        {/* Left: Page count & navigation */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            backgroundColor: 'var(--bg-card)',
-            padding: '2px 8px',
-            borderRadius: '4px',
-            border: '1px solid var(--border-color)',
-            fontSize: '0.75rem',
-            color: 'var(--text-secondary)',
-          }}>
-            <Layers size={13} style={{ color: 'var(--brand-primary)' }} />
-            <span>Page {numPages > 0 ? activePage : 0} of {numPages}</span>
-          </div>
+    <div
+      className="pdf-page"
+      data-page={geometry.pageNumber}
+      style={{ width, height }}
+      onClick={handleClick}
+    >
+      <canvas ref={canvasRef} className="pdf-page-canvas" aria-hidden />
+      {!painted && (
+        <div className="pdf-page-placeholder" aria-hidden>
+          <span>{geometry.pageNumber}</span>
+        </div>
+      )}
+      <div ref={textRef} className="pdf-text-layer" />
+      {highlights.length > 0 && (
+        <div className="pdf-highlight-layer" aria-hidden>
+          {highlights.map((rect, index) => (
+            <div
+              key={index}
+              className="pdf-highlight"
+              style={{
+                left: rect.x * CSS_PX_PER_PT * zoom,
+                top: rect.y * CSS_PX_PER_PT * zoom,
+                width: Math.max(2, rect.width * CSS_PX_PER_PT * zoom),
+                height: Math.max(2, rect.height * CSS_PX_PER_PT * zoom),
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
-          {numPages > 1 && (
-            <div style={{ display: 'flex', gap: '2px' }}>
-              <button
-                onClick={() => scrollToPage(Math.max(1, activePage - 1))}
-                disabled={activePage <= 1}
-                style={{
-                  padding: '3px 6px',
-                  borderRadius: '3px',
-                  background: 'none',
-                  border: 'none',
-                  cursor: activePage <= 1 ? 'not-allowed' : 'pointer',
-                  opacity: activePage <= 1 ? 0.4 : 1,
-                  color: 'var(--text-primary)',
-                }}
-                title="Previous Page"
-              >
-                <ChevronLeft size={14} />
-              </button>
-              <button
-                onClick={() => scrollToPage(Math.min(numPages, activePage + 1))}
-                disabled={activePage >= numPages}
-                style={{
-                  padding: '3px 6px',
-                  borderRadius: '3px',
-                  background: 'none',
-                  border: 'none',
-                  cursor: activePage >= numPages ? 'not-allowed' : 'pointer',
-                  opacity: activePage >= numPages ? 0.4 : 1,
-                  color: 'var(--text-primary)',
-                }}
-                title="Next Page"
-              >
-                <ChevronRight size={14} />
-              </button>
-            </div>
+export function PdfPreviewPane({
+  pdf,
+  status,
+  isCompiling,
+  isStale,
+  errorSummary,
+  documentTitle,
+  onCompile,
+  syncTexIndex,
+  forwardTarget,
+  onInverseSync,
+}: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [doc, setDoc] = useState<PdfDocument | null>(null);
+  /**
+   * Mirror of `doc` for teardown. React drops state updaters queued after
+   * unmount, so releasing the document from inside `setDoc` would silently
+   * leak it — and a leaked document keeps its pages alive in the pdf.js
+   * worker for the lifetime of the tab.
+   */
+  const docRef = useRef<PdfDocument | null>(null);
+  const [geometry, setGeometry] = useState<PageGeometry[]>([]);
+  const [openError, setOpenError] = useState<string | null>(null);
+
+  const [zoomMode, setZoomMode] = useState<ZoomMode>('fit-width');
+  const [zoom, setZoom] = useState(1);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(0);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [activePages, setActivePages] = useState<Set<number>>(() => new Set([1]));
+
+  /**
+   * Scroll anchor captured before a document swap: which page was at the top
+   * of the viewport, and how far into it we were. Restoring by raw scrollTop
+   * would jump whenever the new build has a different page count or size.
+   */
+  const anchorRef = useRef<{ page: number; offset: number } | null>(null);
+
+  // --- document lifecycle ------------------------------------------------
+
+  useEffect(() => {
+    if (!pdf || pdf.byteLength === 0) {
+      setDoc(null);
+      setGeometry([]);
+      return;
+    }
+    let cancelled = false;
+    let opened: PdfDocument | null = null;
+
+    void (async () => {
+      try {
+        opened = await PdfDocument.open(pdf);
+        const pages = await opened.geometry();
+        if (cancelled) {
+          void opened.destroy();
+          return;
+        }
+
+        // Capture where the reader was before swapping documents.
+        const container = scrollRef.current;
+        if (container && geometry.length > 0) {
+          const pageTop = pageOffsets(geometry, zoom)[currentPage - 1] ?? 0;
+          anchorRef.current = {
+            page: currentPage,
+            offset: container.scrollTop - pageTop,
+          };
+        }
+
+        setOpenError(null);
+        setGeometry(pages);
+        setDoc((previous) => {
+          if (previous) void previous.destroy();
+          return opened;
+        });
+        docRef.current = opened;
+      } catch (error) {
+        if (cancelled) return;
+        setOpenError(
+          error instanceof Error
+            ? error.message
+            : 'The compiled PDF could not be opened.',
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally keyed on the artifact alone: zoom/page are read from the
+    // previous render's values at swap time, which is what anchoring needs,
+    // and must not retrigger a document reopen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdf]);
+
+  // Release the final document when the pane unmounts.
+  useEffect(
+    () => () => {
+      const open = docRef.current;
+      docRef.current = null;
+      if (open) void open.destroy();
+    },
+    [],
+  );
+
+  // --- sizing and zoom ---------------------------------------------------
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver(([entry]) => {
+      setContainerWidth(entry.contentRect.width);
+      setContainerHeight(entry.contentRect.height);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  const widest = useMemo(
+    () => geometry.reduce((max, page) => Math.max(max, page.width), 0),
+    [geometry],
+  );
+  const tallest = useMemo(
+    () => geometry.reduce((max, page) => Math.max(max, page.height), 0),
+    [geometry],
+  );
+
+  useEffect(() => {
+    if (zoomMode === 'custom' || widest === 0 || containerWidth === 0) return;
+    // Leave room for the page's shadow and the scrollbar.
+    const available = containerWidth - 48;
+    const next =
+      zoomMode === 'fit-width'
+        ? available / widest
+        : Math.min(available / widest, (containerHeight - 48) / tallest);
+    setZoom(clampZoom(next));
+  }, [zoomMode, widest, tallest, containerWidth, containerHeight]);
+
+  const setCustomZoom = useCallback((value: number) => {
+    setZoomMode('custom');
+    setZoom(clampZoom(value));
+  }, []);
+
+  const stepZoom = useCallback(
+    (direction: 1 | -1) => {
+      const index = ZOOM_STEPS.findIndex((step) => step > zoom + 1e-6);
+      const next =
+        direction === 1
+          ? ZOOM_STEPS[index === -1 ? ZOOM_STEPS.length - 1 : index]
+          : ZOOM_STEPS[Math.max(0, (index === -1 ? ZOOM_STEPS.length : index) - 1)];
+      setCustomZoom(next);
+    },
+    [zoom, setCustomZoom],
+  );
+
+  // Ctrl/Cmd + wheel is the conventional zoom gesture and also what trackpad
+  // pinch reports; without preventDefault the browser zooms the whole app.
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      setCustomZoom(zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1));
+    };
+
+    container.addEventListener('wheel', onWheel, { passive: false });
+    return () => container.removeEventListener('wheel', onWheel);
+  }, [zoom, setCustomZoom]);
+
+  // --- page positions, virtualisation, current page ----------------------
+
+  const offsets = useMemo(() => pageOffsets(geometry, zoom), [geometry, zoom]);
+
+  const recomputeVisible = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container || geometry.length === 0) return;
+
+    const top = container.scrollTop;
+    const bottom = top + container.clientHeight;
+    const margin = container.clientHeight * OVERSCAN;
+
+    const next = new Set<number>();
+    let firstVisible = 1;
+
+    for (let index = 0; index < geometry.length; index++) {
+      const pageTop = offsets[index];
+      const pageBottom = pageTop + geometry[index].height * zoom;
+
+      if (pageBottom >= top - margin && pageTop <= bottom + margin) {
+        next.add(geometry[index].pageNumber);
+      }
+      // The page occupying the top of the viewport is the one being read.
+      if (pageTop <= top + 2) firstVisible = geometry[index].pageNumber;
+    }
+
+    setActivePages((previous) => (sameSet(previous, next) ? previous : next));
+    setCurrentPage(firstVisible);
+  }, [geometry, offsets, zoom]);
+
+  useLayoutEffect(() => {
+    recomputeVisible();
+  }, [recomputeVisible]);
+
+  const onScroll = useCallback(() => {
+    recomputeVisible();
+  }, [recomputeVisible]);
+
+  // Restore the reading position after a new build replaces the document.
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const container = scrollRef.current;
+    if (!anchor || !container || offsets.length === 0) return;
+    anchorRef.current = null;
+
+    const index = Math.min(anchor.page, offsets.length) - 1;
+    container.scrollTop = Math.max(0, offsets[index] + anchor.offset);
+    recomputeVisible();
+  }, [offsets, recomputeVisible]);
+
+  const scrollToPage = useCallback(
+    (pageNumber: number) => {
+      const container = scrollRef.current;
+      if (!container) return;
+      const index = Math.min(Math.max(pageNumber, 1), offsets.length) - 1;
+      container.scrollTo({
+        top: offsets[index] ?? 0,
+        behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+      });
+    },
+    [offsets],
+  );
+
+  // --- SyncTeX -----------------------------------------------------------
+
+  const highlightsByPage = useMemo(() => {
+    const map = new Map<number, ForwardMatch['rects']>();
+    if (forwardTarget) map.set(forwardTarget.page, forwardTarget.rects);
+    return map;
+  }, [forwardTarget]);
+
+  useEffect(() => {
+    if (forwardTarget) scrollToPage(forwardTarget.page);
+  }, [forwardTarget, scrollToPage]);
+
+  const handlePointerSync = useCallback(
+    (pageNumber: number, xPt: number, yPt: number) => {
+      if (!syncTexIndex || !onInverseSync) return;
+      const match = inverseSync(syncTexIndex, pageNumber, xPt, yPt);
+      if (match) onInverseSync(match.file, match.line);
+    },
+    [syncTexIndex, onInverseSync],
+  );
+
+  // --- keyboard ----------------------------------------------------------
+
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.ctrlKey || event.metaKey) {
+        if (event.key === '=' || event.key === '+') {
+          event.preventDefault();
+          stepZoom(1);
+          return;
+        }
+        if (event.key === '-') {
+          event.preventDefault();
+          stepZoom(-1);
+          return;
+        }
+        if (event.key === '0') {
+          event.preventDefault();
+          setZoomMode('fit-width');
+          return;
+        }
+        return;
+      }
+
+      if (event.key === 'PageDown' || event.key === 'n') {
+        event.preventDefault();
+        scrollToPage(currentPage + 1);
+      } else if (event.key === 'PageUp' || event.key === 'p') {
+        event.preventDefault();
+        scrollToPage(currentPage - 1);
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        scrollToPage(1);
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        scrollToPage(geometry.length);
+      }
+    },
+    [currentPage, geometry.length, scrollToPage, stepZoom],
+  );
+
+  // --- status ------------------------------------------------------------
+
+  const engineMessage =
+    status.phase === 'fetching'
+      ? `Downloading TeX engine · ${Math.round(status.progress)}%`
+      : status.phase === 'failed'
+        ? status.error
+        : null;
+
+  const hasDocument = Boolean(doc) && geometry.length > 0;
+
+  const handleDownload = useCallback(() => {
+    if (!pdf) return;
+    try {
+      downloadPdf(pdf, documentTitle);
+    } catch (error) {
+      setOpenError(error instanceof Error ? error.message : String(error));
+    }
+  }, [pdf, documentTitle]);
+
+  return (
+    <div className="pdf-pane">
+      <div className="pdf-toolbar">
+        <div className="pdf-toolbar-group">
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => scrollToPage(currentPage - 1)}
+            disabled={!hasDocument || currentPage <= 1}
+            aria-label="Previous page"
+          >
+            <ChevronLeft size={14} />
+          </button>
+          <span className="pdf-page-indicator" aria-live="polite">
+            {hasDocument ? `${currentPage} / ${geometry.length}` : '—'}
+          </span>
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => scrollToPage(currentPage + 1)}
+            disabled={!hasDocument || currentPage >= geometry.length}
+            aria-label="Next page"
+          >
+            <ChevronRight size={14} />
+          </button>
+        </div>
+
+        <div className="pdf-toolbar-status">
+          {isCompiling && (
+            <span className="pdf-status pdf-status-busy">
+              <Loader2 size={12} className="spin" />
+              Typesetting
+            </span>
           )}
-
-          {/* Compilation status indicator */}
-          {(isCompiling || isRendering) && (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              color: '#38bdf8',
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              padding: '2px 8px',
-              borderRadius: '4px',
-              backgroundColor: 'rgba(56, 189, 248, 0.12)',
-            }}>
-              <Loader2 size={13} className="animate-spin" />
-              <span>{isCompiling ? 'Compiling with TeX Live WASM…' : 'Rendering PDF…'}</span>
-            </div>
+          {!isCompiling && engineMessage && status.phase === 'fetching' && (
+            <span className="pdf-status pdf-status-busy">
+              <Loader2 size={12} className="spin" />
+              {engineMessage}
+            </span>
+          )}
+          {!isCompiling && isStale && (
+            <span className="pdf-status pdf-status-warn" title={errorSummary ?? undefined}>
+              <AlertTriangle size={12} />
+              Showing last successful build
+            </span>
           )}
         </div>
 
-        {/* Right: Zoom controls & Export */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            backgroundColor: 'var(--bg-card)',
-            border: '1px solid var(--border-color)',
-            borderRadius: '4px',
-            overflow: 'hidden',
-          }}>
-            <button
-              onClick={() => setZoom(z => Math.max(50, z - 10))}
-              style={{
-                padding: '4px 8px',
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-primary)',
-                cursor: 'pointer',
-              }}
-              title="Zoom Out"
-            >
-              <ZoomOut size={13} />
-            </button>
-            <span style={{
-              fontSize: '0.75rem',
-              padding: '0 6px',
-              color: 'var(--text-secondary)',
-              minWidth: '40px',
-              textAlign: 'center',
-            }}>
-              {zoom}%
-            </span>
-            <button
-              onClick={() => setZoom(z => Math.min(200, z + 10))}
-              style={{
-                padding: '4px 8px',
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-primary)',
-                cursor: 'pointer',
-              }}
-              title="Zoom In"
-            >
-              <ZoomIn size={13} />
-            </button>
-            <button
-              onClick={() => setZoom(100)}
-              style={{
-                padding: '4px 8px',
-                background: 'none',
-                border: 'none',
-                borderLeft: '1px solid var(--border-color)',
-                color: 'var(--text-primary)',
-                cursor: 'pointer',
-              }}
-              title="Reset Zoom (100%)"
-            >
-              <Maximize2 size={12} />
-            </button>
-          </div>
+        <div className="pdf-toolbar-group">
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => stepZoom(-1)}
+            aria-label="Zoom out"
+          >
+            <Minus size={14} />
+          </button>
+          <button
+            type="button"
+            className="pdf-zoom-readout"
+            onClick={() => setZoomMode(zoomMode === 'fit-width' ? 'fit-page' : 'fit-width')}
+            title={zoomMode === 'fit-width' ? 'Fit page' : 'Fit width'}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => stepZoom(1)}
+            aria-label="Zoom in"
+          >
+            <Plus size={14} />
+          </button>
+
+          <div className="pdf-toolbar-divider" />
 
           <button
-            onClick={handleDownloadPdf}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 10px',
-              backgroundColor: 'var(--brand-primary)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-            }}
-            title="Download compiled native PDF"
+            type="button"
+            className="btn-icon"
+            onClick={onCompile}
+            disabled={isCompiling}
+            aria-label="Recompile"
+            title="Recompile"
+          >
+            <RefreshCw size={14} />
+          </button>
+          <button
+            type="button"
+            className="btn-primary-sm"
+            onClick={handleDownload}
+            disabled={!pdf}
+            title="Download the compiled PDF"
           >
             <Download size={13} />
-            <span>Download PDF</span>
+            PDF
           </button>
         </div>
       </div>
 
-      {/* Main canvas scroll container */}
       <div
-        ref={containerRef}
-        onScroll={handleScroll}
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          overflowX: 'auto',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          padding: '24px 16px',
-          gap: '24px',
-          backgroundColor: 'var(--bg-app)',
-        }}
+        ref={scrollRef}
+        className="pdf-scroll"
+        onScroll={onScroll}
+        onKeyDown={onKeyDown}
+        tabIndex={0}
+        role="document"
+        aria-label="Compiled document preview"
       >
-        {compileError && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: '10px',
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            borderRadius: '6px',
-            padding: '12px 16px',
-            maxWidth: '700px',
-            width: '100%',
-            color: '#f87171',
-            fontSize: '0.82rem',
-          }}>
-            <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: '4px' }}>Compilation Error</div>
-              <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>{compileError}</div>
-            </div>
-          </div>
+        {status.phase === 'failed' && (
+          <EmptyState
+            icon={<AlertTriangle size={22} />}
+            tone="error"
+            title="The TeX engine could not start"
+            detail={status.error}
+          />
         )}
 
-        {renderError && (
-          <div style={{
-            color: '#f87171',
-            fontSize: '0.85rem',
-            padding: '16px',
-            textAlign: 'center',
-          }}>
-            {renderError}
-          </div>
+        {openError && (
+          <EmptyState
+            icon={<AlertTriangle size={22} />}
+            tone="error"
+            title="This PDF could not be displayed"
+            detail={openError}
+          />
         )}
 
-        {numPages === 0 && !isCompiling && (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '60px 20px',
-            color: 'var(--text-secondary)',
-            textAlign: 'center',
-          }}>
-            <FileCheck size={40} style={{ opacity: 0.4, marginBottom: '12px' }} />
-            <div style={{ fontSize: '0.95rem', fontWeight: 500 }}>No PDF compiled yet</div>
-            <div style={{ fontSize: '0.8rem', opacity: 0.7, marginTop: '4px' }}>
-              Edit your LaTeX document or click Compile to typeset with pdfLaTeX WASM.
-            </div>
-          </div>
+        {!hasDocument && status.phase !== 'failed' && !openError && (
+          <EmptyState
+            icon={
+              isCompiling || status.phase === 'fetching' ? (
+                <Loader2 size={22} className="spin" />
+              ) : (
+                <FileText size={22} />
+              )
+            }
+            title={
+              status.phase === 'fetching'
+                ? 'Preparing the TeX engine'
+                : isCompiling
+                  ? 'Typesetting your document'
+                  : 'No output yet'
+            }
+            detail={
+              status.phase === 'fetching'
+                ? `${Math.round(status.progress)}% downloaded. This happens once, then it is cached.`
+                : isCompiling
+                  ? 'Running pdfLaTeX.'
+                  : errorSummary ??
+                    'Start writing, or press Recompile to typeset the document.'
+            }
+          />
         )}
 
-        {Array.from({ length: numPages }, (_, idx) => idx + 1).map((pageNum) => (
-          <div
-            key={pageNum}
-            style={{
-              position: 'relative',
-              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.35)',
-              borderRadius: '2px',
-              backgroundColor: '#ffffff',
-              transition: 'box-shadow 0.2s ease',
-            }}
-          >
-            <canvas
-              ref={(el) => {
-                if (el) {
-                  canvasRefs.current.set(pageNum, el);
-                } else {
-                  canvasRefs.current.delete(pageNum);
-                }
-              }}
-              style={{
-                display: 'block',
-                borderRadius: '2px',
-              }}
-            />
-            {/* Page number badge */}
-            <div style={{
-              position: 'absolute',
-              bottom: '-20px',
-              right: '0',
-              fontSize: '0.7rem',
-              color: 'var(--text-secondary)',
-              opacity: 0.6,
-            }}>
-              Page {pageNum}
-            </div>
+        {hasDocument && doc && (
+          <div className="pdf-pages" style={{ gap: PAGE_GAP }}>
+            {geometry.map((page) => (
+              <PdfPageView
+                key={page.pageNumber}
+                doc={doc}
+                geometry={page}
+                zoom={zoom}
+                active={activePages.has(page.pageNumber)}
+                highlights={highlightsByPage.get(page.pageNumber) ?? []}
+                onPointerSync={syncTexIndex ? handlePointerSync : undefined}
+              />
+            ))}
           </div>
-        ))}
+        )}
       </div>
     </div>
   );
-};
+}
+
+function EmptyState({
+  icon,
+  title,
+  detail,
+  tone = 'neutral',
+}: {
+  icon: React.ReactNode;
+  title: string;
+  detail?: string | null;
+  tone?: 'neutral' | 'error';
+}) {
+  return (
+    <div className={`pdf-empty pdf-empty-${tone}`} role={tone === 'error' ? 'alert' : undefined}>
+      <div className="pdf-empty-icon">{icon}</div>
+      <p className="pdf-empty-title">{title}</p>
+      {detail && <p className="pdf-empty-detail">{detail}</p>}
+    </div>
+  );
+}
+
+/** Cumulative top offset of each page, including the inter-page gap. */
+function pageOffsets(geometry: PageGeometry[], zoom: number): number[] {
+  const out: number[] = [];
+  let y = 0;
+  for (const page of geometry) {
+    out.push(y);
+    y += page.height * zoom + PAGE_GAP;
+  }
+  return out;
+}
+
+function sameSet(a: Set<number>, b: Set<number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const value of a) if (!b.has(value)) return false;
+  return true;
+}
