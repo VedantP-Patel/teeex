@@ -178,7 +178,6 @@ export class TexEngineService {
       // fetched per-file from the remote endpoint at compile time.
       preloadDataPackages: [
         `${ENGINE_BASE_PATH}/texlive-basic.js`,
-        `${ENGINE_BASE_PATH}/texlive-recommended.js`,
       ],
       catalogDataPackages: [],
       onDownloadProgress: ({ percent }) => {

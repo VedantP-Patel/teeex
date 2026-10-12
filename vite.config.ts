@@ -25,17 +25,37 @@ export default defineConfig({
    * an exact path. Self-hosting a version-pinned subset removes that.
    */
   assetsInclude: ['**/*.wasm'],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/katex')) {
+            return 'katex';
+          }
+          if (id.includes('node_modules/@supabase')) {
+            return 'supabase';
+          }
+          if (id.includes('node_modules/lucide-react')) {
+            return 'lucide';
+          }
+          if (id.includes('src/services/latexParser') || id.includes('src/services/visualLatexParser')) {
+            return 'latex-parsers';
+          }
+        },
+      },
+    },
+  },
   /**
-   * Mirror the production Content-Security-Policy (vercel.json) on `vite
+   * Mirror the production Content-Security-Policy (vercel.json / _headers) on `vite
    * preview` so the built app is served under the same policy it will face in
    * production, and CSP breakage is caught here rather than after deploy. NOT
    * applied to the dev server, whose HMR needs inline scripts the prod policy
-   * forbids. Keep this string in sync with vercel.json.
+   * forbids. Keep this string in sync with vercel.json and _headers.
    */
   preview: {
     headers: {
       'Content-Security-Policy':
-        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob: https://texlive2026.texlyre.org https://*.supabase.co wss://*.supabase.co https://fonts.googleapis.com https://fonts.gstatic.com; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
+        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob: https://texlive2026.texlyre.org https://*.railway.app https://*.up.railway.app https://*.onrender.com https://*.fly.dev https://*.supabase.co wss://*.supabase.co https://fonts.googleapis.com https://fonts.gstatic.com; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
     },
   },
   define: {

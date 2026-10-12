@@ -6,12 +6,18 @@
 
 import type { ProjectFile } from '../types/latex';
 
+const MAX_DATA_URL_CACHE = 100;
+const dataUrlCache = new Map<string, Uint8Array>();
+
 /**
  * Converts a base64 Data URL or raw base64 string to a raw Uint8Array binary buffer.
  * Strips any MIME prefix (e.g. data:image/png;base64,) and validates headers.
  */
 export function dataUrlToUint8Array(dataUrl: string): Uint8Array {
   if (!dataUrl) return new Uint8Array(0);
+  const cached = dataUrlCache.get(dataUrl);
+  if (cached) return cached;
+
   const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
   try {
     const binary = atob(base64.trim());
@@ -19,6 +25,11 @@ export function dataUrlToUint8Array(dataUrl: string): Uint8Array {
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i);
     }
+    if (dataUrlCache.size >= MAX_DATA_URL_CACHE) {
+      const firstKey = dataUrlCache.keys().next().value;
+      if (firstKey) dataUrlCache.delete(firstKey);
+    }
+    dataUrlCache.set(dataUrl, bytes);
     return bytes;
   } catch (err) {
     console.error('Failed to decode dataUrl to Uint8Array:', err);
@@ -87,7 +98,7 @@ export function mountVirtualTeXFileSystem(files: ProjectFile[]): Map<string, Vir
         path: file.name,
         isBinary: false,
         content: file.content || '',
-        sizeBytes: new TextEncoder().encode(file.content || '').length,
+        sizeBytes: (file.content || '').length,
         mimeType: file.name.endsWith('.bib') ? 'application/x-bibtex' : 'text/x-tex',
       };
       vfs.set(file.name, entry);

@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  texlive-server:
+    build: .
+    container_name: teeex-texlive-server
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - UPSTREAM_URL=https://texlive2026.texlyre.org
+      - CACHE_DIR=/data/cache
+    volumes:
+      - texlive-cache:/data/cache
+    restart: unless-stopped
+
+volumes:
+  texlive-cache:
+    driver: local

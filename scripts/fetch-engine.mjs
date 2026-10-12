@@ -118,6 +118,40 @@ async function readManifest() {
   }
 }
 
+const CONCURRENCY = 4;
+
+class Semaphore {
+  #queue = [];
+  #running = 0;
+  #concurrency;
+
+  constructor(concurrency) {
+    this.#concurrency = concurrency;
+  }
+
+  run(fn) {
+    return new Promise((resolve, reject) => {
+      this.#queue.push({ fn, resolve, reject });
+      this.#drain();
+    });
+  }
+
+  #drain() {
+    while (this.#running < this.#concurrency && this.#queue.length > 0) {
+      const { fn, resolve, reject } = this.#queue.shift();
+      this.#running++;
+      fn()
+        .then(resolve, reject)
+        .finally(() => {
+          this.#running--;
+          this.#drain();
+        });
+    }
+  }
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** Check if a local file exists and is non-empty */
 async function getLocalFileInfo(filePath) {
   try {
@@ -151,12 +185,10 @@ async function isProvisioned(manifest) {
  * a truncated .wasm or .data behind — those fail at WebAssembly instantiation
  * with messages that point nowhere near the real cause.
  */
-async function download(name) {
+async function download(name, localInfo) {
   const localSource = join(LOCAL_RELEASE, name);
   const target = join(DEST, name);
   const temp = `${target}.partial`;
-
-  const localInfo = await getLocalFileInfo(localSource);
 
   try {
     if (localInfo) {
@@ -176,11 +208,27 @@ async function download(name) {
       return { bytes: copied.size, sha256: null, source: 'local' };
     }
 
-    // Remote download fallback
+    // Remote download fallback with retry
     const url = `${configuredBaseUrl.replace(/\/+$/, '')}/${name}`;
-    const res = await fetch(url);
-    if (!res.ok || !res.body) {
-      throw new Error(`HTTP ${res.status} ${res.statusText} fetching ${url}`);
+    let res;
+    let lastError;
+    const maxRetries = 3;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        res = await fetch(url);
+        if (res.ok && res.body) break;
+        lastError = new Error(`HTTP ${res.status} ${res.statusText} fetching ${url}`);
+      } catch (err) {
+        lastError = err;
+      }
+      if (attempt < maxRetries) {
+        await sleep(300 * attempt);
+      }
+    }
+
+    if (!res || !res.ok || !res.body) {
+      throw lastError || new Error(`Failed to fetch ${url}`);
     }
 
     const contentEncoding = res.headers.get('content-encoding');
@@ -225,65 +273,6 @@ async function main() {
   console.log(`  source   ${hasLocalRelease ? 'local official release assets' : configuredBaseUrl}`);
   console.log('  dest     public/core/busytex\n');
 
-  await mkdir(DEST, { recursive: true });
-
-  const record = {};
-  let totalBytes = 0;
-
-  for (const [index, name] of files.entries()) {
-    const position = `${String(index + 1).padStart(2)}/${files.length}`;
-
-    try {
-      let info;
-      try {
-        info = await stat(join(DEST, name));
-      } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
-      }
-
-      const localSourceInfo = await getLocalFileInfo(join(LOCAL_RELEASE, name));
-
-      // Re-download/copy if forced, missing, empty, or differs from local source (when local exists)
-      const needsFetch =
-        force ||
-        !info ||
-        !info.isFile() ||
-        info.size === 0 ||
-        (localSourceInfo && info.size !== localSourceInfo.size);
-
-      if (needsFetch) {
-        await download(name);
-        info = await stat(join(DEST, name));
-      }
-
-      if (!info || !info.isFile() || info.size === 0) {
-        fail(`Missing or empty engine asset: ${name}`);
-      }
-
-      record[name] = {
-        bytes: info.size,
-        sha256: null,
-      };
-
-      totalBytes += info.size;
-
-      console.log(
-        `  ${position}  ${name.padEnd(26)}${mib(info.size).padStart(10)}`
-      );
-    } catch (error) {
-      fail(`Failed to provision ${name}: ${error.message}`);
-    }
-  }
-
-  const manifest = {
-    engineVersion: ENGINE_VERSION,
-    profile: profileName,
-    baseUrl,
-    provisionedAt: new Date().toISOString(),
-    totalBytes,
-    files: record,
-  };
-
   if (verifyOnly) {
     const existing = await readManifest();
 
@@ -294,9 +283,71 @@ async function main() {
       );
     }
 
-    console.log(`\n  Verified ${files.length} local assets.\n`);
+    console.log(`  Verified ${files.length} local assets.\n`);
     return;
   }
+
+  await mkdir(DEST, { recursive: true });
+
+  const sem = new Semaphore(CONCURRENCY);
+  const results = new Array(files.length);
+
+  await Promise.all(
+    files.map((name, index) =>
+      sem.run(async () => {
+        const localSourceInfo = await getLocalFileInfo(join(LOCAL_RELEASE, name));
+
+        let info;
+        try {
+          info = await stat(join(DEST, name));
+        } catch (error) {
+          if (error?.code !== 'ENOENT') throw error;
+        }
+
+        const needsFetch =
+          force ||
+          !info ||
+          !info.isFile() ||
+          info.size === 0 ||
+          (localSourceInfo && info.size !== localSourceInfo.size);
+
+        if (needsFetch) {
+          const downloadResult = await download(name, localSourceInfo);
+          info = { isFile: () => true, size: downloadResult.bytes };
+        }
+
+        if (!info || !info.isFile() || info.size === 0) {
+          fail(`Missing or empty engine asset: ${name}`);
+        }
+
+        results[index] = { name, size: info.size };
+      })
+    )
+  );
+
+  const record = {};
+  let totalBytes = 0;
+
+  for (const [index, { name, size }] of results.entries()) {
+    const position = `${String(index + 1).padStart(2)}/${files.length}`;
+    record[name] = {
+      bytes: size,
+      sha256: null,
+    };
+    totalBytes += size;
+    console.log(
+      `  ${position}  ${name.padEnd(26)}${mib(size).padStart(10)}`
+    );
+  }
+
+  const manifest = {
+    engineVersion: ENGINE_VERSION,
+    profile: profileName,
+    baseUrl,
+    provisionedAt: new Date().toISOString(),
+    totalBytes,
+    files: record,
+  };
 
   await writeFile(
     MANIFEST,

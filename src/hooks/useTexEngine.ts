@@ -56,26 +56,28 @@ export interface UseTexEngineResult {
  * for. A collision would mean one skipped recompile, recoverable with the
  * Recompile button; the cost of being wrong is low and bounded.
  */
+function mixHash(initialHash: number, text: string): number {
+  let hash = initialHash;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash;
+}
+
 function fingerprintFiles(files: ProjectFile[]): string {
   let hash = 0x811c9dc5;
 
-  const mix = (text: string) => {
-    for (let i = 0; i < text.length; i++) {
-      hash ^= text.charCodeAt(i);
-      hash = Math.imul(hash, 0x01000193);
-    }
-  };
-
   for (const file of files) {
-    mix(file.name);
-    mix(file.content);
-    mix(file.isEntry ? '\u0001' : '\u0002');
+    hash = mixHash(hash, file.name);
+    hash = mixHash(hash, file.content);
+    hash = mixHash(hash, file.isEntry ? '\u0001' : '\u0002');
     // Figures hold their bytes in dataUrl; hashing a multi-megabyte base64
     // string per render is exactly what this function exists to avoid, so use
     // its length plus a short prefix as a replacement signal.
     if (file.dataUrl) {
-      mix(String(file.dataUrl.length));
-      mix(file.dataUrl.slice(0, 64));
+      hash = mixHash(hash, String(file.dataUrl.length));
+      hash = mixHash(hash, file.dataUrl.slice(0, 64));
     }
   }
 

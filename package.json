@@ -11,6 +11,7 @@
     "engine": "node scripts/fetch-engine.mjs",
     "engine:full": "node scripts/fetch-engine.mjs --profile full",
     "engine:verify": "node scripts/fetch-engine.mjs --profile full --verify",
+    "engine:r2-upload": "node scripts/upload-r2.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
