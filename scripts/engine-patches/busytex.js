@@ -6899,6 +6899,10 @@ changes have the same license
       shellHandlers: {
       },
       init: function () {
+        KPSE_REMOTE.shellHandlers['mktextfm'] = function () { return { exit_code: 1, files: [] }; };
+        KPSE_REMOTE.shellHandlers['mktexpk'] = function () { return { exit_code: 1, files: [] }; };
+        KPSE_REMOTE.shellHandlers['mktexmf'] = function () { return { exit_code: 1, files: [] }; };
+        KPSE_REMOTE.shellHandlers['mktexfmt'] = function () { return { exit_code: 1, files: [] }; };
         if (typeof globalThis !== 'undefined')
           globalThis.__busytex_shell_handlers = KPSE_REMOTE.shellHandlers;
 

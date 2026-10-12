@@ -26,7 +26,11 @@ import {
   toEngineFiles,
 } from './texProject';
 import { parseTexLog, type CompileDiagnostic } from './texLog';
-import { getBundledPackages, getCachedMisses } from './bundledPackages';
+import {
+  getBundledPackages,
+  getCachedMisses,
+  preloadDocumentPackages,
+} from './bundledPackages';
 
 export { resolveEntryFile } from './texProject';
 
@@ -373,6 +377,21 @@ export class TexEngineService {
     }
 
     this.setStatus({ phase: 'compiling', engine });
+
+    // Concurrently pre-hydrate all packages and document classes referenced
+    // across project files into WASM kpathsea before typesetting launches.
+    try {
+      const allTexContent = input.files
+        .filter((f) => f.name.endsWith('.tex') || f.name.endsWith('.cls') || f.name.endsWith('.sty'))
+        .map((f) => f.content)
+        .join('\n');
+      const preloaded = await preloadDocumentPackages(allTexContent, remoteEndpoint());
+      if (preloaded.length > 0) {
+        await runner.writeTexliveRemoteFiles(preloaded);
+      }
+    } catch (_preloadErr) {
+      // Non-fatal, compiler falls back to runtime endpoint
+    }
 
     try {
       const tool =

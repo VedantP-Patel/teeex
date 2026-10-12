@@ -291,7 +291,11 @@ class BusytexPipeline {
             FONTCONFIG_PATH: this.dir_fontconfig,
             FONTCONFIG_FILE: this.dir_fontconfig + '/fonts.conf',
             ICU_DATA: '/texlive/',
-            TEXLIVE_REMOTE_ENDPOINT: ''
+            TEXLIVE_REMOTE_ENDPOINT: '',
+            MKTEXTFM: '0',
+            MKTEXPK: '0',
+            MKTEXMF: '0',
+            MKTEXFMT: '0'
         };
 
         this.remove = (FS, log_path) => FS.analyzePath(log_path).exists ? FS.unlink(log_path) : null;
