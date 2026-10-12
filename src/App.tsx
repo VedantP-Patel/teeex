@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
-import { UploadCloud } from 'lucide-react';
+import { UploadCloud, Loader2 } from 'lucide-react';
+import { AuthPortal } from './components/AuthPortal';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
@@ -67,7 +68,7 @@ import {
   DEFAULT_PEERS
 } from './services/collaboration';
 import { isSupabaseConnected } from './services/supabaseClient';
-import { getStoredSession, signOutUser } from './services/authService';
+import { getStoredSession, signOutUser, verifyActiveSupabaseSession } from './services/authService';
 import {
   loadProjects,
   getActiveProjectId,
@@ -103,9 +104,32 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     return getStoredSession().user;
   });
-  const [isAuthOpen, setIsAuthOpen] = useState(() => {
-    return getStoredSession().user === null;
+  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(() => {
+    return isSupabaseConnected() && getStoredSession().user !== null;
   });
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+
+  // Active Cloud / Supabase session verification on startup
+  useEffect(() => {
+    let isMounted = true;
+    if (isSupabaseConnected() && getStoredSession().user !== null) {
+      verifyActiveSupabaseSession().then(verifiedUser => {
+        if (!isMounted) return;
+        if (verifiedUser) {
+          setCurrentUser(verifiedUser);
+        } else {
+          setCurrentUser(null);
+        }
+        setIsAuthChecking(false);
+      }).catch(() => {
+        if (!isMounted) return;
+        setIsAuthChecking(false);
+      });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Multi-Project State
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -1170,25 +1194,7 @@ export function App() {
   const handleSignOut = async () => {
     await signOutUser();
     setCurrentUser(null);
-    
-    // Reload projects back to guest/default state
-    const loadedProjects = loadProjects(undefined);
-    setProjects(loadedProjects);
-    const nextActiveId = getActiveProjectId(loadedProjects);
-    const nextProj = loadedProjects.find(p => p.id === nextActiveId) || loadedProjects[0];
-    if (nextProj) {
-      setActiveProjectId(nextProj.id);
-      setActiveProjectIdState(nextProj.id);
-      setFiles(nextProj.files);
-      setFolders(nextProj.folders || ['sections', 'figures']);
-      const firstId = nextProj.files[0]?.id || 'main.tex';
-      setActiveFileId(firstId);
-      setOpenFileIds([firstId]);
-      setProjectTitle(nextProj.title);
-      setTimeout(() => triggerCompile(), 80);
-    }
-    
-    setIsAuthOpen(true);
+    setIsAuthOpen(false);
   };
 
   // Draggable Split Divider Handlers
@@ -1255,6 +1261,51 @@ export function App() {
       handleImportFiles(e.dataTransfer.files);
     }
   };
+
+  if (isAuthChecking) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        width: '100vw',
+        backgroundColor: '#070b14',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+        color: '#f8fafc',
+        fontFamily: 'Inter, system-ui, sans-serif',
+      }}>
+        <div style={{
+          width: 50,
+          height: 50,
+          borderRadius: 12,
+          backgroundColor: 'rgba(56, 189, 248, 0.12)',
+          border: '1px solid rgba(56, 189, 248, 0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 0 25px rgba(56, 189, 248, 0.25)',
+        }}>
+          <Loader2 size={24} color="#38bdf8" style={{ animation: 'spin 1s linear infinite' }} />
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>Teeex Studio</div>
+          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Verifying cryptographically signed session...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Impermeable Security Gate: Zero workspace DOM/components rendered if unauthenticated
+  if (!currentUser) {
+    return (
+      <AuthPortal
+        onAuthSuccess={handleAuthSuccess}
+        onDeveloperStatusChanged={handleDeveloperStatusChanged}
+      />
+    );
+  }
 
   return (
     <div

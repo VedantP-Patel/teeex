@@ -1,9 +1,24 @@
 import type { UserProfile, ProjectRole } from '../types/latex';
 import { getSupabaseClient } from './supabaseClient';
+import { sha256Sync } from './shareSecurityService';
 
 const AUTH_STORAGE_KEY = 'teeex_auth_user';
 const REMEMBER_ME_KEY = 'teeex_remember_me';
 const LOCAL_REGISTERED_USERS_KEY = 'teeex_local_registered_users';
+const SESSION_SIG_SALT = 'teeex-secure-auth-salt-v3#88219';
+
+interface StoredSessionWrapper {
+  user: UserProfile;
+  issuedAt: number;
+  sig: string;
+}
+
+export function computeSessionSignature(user: UserProfile, issuedAt: number): string {
+  const normEmail = (user.email || '').toLowerCase().trim();
+  const isAdmin = user.isAdmin ? '1' : '0';
+  const isApproved = user.isApproved ? '1' : '0';
+  return sha256Sync(`sess:${user.id}:${normEmail}:${isAdmin}:${isApproved}:${issuedAt}:${SESSION_SIG_SALT}`);
+}
 
 export function getLocalRegisteredUsers(): UserProfile[] {
   try {
@@ -139,38 +154,66 @@ export const DEMO_ACCOUNTS: Array<{
 ];
 
 export function getStoredSession(): { user: UserProfile | null; rememberMe: boolean } {
-  // Check localStorage first
-  const localData = localStorage.getItem(AUTH_STORAGE_KEY);
-  if (localData) {
-    try {
-      return { user: JSON.parse(localData), rememberMe: true };
-    } catch {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-    }
-  }
-
-  // Check sessionStorage
-  const sessionData = sessionStorage.getItem(AUTH_STORAGE_KEY);
-  if (sessionData) {
-    try {
-      return { user: JSON.parse(sessionData), rememberMe: false };
-    } catch {
-      sessionStorage.removeItem(AUTH_STORAGE_KEY);
-    }
-  }
-
   // If user explicitly signed out, preserve signed-out guest state
   if (localStorage.getItem('teeex_signed_out') === 'true') {
     return { user: null, rememberMe: false };
   }
 
-  // Default: Clean Guest session (no automatic demo account login)
+  const validateRecord = (rawJson: string | null): UserProfile | null => {
+    if (!rawJson) return null;
+    try {
+      const parsed = JSON.parse(rawJson);
+      // Valid signed wrapper check
+      if (parsed && parsed.user && typeof parsed.issuedAt === 'number' && typeof parsed.sig === 'string') {
+        const expected = computeSessionSignature(parsed.user, parsed.issuedAt);
+        if (parsed.sig === expected) {
+          // Prevent forged admin elevation via F12
+          if (parsed.user.isAdmin && parsed.user.email?.toLowerCase() !== 'admin@teeex.io') {
+            console.warn('Suspicious unverified admin session rejected.');
+            return null;
+          }
+          return parsed.user;
+        } else {
+          console.warn('Tampered auth session signature detected. Session rejected.');
+          return null;
+        }
+      }
+      // Untrusted raw JSON injected via F12 DevTools console is rejected
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Check localStorage (Remember Me)
+  const localUser = validateRecord(localStorage.getItem(AUTH_STORAGE_KEY));
+  if (localUser) {
+    return { user: localUser, rememberMe: true };
+  } else if (localStorage.getItem(AUTH_STORAGE_KEY)) {
+    // Purge tampered or unverified data
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+
+  // Check sessionStorage (Single Session)
+  const sessionUser = validateRecord(sessionStorage.getItem(AUTH_STORAGE_KEY));
+  if (sessionUser) {
+    return { user: sessionUser, rememberMe: false };
+  } else if (sessionStorage.getItem(AUTH_STORAGE_KEY)) {
+    sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+
   return { user: null, rememberMe: false };
 }
 
 export function saveSession(user: UserProfile, rememberMe: boolean): void {
   localStorage.removeItem('teeex_signed_out');
-  const json = JSON.stringify(user);
+  const issuedAt = Date.now();
+  const wrapper: StoredSessionWrapper = {
+    user,
+    issuedAt,
+    sig: computeSessionSignature(user, issuedAt),
+  };
+  const json = JSON.stringify(wrapper);
   localStorage.setItem(REMEMBER_ME_KEY, rememberMe ? 'true' : 'false');
 
   if (rememberMe) {
@@ -363,8 +406,49 @@ export async function signOutUser(): Promise<void> {
   clearSession();
 }
 
-// Expose mock admin functions for easy testing via browser console
-if (typeof window !== 'undefined') {
-  (window as any).approveUser = approveLocalUser;
-  (window as any).listPendingUsers = () => getLocalRegisteredUsers().filter(u => !u.isApproved);
+/**
+ * Actively checks the connected Supabase cloud session to prevent client-side spoofing.
+ */
+export async function verifyActiveSupabaseSession(): Promise<UserProfile | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  try {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error || !session || !session.user) {
+      return null;
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('is_approved, is_admin, full_name')
+      .eq('id', session.user.id)
+      .single();
+
+    const userEmail = session.user.email || '';
+    const isApproved = profile?.is_approved === true || isUserApproved(userEmail);
+    const isAdmin = profile?.is_admin === true;
+
+    if (!isApproved && !isAdmin) {
+      await supabase.auth.signOut();
+      clearSession();
+      return null;
+    }
+
+    const verifiedUser: UserProfile = {
+      id: session.user.id,
+      email: userEmail,
+      fullName: profile?.full_name || session.user.user_metadata?.full_name || userEmail.split('@')[0],
+      avatarColor: '#38bdf8',
+      isAnonymous: false,
+      isAdmin,
+      isApproved: true,
+    };
+
+    saveSession(verifiedUser, true);
+    return verifiedUser;
+  } catch (err) {
+    console.warn('Error verifying Supabase session:', err);
+    return null;
+  }
 }

@@ -21,7 +21,7 @@ export interface RoomShareTokens {
 }
 
 // Fast synchronous SHA-256 implementation
-function sha256Sync(str: string): string {
+export function sha256Sync(str: string): string {
   function rightRotate(value: number, amount: number) {
     return (value >>> amount) | (value << (32 - amount));
   }
