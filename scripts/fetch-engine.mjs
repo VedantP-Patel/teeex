@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DEST = join(ROOT, 'public', 'core', 'busytex');
 const MANIFEST = join(DEST, '.teeex-manifest.json');
+const PATCHES_DIR = join(ROOT, 'scripts', 'engine-patches');
 
 /**
  * Pinned to the texlyre-busytex version in package.json. The upstream project
@@ -282,6 +283,23 @@ async function download(name, localInfo) {
   }
 }
 
+async function applyEnginePatches() {
+  const patchFiles = ['busytex_pipeline.js', 'busytex_worker.js', 'busytex.js'];
+  const applied = {};
+  for (const patchName of patchFiles) {
+    const patchPath = join(PATCHES_DIR, patchName);
+    const patchStat = await getLocalFileInfo(patchPath);
+    if (patchStat) {
+      await pipeline(
+        createReadStream(patchPath),
+        createWriteStream(join(DEST, patchName))
+      );
+      applied[patchName] = patchStat.size;
+    }
+  }
+  return applied;
+}
+
 async function main() {
   const hasLocalRelease = (await getLocalFileInfo(join(LOCAL_RELEASE, 'busytex_worker.js'))) !== null;
   const baseUrl = hasLocalRelease ? 'local-release:texlyre-busytex@1.4.0' : configuredBaseUrl;
@@ -356,6 +374,14 @@ async function main() {
       })
     )
   );
+
+  const patched = await applyEnginePatches();
+  for (const [name, size] of Object.entries(patched)) {
+    const resIdx = results.findIndex((r) => r && r.name === name);
+    if (resIdx !== -1) {
+      results[resIdx].size = size;
+    }
+  }
 
   const record = {};
   let totalBytes = 0;

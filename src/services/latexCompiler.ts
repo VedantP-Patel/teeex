@@ -26,7 +26,7 @@ import {
   toEngineFiles,
 } from './texProject';
 import { parseTexLog, type CompileDiagnostic } from './texLog';
-import { getBundledPackages } from './bundledPackages';
+import { getBundledPackages, getCachedMisses } from './bundledPackages';
 
 export { resolveEntryFile } from './texProject';
 
@@ -208,6 +208,10 @@ export class TexEngineService {
         const bundled = await getBundledPackages();
         if (bundled.length > 0) {
           await runner.writeTexliveRemoteFiles(bundled);
+        }
+        const misses = await getCachedMisses();
+        if (misses.length > 0) {
+          await runner.writeTexliveRemoteMisses(misses);
         }
       } catch (_bundledErr) {
         // Non-fatal, compiler will fall back to remote endpoint
