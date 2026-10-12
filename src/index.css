@@ -47,6 +47,7 @@
 }
 
 :root {
+  color-scheme: dark;
   /* Color Palette - Dark Obsidian (Default) */
   --bg-app: #080a0f;
   --bg-surface-0: #0d1017;
@@ -105,6 +106,7 @@
 
 /* Light Theme Variables */
 [data-theme="light"] {
+  color-scheme: light;
   --bg-app: #f1f5f9;
   --bg-surface-0: #ffffff;
   --bg-surface-1: #f8fafc;
@@ -132,6 +134,53 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+/* ==========================================================================
+   Browser Autofill Dark Mode Override
+   Prevents browser autofill (Chrome, Edge, Safari) from forcing bright white
+   backgrounds and pill artifacts onto inputs in dark mode.
+   ========================================================================== */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #090e1c inset !important;
+  box-shadow: 0 0 0 1000px #090e1c inset !important;
+  -webkit-text-fill-color: #f8fafc !important;
+  caret-color: #f8fafc !important;
+  border-radius: 4px !important;
+  transition: background-color 50000s ease-in-out 0s !important;
+}
+
+[data-theme="light"] input:-webkit-autofill,
+[data-theme="light"] input:-webkit-autofill:hover, 
+[data-theme="light"] input:-webkit-autofill:focus, 
+[data-theme="light"] input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  -webkit-text-fill-color: #0f172a !important;
+  caret-color: #0f172a !important;
+}
+
+/* Auth Portal & Modal Inputs Seamless Autofill */
+.auth-input:-webkit-autofill,
+.auth-input:-webkit-autofill:hover, 
+.auth-input:-webkit-autofill:focus, 
+.auth-input:-webkit-autofill:active,
+.auth-input:-internal-autofill-selected {
+  -webkit-box-shadow: 0 0 0 1000px #080d1a inset !important;
+  box-shadow: 0 0 0 1000px #080d1a inset !important;
+  -webkit-text-fill-color: #f8fafc !important;
+  caret-color: #38bdf8 !important;
+  border-radius: 0 !important;
+  transition: background-color 50000s ease-in-out 0s !important;
+}
+
+input:autofill {
+  box-shadow: 0 0 0 1000px #090e1c inset !important;
+  -moz-text-fill-color: #f8fafc !important;
+  filter: none !important;
 }
 
 html, body {

@@ -248,10 +248,13 @@ export const AuthModal: React.FC<Props> = ({
                   <Mail size={14} color="var(--text-muted)" style={{ marginLeft: 10 }} />
                   <input
                     type="email"
+                    name="email"
+                    autoComplete="username"
                     required
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     placeholder="e.g. elena.rostova@teeex.io"
+                    className="auth-input"
                     style={inputStyle}
                   />
                 </div>
@@ -272,10 +275,13 @@ export const AuthModal: React.FC<Props> = ({
                   <Lock size={14} color="var(--text-muted)" style={{ marginLeft: 10 }} />
                   <input
                     type="password"
+                    name="password"
+                    autoComplete="current-password"
                     required
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     placeholder="Enter your password"
+                    className="auth-input"
                     style={inputStyle}
                   />
                 </div>
@@ -317,10 +323,13 @@ export const AuthModal: React.FC<Props> = ({
                   <User size={14} color="var(--text-muted)" style={{ marginLeft: 10 }} />
                   <input
                     type="text"
+                    name="name"
+                    autoComplete="name"
                     required
                     value={fullName}
                     onChange={e => setFullName(e.target.value)}
                     placeholder="e.g. Dr. Jane Doe"
+                    className="auth-input"
                     style={inputStyle}
                   />
                 </div>
@@ -332,10 +341,13 @@ export const AuthModal: React.FC<Props> = ({
                   <Mail size={14} color="var(--text-muted)" style={{ marginLeft: 10 }} />
                   <input
                     type="email"
+                    name="email"
+                    autoComplete="username"
                     required
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     placeholder="jane.doe@university.edu"
+                    className="auth-input"
                     style={inputStyle}
                   />
                 </div>
@@ -347,10 +359,13 @@ export const AuthModal: React.FC<Props> = ({
                   <Lock size={14} color="var(--text-muted)" style={{ marginLeft: 10 }} />
                   <input
                     type="password"
+                    name="password"
+                    autoComplete="new-password"
                     required
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     placeholder="At least 6 characters"
+                    className="auth-input"
                     style={inputStyle}
                   />
                 </div>
@@ -391,10 +406,13 @@ export const AuthModal: React.FC<Props> = ({
                   <Mail size={14} color="var(--text-muted)" style={{ marginLeft: 10 }} />
                   <input
                     type="email"
+                    name="email"
+                    autoComplete="username"
                     required
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     placeholder="e.g. elena.rostova@teeex.io"
+                    className="auth-input"
                     style={inputStyle}
                   />
                 </div>

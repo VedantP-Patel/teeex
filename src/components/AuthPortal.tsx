@@ -250,11 +250,15 @@ export const AuthPortal: React.FC<Props> = ({
                   <Mail size={15} color="var(--text-muted, #94a3b8)" style={{ marginLeft: 12, flexShrink: 0 }} />
                   <input
                     type="email"
+                    name="email"
+                    id="signin-email"
+                    autoComplete="username"
                     required
                     autoFocus
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     placeholder="e.g. author@university.edu"
+                    className="auth-input"
                     style={inputStyle}
                   />
                 </div>
@@ -275,10 +279,14 @@ export const AuthPortal: React.FC<Props> = ({
                   <Lock size={15} color="var(--text-muted, #94a3b8)" style={{ marginLeft: 12, flexShrink: 0 }} />
                   <input
                     type={showPassword ? 'text' : 'password'}
+                    name="password"
+                    id="signin-password"
+                    autoComplete="current-password"
                     required
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     placeholder="Enter your account password"
+                    className="auth-input"
                     style={inputStyle}
                   />
                   <button
@@ -337,10 +345,14 @@ export const AuthPortal: React.FC<Props> = ({
                   <User size={15} color="var(--text-muted, #94a3b8)" style={{ marginLeft: 12 }} />
                   <input
                     type="text"
+                    name="name"
+                    id="signup-name"
+                    autoComplete="name"
                     required
                     value={fullName}
                     onChange={e => setFullName(e.target.value)}
                     placeholder="e.g. Dr. Eleanor Vance"
+                    className="auth-input"
                     style={inputStyle}
                   />
                 </div>
@@ -352,10 +364,14 @@ export const AuthPortal: React.FC<Props> = ({
                   <Mail size={15} color="var(--text-muted, #94a3b8)" style={{ marginLeft: 12 }} />
                   <input
                     type="email"
+                    name="email"
+                    id="signup-email"
+                    autoComplete="username"
                     required
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     placeholder="e.g. evance@oxford.ac.uk"
+                    className="auth-input"
                     style={inputStyle}
                   />
                 </div>
@@ -367,10 +383,14 @@ export const AuthPortal: React.FC<Props> = ({
                   <Lock size={15} color="var(--text-muted, #94a3b8)" style={{ marginLeft: 12 }} />
                   <input
                     type={showPassword ? 'text' : 'password'}
+                    name="password"
+                    id="signup-password"
+                    autoComplete="new-password"
                     required
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     placeholder="At least 6 characters"
+                    className="auth-input"
                     style={inputStyle}
                   />
                   <button
@@ -427,10 +447,14 @@ export const AuthPortal: React.FC<Props> = ({
                   <Mail size={15} color="var(--text-muted, #94a3b8)" style={{ marginLeft: 12 }} />
                   <input
                     type="email"
+                    name="email"
+                    id="forgot-email"
+                    autoComplete="username"
                     required
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     placeholder="e.g. author@university.edu"
+                    className="auth-input"
                     style={inputStyle}
                   />
                 </div>
