@@ -79,6 +79,16 @@ const PROFILES = {
     'biber.wasm',
     'biber.data',
   ],
+  pages: [
+    'busytex_worker.js',
+    'busytex_pipeline.js',
+    'busytex_biber.js',
+    'busytex.js',
+    'texlive-basic.js',
+    'texlive-recommended.js',
+    'biber.js',
+    'biber.wasm',
+  ],
 };
 
 const args = process.argv.slice(2);
@@ -88,7 +98,15 @@ const option = (name, fallback) => {
   return i !== -1 && args[i + 1] ? args[i + 1] : fallback;
 };
 
-const profileName = option('profile', 'full');
+const isCloudflare = Boolean(
+  process.env.CF_PAGES === '1' ||
+  process.env.CF_PAGES ||
+  process.env.CF_PAGES_COMMIT_SHA ||
+  process.env.CF_PAGES_BRANCH ||
+  process.env.CLOUDFLARE_PAGES
+);
+const defaultProfile = isCloudflare ? 'pages' : 'full';
+const profileName = option('profile', defaultProfile);
 const configuredBaseUrl = process.env.TEEEX_ENGINE_BASE_URL || DEFAULT_BASE_URL;
 const LOCAL_RELEASE = join(ROOT, 'tmp-busytex-assets', 'busytex');
 const force = flag('force');
@@ -288,6 +306,20 @@ async function main() {
   }
 
   await mkdir(DEST, { recursive: true });
+
+  // When building with the 'pages' profile, clean up any existing heavy files (>25MB)
+  // so Vite does not copy them into dist/ where Cloudflare Pages would reject them.
+  if (profileName === 'pages') {
+    const heavyFiles = [
+      'busytex.wasm',
+      'texlive-basic.data',
+      'texlive-recommended.data',
+      'biber.data',
+    ];
+    for (const heavy of heavyFiles) {
+      await rm(join(DEST, heavy), { force: true }).catch(() => {});
+    }
+  }
 
   const sem = new Semaphore(CONCURRENCY);
   const results = new Array(files.length);
