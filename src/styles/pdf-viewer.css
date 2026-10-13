@@ -610,3 +610,89 @@
     transition: none;
   }
 }
+
+/* ==========================================================================
+   Compile Progress Bar & Status Badges
+   ========================================================================== */
+
+.pdf-compile-progress-bar {
+  position: relative;
+  width: 100%;
+  height: 2.5px;
+  background: var(--bg-surface-1);
+  overflow: hidden;
+  flex-shrink: 0;
+  z-index: 20;
+}
+
+.pdf-compile-progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 45%;
+  background: linear-gradient(90deg, #38bdf8, #818cf8, #38bdf8);
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
+  animation: compileProgressIndeterminate 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes compileProgressIndeterminate {
+  0% {
+    left: -45%;
+  }
+  50% {
+    left: 40%;
+    width: 60%;
+  }
+  100% {
+    left: 105%;
+  }
+}
+
+.pdf-status-duration {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  padding: 2px 7px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-surface-1);
+  border: 1px solid var(--border-subtle);
+  letter-spacing: -0.01em;
+}
+
+.pdf-status-queued {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 6px #38bdf8;
+  display: inline-block;
+  animation: pulseDot 1s ease-in-out infinite alternate;
+}
+
+@keyframes pulseDot {
+  from {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+}
+

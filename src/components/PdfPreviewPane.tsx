@@ -47,6 +47,8 @@ interface Props {
   pdf: Uint8Array | null;
   status: EngineStatus;
   isCompiling: boolean;
+  isDebouncing?: boolean;
+  durationMs?: number | null;
   /** True when `pdf` is an earlier successful build than the latest attempt. */
   isStale: boolean;
   errorSummary?: string | null;
@@ -192,6 +194,8 @@ export function PdfPreviewPane({
   pdf,
   status,
   isCompiling,
+  isDebouncing = false,
+  durationMs,
   isStale,
   errorSummary,
   documentTitle,
@@ -383,21 +387,90 @@ export function PdfPreviewPane({
       if (pageBottom >= top - margin && pageTop <= bottom + margin) {
         next.add(geometry[index].pageNumber);
       }
-      // The page occupying the top of the viewport is the one being read.
-      if (pageTop <= top + 2) firstVisible = geometry[index].pageNumber;
+      if (pageTop <= top + 20) firstVisible = geometry[index].pageNumber;
     }
 
     setActivePages((previous) => (sameSet(previous, next) ? previous : next));
     setCurrentPage(firstVisible);
   }, [geometry, offsets, zoom]);
 
+  // Initial layout synchronization
   useLayoutEffect(() => {
     recomputeVisible();
   }, [recomputeVisible]);
 
+  // Hardware-accelerated off-thread viewport virtualization via IntersectionObserver
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root || typeof IntersectionObserver === 'undefined' || geometry.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setActivePages((prev) => {
+          let changed = false;
+          const next = new Set(prev);
+          for (const entry of entries) {
+            const pageNum = Number(entry.target.getAttribute('data-page'));
+            if (!pageNum) continue;
+            if (entry.isIntersecting) {
+              if (!next.has(pageNum)) {
+                next.add(pageNum);
+                changed = true;
+              }
+            } else {
+              if (next.has(pageNum)) {
+                next.delete(pageNum);
+                changed = true;
+              }
+            }
+          }
+          return changed ? next : prev;
+        });
+      },
+      {
+        root,
+        rootMargin: '100% 0px',
+        threshold: 0,
+      },
+    );
+
+    const pageEls = root.querySelectorAll('.pdf-page[data-page]');
+    pageEls.forEach((el) => observer.observe(el));
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [geometry, doc, zoom]);
+
+  // Throttled reading-page indicator on scroll (max 1 callback per animation frame)
+  const scrollRafRef = useRef<number | null>(null);
   const onScroll = useCallback(() => {
-    recomputeVisible();
-  }, [recomputeVisible]);
+    if (scrollRafRef.current !== null) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      const container = scrollRef.current;
+      if (!container || geometry.length === 0) return;
+      const top = container.scrollTop;
+      let firstVisible = 1;
+      for (let index = 0; index < geometry.length; index++) {
+        const pageTop = offsets[index];
+        if (pageTop <= top + 20) {
+          firstVisible = geometry[index].pageNumber;
+        } else {
+          break;
+        }
+      }
+      setCurrentPage((prev) => (prev !== firstVisible ? firstVisible : prev));
+    });
+  }, [geometry, offsets]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+      }
+    };
+  }, []);
 
   // Restore the reading position after a new build replaces the document.
   useLayoutEffect(() => {
@@ -539,6 +612,12 @@ export function PdfPreviewPane({
               Typesetting
             </span>
           )}
+          {!isCompiling && isDebouncing && (
+            <span className="pdf-status pdf-status-queued">
+              <span className="pulse-dot" />
+              Queued
+            </span>
+          )}
           {!isCompiling && engineMessage && status.phase === 'fetching' && (
             <span className="pdf-status pdf-status-busy">
               <Loader2 size={12} className="spin" />
@@ -549,6 +628,14 @@ export function PdfPreviewPane({
             <span className="pdf-status pdf-status-warn" title={errorSummary ?? undefined}>
               <AlertTriangle size={12} />
               Showing last successful build
+            </span>
+          )}
+          {!isCompiling && !isDebouncing && durationMs !== null && durationMs !== undefined && (
+            <span
+              className="pdf-status-duration"
+              title={`Last compile finished in ${durationMs}ms`}
+            >
+              {durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`}
             </span>
           )}
         </div>
@@ -603,6 +690,8 @@ export function PdfPreviewPane({
           </button>
         </div>
       </div>
+
+      {isCompiling && <div className="pdf-compile-progress-bar" />}
 
       <div
         ref={scrollRef}

@@ -40,6 +40,10 @@ export interface UseTexEngineResult {
   /** Result of the latest compile that actually ran. */
   outcome: CompileOutcome | null;
   isCompiling: boolean;
+  /** True when a keystroke has queued compilation and the debounce timer is counting down. */
+  isDebouncing: boolean;
+  /** Wall-clock time of the last TeX compilation in milliseconds. */
+  durationMs: number | null;
   /** True when `pdf` predates `outcome` — i.e. the view is a last-good build. */
   isStale: boolean;
   lastCompiledAt: number | null;
@@ -95,6 +99,7 @@ export function useTexEngine({
   const [outcome, setOutcome] = useState<CompileOutcome | null>(null);
   const [pdf, setPdf] = useState<Uint8Array | null>(null);
   const [isCompiling, setIsCompiling] = useState(false);
+  const [isDebouncing, setIsDebouncing] = useState(false);
   const [lastCompiledAt, setLastCompiledAt] = useState<number | null>(null);
 
   const filesRef = useRef(files);
@@ -116,6 +121,7 @@ export function useTexEngine({
   }, []);
 
   const runCompile = useCallback(async () => {
+    setIsDebouncing(false);
     setIsCompiling(true);
     try {
       const result = await texEngine.compile({
@@ -155,7 +161,9 @@ export function useTexEngine({
     if (!fingerprint) return;
 
     if (timerRef.current) clearTimeout(timerRef.current);
+    setIsDebouncing(true);
     timerRef.current = setTimeout(() => {
+      setIsDebouncing(false);
       void runCompile();
     }, effectiveDebounceMs);
 
@@ -171,10 +179,13 @@ export function useTexEngine({
     pdf,
     outcome,
     isCompiling,
+    isDebouncing,
+    durationMs: outcome?.durationMs ?? null,
     isStale,
     lastCompiledAt,
     compile: () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      setIsDebouncing(false);
       void runCompile();
     },
   };

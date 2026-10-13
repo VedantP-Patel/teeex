@@ -105,6 +105,22 @@ function remoteEndpoint(): string | undefined {
   return DEFAULT_REMOTE_ENDPOINT;
 }
 
+function hashString(str: string): string {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function extractCrossRefSig(content: string): string {
+  const matches =
+    content.match(
+      /\\(?:label|ref|pageref|cite|nocite|bibliography|tableofcontents|listoffigures|listoftables|input|include)\*?(?:\[[^\]]*\])?\{[^}]*\}/g,
+    ) || [];
+  return hashString(matches.join(';'));
+}
+
 interface QueuedRequest {
   input: CompileInput;
   requestId: number;
@@ -122,6 +138,11 @@ export class TexEngineService {
   private inFlight: Promise<CompileOutcome> | null = null;
   private queued: QueuedRequest | null = null;
   private nextRequestId = 1;
+
+  /** Cross-reference and aux tracking for smart single-pass compile acceleration. */
+  private lastAuxHashes = new Map<string, string>();
+  private lastRerunRequired = new Map<string, boolean>();
+  private lastDocSig = new Map<string, string>();
 
   // --- status ------------------------------------------------------------
 
@@ -393,6 +414,16 @@ export class TexEngineService {
       // Non-fatal, compiler falls back to runtime endpoint
     }
 
+    const cacheKey = `${engine}:${entry.name}`;
+    const currentSig = extractCrossRefSig(entry.content);
+    const prevSig = this.lastDocSig.get(cacheKey);
+    const prevAuxHash = this.lastAuxHashes.get(cacheKey);
+    const wasRerunRequired = this.lastRerunRequired.get(cacheKey) ?? false;
+
+    // Only run multi-pass if aux hasn't settled yet, cross-references changed,
+    // or the previous run explicitly flagged that another pass is needed.
+    const shouldRerun = !prevAuxHash || currentSig !== prevSig || wasRerunRequired;
+
     try {
       const tool =
         engine === 'xelatex'
@@ -401,20 +432,44 @@ export class TexEngineService {
             ? new LuaLatex(runner, false)
             : new PdfLatex(runner, false);
 
-      const result = await tool.compile({
+      let result = await tool.compile({
         input: entry.content,
         mainTexPath: entry.name,
         additionalFiles: toEngineFiles(input.files, entry.name),
         bibtex: input.bibtex ?? needsBibtex(input.files, entry.content),
         makeindex: input.makeindex ?? needsMakeindex(entry.content),
-        // LaTeX needs repeat passes to settle cross-references, the TOC, and
-        // citation labels — the same reason Overleaf runs latexmk.
-        rerun: true,
+        rerun: shouldRerun,
         remoteEndpoint: remoteEndpoint(),
       });
 
-      const log = result.log || '';
-      const parsed = parseTexLog(log, { root: entry.name });
+      let log = result.log || '';
+      let parsed = parseTexLog(log, { root: entry.name });
+
+      // If we ran in single-pass mode to optimize speed, but LaTeX signaled that references
+      // or labels shifted (e.g. text pushed across a page), do one fast single pass to settle them.
+      if (!shouldRerun && parsed.rerunRequired && result.pdf && result.pdf.byteLength > 0) {
+        const followUp = await tool.compile({
+          input: entry.content,
+          mainTexPath: entry.name,
+          additionalFiles: toEngineFiles(input.files, entry.name),
+          bibtex: false,
+          makeindex: false,
+          rerun: false,
+          remoteEndpoint: remoteEndpoint(),
+        });
+        if (followUp.pdf && followUp.pdf.byteLength > 0) {
+          result = followUp;
+          log = result.log || '';
+          parsed = parseTexLog(log, { root: entry.name });
+        }
+      }
+
+      this.lastDocSig.set(cacheKey, currentSig);
+      this.lastRerunRequired.set(cacheKey, parsed.rerunRequired);
+      const finalLog = result.logs?.[result.logs.length - 1];
+      if (finalLog?.aux) {
+        this.lastAuxHashes.set(cacheKey, hashString(finalLog.aux));
+      }
 
       // A PDF is the only proof of success. busytex can report a zero exit code
       // while producing no output, so the artifact is the authority, not the
@@ -449,6 +504,9 @@ export class TexEngineService {
     for (const runner of this.runners.values()) runner.terminate();
     this.runners.clear();
     this.initPromises.clear();
+    this.lastAuxHashes.clear();
+    this.lastRerunRequired.clear();
+    this.lastDocSig.clear();
     this.setStatus({ phase: 'idle', progress: 0 });
   }
 }

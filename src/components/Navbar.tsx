@@ -291,6 +291,11 @@ export const Navbar: React.FC<Props> = ({
               <Loader2 size={11} color="#38bdf8" style={{ animation: 'spin 1s linear infinite' }} />
               <span style={{ color: 'var(--text-secondary)' }}>Compiling...</span>
             </>
+          ) : compileState.isDebouncing ? (
+            <>
+              <span className="pulse-dot" />
+              <span style={{ color: '#38bdf8', fontWeight: 600 }}>Queued</span>
+            </>
           ) : compileState.status === 'error' ? (
             <>
               <XCircle size={12} color="#f43f5e" />
@@ -309,11 +314,11 @@ export const Navbar: React.FC<Props> = ({
                 }}
                 title={
                   compileState.pdfDurationMs
-                    ? `Live keystroke render: ${compileState.durationMs}ms | Engine PDF pass: ${compileState.pdfDurationMs}ms`
+                    ? `Live draft render: ${compileState.durationMs}ms | Engine pdfLaTeX pass: ${compileState.pdfDurationMs}ms`
                     : `Live compilation & render latency: ${compileState.durationMs}ms`
                 }
               >
-                ({compileState.durationMs}ms)
+                ({compileState.pdfDurationMs ? `${compileState.pdfDurationMs}ms` : `${compileState.durationMs}ms`})
               </span>
             </>
           )}

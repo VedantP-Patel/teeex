@@ -41,6 +41,8 @@ interface Props {
   pdf: Uint8Array | null;
   status: EngineStatus;
   isCompiling: boolean;
+  isDebouncing?: boolean;
+  durationMs?: number | null;
   isStale: boolean;
   errorSummary?: string | null;
   onCompile: () => void;
@@ -67,6 +69,8 @@ export function PreviewPane({
   pdf,
   status,
   isCompiling,
+  isDebouncing,
+  durationMs,
   isStale,
   errorSummary,
   onCompile,
@@ -136,6 +140,8 @@ export function PreviewPane({
             pdf={pdf}
             status={status}
             isCompiling={isCompiling}
+            isDebouncing={isDebouncing}
+            durationMs={durationMs}
             isStale={isStale}
             errorSummary={errorSummary}
             documentTitle={documentTitle}

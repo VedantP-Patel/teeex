@@ -62,6 +62,7 @@ export interface CompileState {
   status: 'idle' | 'compiling' | 'success' | 'error';
   durationMs: number;
   pdfDurationMs?: number;
+  isDebouncing?: boolean;
   timestamp: string;
   errorCount: number;
   warningCount: number;

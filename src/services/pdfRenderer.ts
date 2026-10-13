@@ -144,17 +144,18 @@ export class PdfDocument {
   async geometry(): Promise<PageGeometry[]> {
     if (this.geometryCache) return this.geometryCache;
 
-    const out: PageGeometry[] = [];
-    for (let pageNumber = 1; pageNumber <= this.numPages; pageNumber++) {
-      const page = await this.page(pageNumber);
+    const pages = await Promise.all(
+      Array.from({ length: this.numPages }, (_, i) => this.page(i + 1)),
+    );
+    const out: PageGeometry[] = pages.map((page, idx) => {
       const viewport = page.getViewport({ scale: CSS_PX_PER_PT });
-      out.push({
-        pageNumber,
+      return {
+        pageNumber: idx + 1,
         width: viewport.width,
         height: viewport.height,
         rotation: viewport.rotation,
-      });
-    }
+      };
+    });
 
     this.geometryCache = out;
     return out;

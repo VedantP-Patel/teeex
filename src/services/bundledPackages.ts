@@ -208,14 +208,10 @@ export async function preloadDocumentPackages(
 ): Promise<LoadedPackage[]> {
   if (!texContent || typeof texContent !== 'string') return [];
 
-  // Extract preamble (everything before \begin{document} if present)
-  const docIdx = texContent.indexOf('\\begin{document}');
-  const preamble = docIdx !== -1 ? texContent.slice(0, docIdx) : texContent;
-
   const targetFiles: Array<{ name: string; format: number }> = [];
 
   // Match \documentclass[...]{class_name}
-  const classMatches = preamble.matchAll(/\\documentclass(?:\[[^\]]*\])?\{([^}]+)\}/g);
+  const classMatches = texContent.matchAll(/\\documentclass(?:\[[^\]]*\])?\{([^}]+)\}/g);
   for (const match of classMatches) {
     const raw = match[1]?.trim();
     if (raw) {
@@ -224,8 +220,8 @@ export async function preloadDocumentPackages(
     }
   }
 
-  // Match \usepackage[...]{pkg1, pkg2, ...}
-  const pkgMatches = preamble.matchAll(/\\usepackage(?:\[[^\]]*\])?\{([^}]+)\}/g);
+  // Match \usepackage[...]{pkg1, pkg2, ...} and \RequirePackage[...]{pkg1, pkg2, ...}
+  const pkgMatches = texContent.matchAll(/\\(?:usepackage|RequirePackage)(?:\[[^\]]*\])?\{([^}]+)\}/g);
   for (const match of pkgMatches) {
     const raw = match[1]?.trim();
     if (raw) {
@@ -237,26 +233,42 @@ export async function preloadDocumentPackages(
     }
   }
 
-  if (targetFiles.length === 0) return [];
-
-  const db = await openPackagesDb();
-  const newlyLoaded: LoadedPackage[] = [];
-  const endpoint =
-    remoteEndpointUrl ||
-    (typeof window !== 'undefined' && window.location?.origin
-      ? `${window.location.origin}/api/texlive`
-      : 'https://texlive2026.texlyre.org');
-
-  // Check which files are missing from memory
-  const neededFiles: Array<{ name: string; format: number }> = [];
-  for (const target of targetFiles) {
-    if (packageMemoryCache.has(target.name)) {
-      continue;
+  // Match \input{foo} or \include{foo} for common external macro or package files
+  const inputMatches = texContent.matchAll(/\\(?:input|include)\{([^}]+)\}/g);
+  for (const match of inputMatches) {
+    const raw = match[1]?.trim();
+    if (raw && !raw.startsWith('/') && !raw.startsWith('.')) {
+      const name = raw.includes('.') ? raw : `${raw}.tex`;
+      targetFiles.push({ name, format: 26 });
     }
-    neededFiles.push(target);
   }
 
-  if (neededFiles.length === 0) return [];
+  // Deduplicate target files
+  const uniqueTargets = new Map<string, { name: string; format: number }>();
+  for (const tf of targetFiles) {
+    if (!uniqueTargets.has(tf.name)) {
+      uniqueTargets.set(tf.name, tf);
+    }
+  }
+  const targets = Array.from(uniqueTargets.values());
+  if (targets.length === 0) return [];
+
+  const resolvedPackages: LoadedPackage[] = [];
+  const neededFiles: Array<{ name: string; format: number }> = [];
+
+  // Check in-memory cache first
+  for (const target of targets) {
+    const memBuf = packageMemoryCache.get(target.name);
+    if (memBuf) {
+      resolvedPackages.push({ name: target.name, format: target.format, content: memBuf });
+    } else {
+      neededFiles.push(target);
+    }
+  }
+
+  if (neededFiles.length === 0) return resolvedPackages;
+
+  const db = await openPackagesDb();
 
   // If in IndexedDB, hydrate immediately
   if (db) {
@@ -274,7 +286,7 @@ export async function preloadDocumentPackages(
                     ? req.result.content
                     : new Uint8Array(req.result.content);
                 packageMemoryCache.set(target.name, buf);
-                newlyLoaded.push({ name: target.name, format: target.format, content: buf });
+                resolvedPackages.push({ name: target.name, format: target.format, content: buf });
               }
               resolve();
             };
@@ -289,7 +301,13 @@ export async function preloadDocumentPackages(
 
   // Files still missing from both memory and IndexedDB: fetch concurrently in parallel!
   const toFetch = neededFiles.filter((target) => !packageMemoryCache.has(target.name));
-  if (toFetch.length === 0) return newlyLoaded;
+  if (toFetch.length === 0) return resolvedPackages;
+
+  const endpoint =
+    remoteEndpointUrl ||
+    (typeof window !== 'undefined' && window.location?.origin
+      ? `${window.location.origin}/api/texlive`
+      : 'https://texlive2026.texlyre.org');
 
   await Promise.all(
     toFetch.map(async (target) => {
@@ -305,7 +323,7 @@ export async function preloadDocumentPackages(
           };
           packageMemoryCache.set(target.name, buf);
           saveToIndexedDb(loaded);
-          newlyLoaded.push(loaded);
+          resolvedPackages.push(loaded);
         }
       } catch {
         // Fallback to runtime compiler resolution
@@ -313,5 +331,5 @@ export async function preloadDocumentPackages(
     }),
   );
 
-  return newlyLoaded;
+  return resolvedPackages;
 }

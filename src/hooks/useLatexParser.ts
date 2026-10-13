@@ -15,6 +15,7 @@ import {
   parseLatexDocument,
   renderLatexToHtml,
 } from '../services/latexParser';
+import { preloadDocumentPackages } from '../services/bundledPackages';
 
 export interface UseLatexParserOptions {
   content: string;
@@ -67,6 +68,8 @@ export function useLatexParser({
   const acceptedRequestIdRef = useRef<number>(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFileNameRef = useRef<string>(activeFileName);
+  const latestContentRef = useRef<string>(content);
+  latestContentRef.current = content;
 
   // Initialize and maintain persistent Web Worker
   useEffect(() => {
@@ -93,6 +96,11 @@ export function useLatexParser({
           durationMs: data.durationMs,
           isParsing: false,
         });
+
+        // Proactive background prefetch of packages into IndexedDB & memory while typing
+        if (data.requiredPackages && data.requiredPackages.length > 0) {
+          void preloadDocumentPackages(latestContentRef.current).catch(() => {});
+        }
       };
 
       worker.onerror = (err) => {

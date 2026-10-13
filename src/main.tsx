@@ -4,6 +4,9 @@ import './index.css'
 import './styles/pdf-viewer.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { registerServiceWorker } from './registerSw'
+
+registerServiceWorker()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

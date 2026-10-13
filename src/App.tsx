@@ -482,7 +482,12 @@ export function App() {
   // typesets the document.
   useEffect(() => {
     if (texEngineView.isCompiling) {
-      setCompileState(prev => ({ ...prev, status: 'compiling' }));
+      setCompileState(prev => ({ ...prev, status: 'compiling', isDebouncing: false }));
+      return;
+    }
+
+    if (texEngineView.isDebouncing) {
+      setCompileState(prev => ({ ...prev, isDebouncing: true }));
       return;
     }
 
@@ -491,6 +496,7 @@ export function App() {
       setCompileState(prev => ({
         ...prev,
         durationMs: liveCompileResult.durationMs,
+        isDebouncing: false,
       }));
       return;
     }
@@ -499,6 +505,7 @@ export function App() {
       status: outcome.ok ? 'success' : 'error',
       durationMs: liveCompileResult.durationMs,
       pdfDurationMs: outcome.durationMs,
+      isDebouncing: false,
       errorCount: outcome.diagnostics.filter(d => d.severity === 'error').length,
       warningCount: outcome.diagnostics.filter(d => d.severity === 'warning').length,
       timestamp: texEngineView.lastCompiledAt
@@ -506,7 +513,7 @@ export function App() {
         : new Date().toLocaleTimeString(),
       rawLogs: outcome.log ? outcome.log.split(/\r?\n/).filter(Boolean) : [],
     });
-  }, [texEngineView.isCompiling, texEngineView.outcome, texEngineView.lastCompiledAt, liveCompileResult.durationMs]);
+  }, [texEngineView.isCompiling, texEngineView.isDebouncing, texEngineView.outcome, texEngineView.lastCompiledAt, liveCompileResult.durationMs]);
 
   // Document Stats
   const wordCount = useMemo(() => {
@@ -1520,6 +1527,8 @@ export function App() {
               pdf={texEngineView.pdf}
               status={texEngineView.status}
               isCompiling={texEngineView.isCompiling}
+              isDebouncing={texEngineView.isDebouncing}
+              durationMs={texEngineView.durationMs}
               isStale={texEngineView.isStale}
               errorSummary={engineErrorSummary}
               onCompile={triggerCompile}
