@@ -96,8 +96,12 @@ export function useLatexExtensions({
       lintGutter(),
       peerDecorationsField,
 
-      // LaTeX language support with Lezer parser
-      latex(),
+      // LaTeX language support with Lezer parser (disabled conflicting internal autocompletion)
+      latex({
+        enableAutocomplete: false,
+        enableLinting: false,
+        autoCloseBrackets: false,
+      }),
 
       // Autocomplete configured with BibTeX, labels, and LaTeX environments
       completionCompartment.of(
