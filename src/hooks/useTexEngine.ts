@@ -89,7 +89,7 @@ export function useTexEngine({
   files,
   engine = 'pdflatex',
   autoCompile = true,
-  debounceMs = 1200,
+  debounceMs,
 }: UseTexEngineOptions): UseTexEngineResult {
   const [status, setStatus] = useState<EngineStatus>(() => texEngine.getStatus());
   const [outcome, setOutcome] = useState<CompileOutcome | null>(null);
@@ -140,6 +140,16 @@ export function useTexEngine({
 
   const fingerprint = useMemo(() => fingerprintFiles(files), [files]);
 
+  // Adaptive debounce: short docs recompile quickly (700ms), heavy papers throttle (1100-1800ms)
+  // to avoid thrashing the WASM compiler during continuous editing.
+  const effectiveDebounceMs = useMemo(() => {
+    if (debounceMs !== undefined) return debounceMs;
+    const totalChars = files.reduce((acc, f) => acc + (f.content ? f.content.length : 0), 0);
+    if (totalChars < 3000) return 700;
+    if (totalChars < 12000) return 1100;
+    return 1800;
+  }, [debounceMs, files]);
+
   useEffect(() => {
     if (!autoCompile) return;
     if (!fingerprint) return;
@@ -147,12 +157,12 @@ export function useTexEngine({
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       void runCompile();
-    }, debounceMs);
+    }, effectiveDebounceMs);
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [fingerprint, autoCompile, debounceMs, runCompile]);
+  }, [fingerprint, autoCompile, effectiveDebounceMs, runCompile]);
 
   const isStale = Boolean(pdf) && Boolean(outcome) && !outcome!.ok;
 

@@ -55,11 +55,7 @@ import type {
   ProjectMember,
   TrackedChange
 } from './types/latex';
-import {
-  diagnoseLatex,
-  parseLatexDocument,
-  renderLatexToHtml
-} from './services/latexParser';
+import { useLatexParser } from './hooks/useLatexParser';
 import { parseBibtex } from './services/bibtexParser';
 import { STARTER_TEMPLATES } from './services/templates';
 import { exportProjectAsZip } from './services/zipExporter';
@@ -448,29 +444,15 @@ export function App() {
     if (notice) setToast(notice);
   }, []);
 
-  // Real-Time High-Performance Live Compilation Pipeline
-  // Diagnoses LaTeX syntax, parses AST, renders KaTeX/HTML, and measures REAL latency
-  const liveCompileResult = useMemo(() => {
-    const t0 = performance.now();
-    const isTex = activeFile.name.endsWith('.tex');
-    const diags = isTex ? diagnoseLatex(activeFile.content) : [];
-    const doc = parseLatexDocument(activeFile.content, files);
-    const html = renderLatexToHtml(activeFile.content, files);
-    const t1 = performance.now();
-
-    const elapsed = t1 - t0;
-    // Accurate real latency formatting: 1 decimal place if < 10ms, whole number if >= 10ms
-    const durationMs = elapsed < 10
-      ? Number(elapsed.toFixed(1))
-      : Math.round(elapsed);
-
-    return {
-      diagnostics: diags,
-      parsedDoc: doc,
-      renderedHtml: html,
-      durationMs: Math.max(0.5, durationMs),
-    };
-  }, [activeFile.content, activeFile.name, files]);
+  // Real-Time High-Performance Live Compilation Pipeline (Persistent Web Worker)
+  // Completely offloads AST parsing, syntax diagnostics, and KaTeX rendering to a dedicated worker.
+  // Guarantees 0ms editor main-thread blocking on every keystroke.
+  const liveCompileResult = useLatexParser({
+    content: activeFile.content,
+    files,
+    activeFileName: activeFile.name,
+    debounceMs: 80,
+  });
 
   const parsedDoc = liveCompileResult.parsedDoc;
   const renderedHtml = liveCompileResult.renderedHtml;
@@ -505,7 +487,13 @@ export function App() {
     }
 
     const outcome = texEngineView.outcome;
-    if (!outcome) return;
+    if (!outcome) {
+      setCompileState(prev => ({
+        ...prev,
+        durationMs: liveCompileResult.durationMs,
+      }));
+      return;
+    }
 
     setCompileState({
       status: outcome.ok ? 'success' : 'error',
