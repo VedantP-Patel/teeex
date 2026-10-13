@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/sync-pdfjs-assets.mjs && node scripts/fetch-engine.mjs",
+    "predev": "node scripts/sync-pdfjs-assets.mjs && node scripts/fetch-engine.mjs && node scripts/download-essential-packages.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/sync-pdfjs-assets.mjs && node scripts/fetch-engine.mjs",
+    "prebuild": "node scripts/sync-pdfjs-assets.mjs && node scripts/fetch-engine.mjs && node scripts/download-essential-packages.mjs",
     "build": "tsc -b && vite build",
     "engine": "node scripts/fetch-engine.mjs",
     "engine:full": "node scripts/fetch-engine.mjs --profile full",

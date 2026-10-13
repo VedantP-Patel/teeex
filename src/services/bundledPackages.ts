@@ -36,9 +36,19 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'msam7.tfm', format: 51 },
   { name: 'msbm7.tfm', format: 51 },
   { name: 'msam5.tfm', format: 51 },
-  { name: 'msbm5.tfm', format: 51 },
   { name: 'tfrupee.sty', format: 26 },
   { name: 'tfrupee.tfm', format: 51 },
+  { name: 'booktabs.sty', format: 26 },
+  { name: 'setspace.sty', format: 26 },
+  { name: 'enumitem.sty', format: 26 },
+  { name: 'titlesec.sty', format: 26 },
+  { name: 'float.sty', format: 26 },
+  { name: 'caption.sty', format: 26 },
+  { name: 'caption3.sty', format: 26 },
+  { name: 'ragged2e.sty', format: 26 },
+  { name: 'microtype.sty', format: 26 },
+  { name: 'microtype-pdftex.def', format: 26 },
+  { name: 'everysel.sty', format: 26 },
 ];
 
 const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
@@ -325,7 +335,7 @@ export async function preloadDocumentPackages(
           ? `/packages/${encodeURIComponent(target.name)}`
           : `${endpoint}/${target.format}/${encodeURIComponent(target.name)}`;
 
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: AbortSignal.timeout(2500) });
         if (res.ok) {
           const buf = new Uint8Array(await res.arrayBuffer());
           const loaded: LoadedPackage = {
