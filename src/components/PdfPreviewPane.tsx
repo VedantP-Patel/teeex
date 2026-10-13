@@ -248,6 +248,9 @@ export function PdfPreviewPane({
     void (async () => {
       try {
         opened = await PdfDocument.open(pdf);
+        opened.setOnGeometryUpdate((updatedPages) => {
+          if (!cancelled) setGeometry(updatedPages);
+        });
         const pages = await opened.geometry();
         if (cancelled) {
           void opened.destroy();

@@ -416,6 +416,8 @@ export class TexEngineService {
 
     const cacheKey = `${engine}:${entry.name}`;
     const currentSig = extractCrossRefSig(entry.content);
+    const prevSig = this.lastDocSig.get(cacheKey);
+    const prevAuxHash = this.lastAuxHashes.get(cacheKey);
 
     try {
       const tool =
@@ -441,9 +443,14 @@ export class TexEngineService {
       let log = result.log || '';
       let parsed = parseTexLog(log, { root: entry.name });
 
-      // If LaTeX explicitly signaled that cross-references, citations, or labels shifted,
-      // run exactly one follow-up pass to resolve them (capping total passes at 2, never 3).
-      if (parsed.rerunRequired && result.pdf && result.pdf.byteLength > 0) {
+      // Run follow-up pass only when auxiliary files are unsettled or cross-references/citations
+      // actually changed. If only body text was edited, pass 1 is already complete and accurate!
+      const needsFollowUp =
+        parsed.rerunRequired &&
+        (!prevAuxHash || currentSig !== prevSig) &&
+        Boolean(result.pdf && result.pdf.byteLength > 0);
+
+      if (needsFollowUp) {
         const followUp = await tool.compile({
           input: entry.content,
           mainTexPath: entry.name,

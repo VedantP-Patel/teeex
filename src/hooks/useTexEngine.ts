@@ -146,14 +146,15 @@ export function useTexEngine({
 
   const fingerprint = useMemo(() => fingerprintFiles(files), [files]);
 
-  // Adaptive debounce: short docs recompile quickly (700ms), heavy papers throttle (1100-1800ms)
-  // to avoid thrashing the WASM compiler during continuous editing.
+  // Ultra-responsive debounce for live editing:
+  // Short docs: 250ms, medium: 350ms, large papers: 450ms.
+  // Eliminates up to 1.35s of dead-time lag while preserving typing fluidity.
   const effectiveDebounceMs = useMemo(() => {
     if (debounceMs !== undefined) return debounceMs;
     const totalChars = files.reduce((acc, f) => acc + (f.content ? f.content.length : 0), 0);
-    if (totalChars < 3000) return 700;
-    if (totalChars < 12000) return 1100;
-    return 1800;
+    if (totalChars < 5000) return 250;
+    if (totalChars < 25000) return 350;
+    return 450;
   }, [debounceMs, files]);
 
   const isInitialMount = useRef(true);

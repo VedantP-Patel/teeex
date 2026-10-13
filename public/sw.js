@@ -1,11 +1,12 @@
 // Teeex — High-Performance Engine & Asset Cache Service Worker
 const CACHE_NAME = 'teeex-engine-cache-v1';
 
-// Immutable engine and viewer assets that never change within an engine release
+// Immutable engine, viewer, and remote TeX Live package assets
 const CACHE_PATTERNS = [
   /\/core\/busytex\//,
   /\/pdfjs\//,
   /\/packages\//,
+  /\/api\/texlive\//,
 ];
 
 self.addEventListener('install', () => {
