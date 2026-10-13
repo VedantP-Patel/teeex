@@ -53,6 +53,9 @@ Random Haar & 10 & 97.80 & 145.0 \\\\
 \\section{Conclusion}
 We demonstrated that attention-based quantum state tomography scales effectively beyond the reach of standard convex optimization solvers. Future work will explore real-time hardware deployment on superconducting architectures.
 
+\\bibliographystyle{plain}
+\\bibliography{references}
+
 \\end{document}`;
 
 const IEEE_PAPER_TEX = `\\documentclass[conference]{IEEEtran}
@@ -107,6 +110,9 @@ Random Haar & 10 & 97.80 & 145.0 \\\\
 
 \\section{Conclusion}
 We demonstrated that attention-based quantum state tomography scales effectively beyond the reach of standard convex optimization solvers. Future work will explore real-time hardware deployment on superconducting architectures.
+
+\\bibliographystyle{IEEEtran}
+\\bibliography{references}
 
 \\end{document}`;
 

@@ -416,13 +416,6 @@ export class TexEngineService {
 
     const cacheKey = `${engine}:${entry.name}`;
     const currentSig = extractCrossRefSig(entry.content);
-    const prevSig = this.lastDocSig.get(cacheKey);
-    const prevAuxHash = this.lastAuxHashes.get(cacheKey);
-    const wasRerunRequired = this.lastRerunRequired.get(cacheKey) ?? false;
-
-    // Only run multi-pass if aux hasn't settled yet, cross-references changed,
-    // or the previous run explicitly flagged that another pass is needed.
-    const shouldRerun = !prevAuxHash || currentSig !== prevSig || wasRerunRequired;
 
     try {
       const tool =
@@ -432,22 +425,25 @@ export class TexEngineService {
             ? new LuaLatex(runner, false)
             : new PdfLatex(runner, false);
 
+      // Always pass rerun: false to BusyTex to avoid its internal 3-pass loop.
+      // We explicitly control multi-pass compilation: Pass 1 (fast baseline + bibtex),
+      // and at most ONE follow-up pass if LaTeX explicitly requested rerun for labels/citations.
       let result = await tool.compile({
         input: entry.content,
         mainTexPath: entry.name,
         additionalFiles: toEngineFiles(input.files, entry.name),
         bibtex: input.bibtex ?? needsBibtex(input.files, entry.content),
         makeindex: input.makeindex ?? needsMakeindex(entry.content),
-        rerun: shouldRerun,
+        rerun: false,
         remoteEndpoint: remoteEndpoint(),
       });
 
       let log = result.log || '';
       let parsed = parseTexLog(log, { root: entry.name });
 
-      // If we ran in single-pass mode to optimize speed, but LaTeX signaled that references
-      // or labels shifted (e.g. text pushed across a page), do one fast single pass to settle them.
-      if (!shouldRerun && parsed.rerunRequired && result.pdf && result.pdf.byteLength > 0) {
+      // If LaTeX explicitly signaled that cross-references, citations, or labels shifted,
+      // run exactly one follow-up pass to resolve them (capping total passes at 2, never 3).
+      if (parsed.rerunRequired && result.pdf && result.pdf.byteLength > 0) {
         const followUp = await tool.compile({
           input: entry.content,
           mainTexPath: entry.name,

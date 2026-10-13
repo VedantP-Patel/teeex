@@ -9,6 +9,8 @@
  * subsequent compiles across browser sessions incur 0ms network latency.
  */
 
+import { TEXLIVE_BASIC_PACKAGES } from './texliveBasicFiles';
+
 export interface BundledPackageDef {
   name: string;
   format: number; // 26 = TeX/LaTeX class/style/source, 51 = TFM font metric
@@ -38,6 +40,8 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'tfrupee.sty', format: 26 },
   { name: 'tfrupee.tfm', format: 51 },
 ];
+
+const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
 
 export interface LoadedPackage {
   name: string;
@@ -243,9 +247,13 @@ export async function preloadDocumentPackages(
     }
   }
 
-  // Deduplicate target files
+  // Deduplicate target files and filter out packages already baked into texlive-basic.data!
   const uniqueTargets = new Map<string, { name: string; format: number }>();
   for (const tf of targetFiles) {
+    if (TEXLIVE_BASIC_PACKAGES.has(tf.name.toLowerCase())) {
+      // Already bundled inside WASM texlive-basic.data virtual filesystem
+      continue;
+    }
     if (!uniqueTargets.has(tf.name)) {
       uniqueTargets.set(tf.name, tf);
     }
@@ -312,7 +320,11 @@ export async function preloadDocumentPackages(
   await Promise.all(
     toFetch.map(async (target) => {
       try {
-        const url = `${endpoint}/${target.format}/${encodeURIComponent(target.name)}`;
+        const isBundled = BUNDLED_PACKAGE_NAMES.has(target.name);
+        const url = isBundled
+          ? `/packages/${encodeURIComponent(target.name)}`
+          : `${endpoint}/${target.format}/${encodeURIComponent(target.name)}`;
+
         const res = await fetch(url);
         if (res.ok) {
           const buf = new Uint8Array(await res.arrayBuffer());

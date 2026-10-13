@@ -156,9 +156,19 @@ export function useTexEngine({
     return 1800;
   }, [debounceMs, files]);
 
+  const isInitialMount = useRef(true);
+
   useEffect(() => {
     if (!autoCompile) return;
     if (!fingerprint) return;
+
+    // Immediately trigger compilation on initial mount without any debounce delay
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      setIsDebouncing(false);
+      void runCompile();
+      return;
+    }
 
     if (timerRef.current) clearTimeout(timerRef.current);
     setIsDebouncing(true);

@@ -119,7 +119,9 @@ function PdfPageView({
           setPainted(true);
           const container = textRef.current;
           if (container) {
-            await doc.renderTextLayer(geometry.pageNumber, zoom, container);
+            void doc.renderTextLayer(geometry.pageNumber, zoom, container).catch((err) => {
+              console.warn(`[PdfPageView] Page ${geometry.pageNumber} text layer error:`, err);
+            });
           }
         }
       } catch (err) {
