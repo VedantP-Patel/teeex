@@ -89,7 +89,7 @@ export function useTexEngine({
   files,
   engine = 'pdflatex',
   autoCompile = true,
-  debounceMs = 350,
+  debounceMs = 1200,
 }: UseTexEngineOptions): UseTexEngineResult {
   const [status, setStatus] = useState<EngineStatus>(() => texEngine.getStatus());
   const [outcome, setOutcome] = useState<CompileOutcome | null>(null);

@@ -509,7 +509,8 @@ export function App() {
 
     setCompileState({
       status: outcome.ok ? 'success' : 'error',
-      durationMs: outcome.durationMs,
+      durationMs: liveCompileResult.durationMs,
+      pdfDurationMs: outcome.durationMs,
       errorCount: outcome.diagnostics.filter(d => d.severity === 'error').length,
       warningCount: outcome.diagnostics.filter(d => d.severity === 'warning').length,
       timestamp: texEngineView.lastCompiledAt
@@ -517,7 +518,7 @@ export function App() {
         : new Date().toLocaleTimeString(),
       rawLogs: outcome.log ? outcome.log.split(/\r?\n/).filter(Boolean) : [],
     });
-  }, [texEngineView.isCompiling, texEngineView.outcome, texEngineView.lastCompiledAt]);
+  }, [texEngineView.isCompiling, texEngineView.outcome, texEngineView.lastCompiledAt, liveCompileResult.durationMs]);
 
   // Document Stats
   const wordCount = useMemo(() => {

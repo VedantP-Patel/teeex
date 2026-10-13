@@ -197,7 +197,7 @@ export class PdfDocument {
     canvas.style.height = `${viewport.height}px`;
 
     const task = page.render({
-      canvas,
+      canvas: null,
       canvasContext: context,
       viewport,
       transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],

@@ -1,12 +1,67 @@
 import type { Template } from '../types/latex';
 
-const IEEE_PAPER_TEX = `\\documentclass[conference,twocolumn]{IEEEtran}
+const RESEARCH_PAPER_TEX = `\\documentclass[10pt,twocolumn]{article}
 \\usepackage{amsmath,amssymb,amsfonts}
 \\usepackage{graphicx}
 \\usepackage{cite}
 
 \\title{Neural Quantum State Tomography with Self-Attention Mechanisms}
-\\author{Dr. Elena Rostova\\and Dr. Marcus Chen\\and Dr. Aris Thorne}
+\\author{Dr. Elena Rostova \\and Dr. Marcus Chen \\and Dr. Aris Thorne}
+\\date{\\today}
+
+\\begin{document}
+
+\\maketitle
+
+\\begin{abstract}
+Quantum state tomography is essential for characterizing quantum information processors. However, conventional maximum likelihood estimation scales exponentially with the number of qubits $N$. In this paper, we propose an attention-augmented transformer framework capable of reconstructing density matrices $\\rho$ with $99.4\\%$ fidelity in polynomial time.
+\\end{abstract}
+
+\\section{Introduction}
+Characterization of quantum computational devices requires robust reconstruction of quantum density operators. Given an ensemble of Pauli measurements, reconstructing the density operator $\\rho \\in \\mathbb{C}^{2^N \\times 2^N}$ poses a fundamental challenge in quantum verification \\cite{thorne2025quantum}.
+
+Traditional tomography relies on matrix inversion and compressed sensing. Our approach utilizes neural representations where the probability distribution $P(\\sigma)$ of measurement outcomes is modeled directly:
+\\begin{equation}
+P(\\boldsymbol{\\sigma}) = \\frac{1}{Z} \\exp\\left( -\\sum_{j=1}^M \\theta_j \\phi_j(\\boldsymbol{\\sigma}) \\right)
+\\end{equation}
+
+\\section{System Architecture}
+The quantum variational autoencoder comprises an encoder module $E_\\phi$ that maps projective basis states to continuous latent representations:
+\\begin{equation}
+\\mathcal{L}_{\\text{rec}}(\\theta, \\phi) = \\mathbb{E}_{x \\sim \\mathcal{D}}\\left[ -\\log p_\\theta(x | z) \\right] + D_{\\text{KL}}\\left( q_\\phi(z|x) \\parallel p(z) \\right)
+\\end{equation}
+
+\\section{Experimental Results}
+We evaluated our framework against synthetic GHZ and W-states across system sizes up to $N = 12$ qubits. Table I summarizes the reconstruction fidelity and convergence latency.
+
+\\begin{table}[htbp]
+\\centering
+\\caption{Reconstruction Fidelity and Execution Latency Across Quantum State Families}
+\\label{tab:fidelity}
+\\begin{tabular}{l c c c}
+\\hline
+Quantum State & Qubits ($N$) & Fidelity (\\%) & Runtime (ms) \\\\
+\\hline
+GHZ State & 4 & 99.82 & 14.2 \\\\
+W-State & 6 & 99.45 & 28.6 \\\\
+Cluster State & 8 & 98.91 & 62.4 \\\\
+Random Haar & 10 & 97.80 & 145.0 \\\\
+\\hline
+\\end{tabular}
+\\end{table}
+
+\\section{Conclusion}
+We demonstrated that attention-based quantum state tomography scales effectively beyond the reach of standard convex optimization solvers. Future work will explore real-time hardware deployment on superconducting architectures.
+
+\\end{document}`;
+
+const IEEE_PAPER_TEX = `\\documentclass[conference]{IEEEtran}
+\\usepackage{amsmath,amssymb,amsfonts}
+\\usepackage{graphicx}
+\\usepackage{cite}
+
+\\title{Neural Quantum State Tomography with Self-Attention Mechanisms}
+\\author{\\IEEEauthorblockN{Dr. Elena Rostova, Dr. Marcus Chen, and Dr. Aris Thorne}}
 \\date{\\today}
 
 \\begin{document}
@@ -100,10 +155,32 @@ const ACADEMIC_CV_TEX = `\\documentclass{article}
 
 export const STARTER_TEMPLATES: Template[] = [
   {
+    id: 'research-paper',
+    name: 'Academic Research Paper',
+    category: 'Academic Paper',
+    description: 'High-performance two-column research paper with abstract, mathematical model, and citations.',
+    badge: 'Standard Article',
+    files: [
+      {
+        id: 'main.tex',
+        name: 'main.tex',
+        type: 'tex',
+        isEntry: true,
+        content: RESEARCH_PAPER_TEX,
+      },
+      {
+        id: 'references.bib',
+        name: 'references.bib',
+        type: 'bib',
+        content: REFERENCES_BIB,
+      }
+    ]
+  },
+  {
     id: 'ieee-conference',
     name: 'IEEE Conference Paper',
     category: 'Academic Paper',
-    description: 'Two-column academic research paper format with abstract, mathematical model, and citations.',
+    description: 'Two-column academic research paper format with IEEEauthorblock.',
     badge: 'IEEE Style',
     files: [
       {

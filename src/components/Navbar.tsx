@@ -307,7 +307,11 @@ export const Navbar: React.FC<Props> = ({
                   fontFamily: 'var(--font-mono)',
                   letterSpacing: '-0.02em',
                 }}
-                title={`Live compilation & render latency: ${compileState.durationMs}ms`}
+                title={
+                  compileState.pdfDurationMs
+                    ? `Live keystroke render: ${compileState.durationMs}ms | Engine PDF pass: ${compileState.pdfDurationMs}ms`
+                    : `Live compilation & render latency: ${compileState.durationMs}ms`
+                }
               >
                 ({compileState.durationMs}ms)
               </span>

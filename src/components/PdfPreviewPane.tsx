@@ -120,9 +120,8 @@ function PdfPageView({
             await doc.renderTextLayer(geometry.pageNumber, zoom, container);
           }
         }
-      } catch {
-        // A page that fails to paint keeps its placeholder; the error is
-        // surfaced once at the document level rather than per page.
+      } catch (err) {
+        console.warn(`[PdfPageView] Page ${geometry.pageNumber} render error:`, err);
       }
     })();
 
@@ -164,7 +163,8 @@ function PdfPageView({
       <canvas ref={canvasRef} className="pdf-page-canvas" aria-hidden />
       {!painted && (
         <div className="pdf-page-placeholder" aria-hidden>
-          <span>{geometry.pageNumber}</span>
+          <Loader2 size={15} className="spin" style={{ color: '#38bdf8', marginBottom: 4 }} />
+          <span>Page {geometry.pageNumber}</span>
         </div>
       )}
       <div ref={textRef} className="pdf-text-layer" />

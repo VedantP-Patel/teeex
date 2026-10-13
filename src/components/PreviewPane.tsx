@@ -22,7 +22,7 @@
  */
 
 import React, { useCallback, useState } from 'react';
-import { FileCode2, FileText } from 'lucide-react';
+import { FileCode2, FileText, Loader2 } from 'lucide-react';
 import type { ParsedDocument } from '../types/latex';
 import type { SyncTexIndex, ForwardMatch } from '../services/synctex';
 import type { EngineStatus } from '../services/latexCompiler';
@@ -131,18 +131,57 @@ export function PreviewPane({
       </div>
 
       {surface === 'pdf' ? (
-        <PdfPreviewPane
-          pdf={pdf}
-          status={status}
-          isCompiling={isCompiling}
-          isStale={isStale}
-          errorSummary={errorSummary}
-          documentTitle={documentTitle}
-          onCompile={onCompile}
-          syncTexIndex={syncTexIndex}
-          forwardTarget={forwardTarget}
-          onInverseSync={onInverseSync}
-        />
+        pdf ? (
+          <PdfPreviewPane
+            pdf={pdf}
+            status={status}
+            isCompiling={isCompiling}
+            isStale={isStale}
+            errorSummary={errorSummary}
+            documentTitle={documentTitle}
+            onCompile={onCompile}
+            syncTexIndex={syncTexIndex}
+            forwardTarget={forwardTarget}
+            onInverseSync={onInverseSync}
+          />
+        ) : (
+          <div className="outline-pane">
+            <div
+              className="outline-notice"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'rgba(56, 189, 248, 0.08)',
+                color: '#38bdf8',
+                borderBottom: '1px solid rgba(56, 189, 248, 0.2)',
+                padding: '8px 14px',
+              }}
+            >
+              <Loader2 size={12} className="spin" style={{ flexShrink: 0 }} />
+              <span>
+                {status.phase === 'fetching'
+                  ? `Preparing high-fidelity PDF engine (${Math.round(status.progress)}%)... Showing instant live draft.`
+                  : isCompiling
+                    ? 'Typesetting PDF in background... Showing instant live draft preview.'
+                    : 'Instant live draft preview (compiling PDF in background...)'}
+              </span>
+            </div>
+
+            <div className="outline-scroll">
+              <article className="outline-sheet" onClick={handleOutlineClick}>
+                {parsedDoc.title && <h1 className="outline-title">{parsedDoc.title}</h1>}
+                {parsedDoc.authors.length > 0 && (
+                  <p className="outline-authors">{parsedDoc.authors.join(' · ')}</p>
+                )}
+                <div
+                  className="outline-body latex-paper-sheet"
+                  dangerouslySetInnerHTML={{ __html: renderedHtml }}
+                />
+              </article>
+            </div>
+          </div>
+        )
       ) : (
         <div className="outline-pane">
           <p className="outline-notice">

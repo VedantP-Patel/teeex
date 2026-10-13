@@ -61,6 +61,7 @@ export interface ReviewComment {
 export interface CompileState {
   status: 'idle' | 'compiling' | 'success' | 'error';
   durationMs: number;
+  pdfDurationMs?: number;
   timestamp: string;
   errorCount: number;
   warningCount: number;
