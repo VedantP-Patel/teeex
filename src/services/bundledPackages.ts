@@ -1,12 +1,5 @@
 /**
  * Teeex — Pre-bundled academic templates and font metric assets with IndexedDB persistence.
- *
- * Pre-seeds popular academic packages (IEEEtran, cite, acmart) and essential
- * font metrics (Times, Helvetica, AMS Math) into the WebAssembly engine's
- * in-memory kpathsea tree on initialization.
- *
- * Persists both preloaded and remotely downloaded CTAN assets in IndexedDB so
- * subsequent compiles across browser sessions incur 0ms network latency.
  */
 
 import { TEXLIVE_BASIC_PACKAGES } from './texliveBasicFiles';
@@ -73,6 +66,7 @@ export interface LoadedPackage {
   name: string;
   format: number;
   content: Uint8Array;
+  contents?: Uint8Array;
 }
 
 const DB_NAME = 'teeex_packages_db';
@@ -81,11 +75,15 @@ const STORE_PACKAGES = 'packages';
 const STORE_MISSES = 'misses';
 
 const packageMemoryCache = new Map<string, Uint8Array>();
+const failedFetchCache = new Set<string>();
 let loadPromise: Promise<LoadedPackage[]> | null = null;
+let dbPromise: Promise<IDBDatabase | null> | null = null;
 
 function openPackagesDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null);
-  return new Promise((resolve) => {
+  if (dbPromise) return dbPromise;
+
+  dbPromise = new Promise((resolve) => {
     try {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = (ev) => {
@@ -103,6 +101,8 @@ function openPackagesDb(): Promise<IDBDatabase | null> {
       resolve(null);
     }
   });
+
+  return dbPromise;
 }
 
 async function getAllFromIndexedDb(): Promise<LoadedPackage[]> {
@@ -117,11 +117,15 @@ async function getAllFromIndexedDb(): Promise<LoadedPackage[]> {
       req.onsuccess = () => {
         const rows = (req.result || []) as Array<{ name: string; format: number; content: Uint8Array }>;
         resolve(
-          rows.map((r) => ({
-            name: r.name,
-            format: r.format,
-            content: r.content instanceof Uint8Array ? r.content : new Uint8Array(r.content),
-          })),
+          rows.map((r) => {
+            const bytes = r.content instanceof Uint8Array ? r.content : new Uint8Array(r.content);
+            return {
+              name: r.name,
+              format: r.format,
+              content: bytes,
+              contents: bytes,
+            };
+          }),
         );
       };
       req.onerror = () => resolve([]);
@@ -144,7 +148,7 @@ function saveToIndexedDb(pkg: LoadedPackage): void {
         content: pkg.content,
       });
     } catch {
-      // Non-fatal if IndexedDB write fails
+      // Non-fatal
     }
   })();
 }
@@ -179,14 +183,12 @@ export async function getBundledPackages(): Promise<LoadedPackage[]> {
   loadPromise = (async () => {
     const resultsMap = new Map<string, LoadedPackage>();
 
-    // 1. Hydrate from IndexedDB first (0ms latency if cached from past sessions)
     const stored = await getAllFromIndexedDb();
     for (const item of stored) {
       resultsMap.set(item.name, item);
       packageMemoryCache.set(item.name, item.content);
     }
 
-    // 2. Fetch any missing core bundled packages from static /packages/
     const missingCore = BUNDLED_PACKAGES.filter((p) => !resultsMap.has(p.name));
     if (missingCore.length > 0) {
       await Promise.all(
@@ -199,13 +201,14 @@ export async function getBundledPackages(): Promise<LoadedPackage[]> {
                 name: pkg.name,
                 format: pkg.format,
                 content: buf,
+                contents: buf,
               };
               resultsMap.set(pkg.name, loaded);
               packageMemoryCache.set(pkg.name, buf);
               saveToIndexedDb(loaded);
             }
           } catch {
-            // Graceful fallback if asset cannot be fetched
+            // Ignore
           }
         }),
       );
@@ -217,21 +220,10 @@ export async function getBundledPackages(): Promise<LoadedPackage[]> {
   return loadPromise;
 }
 
-/**
- * Returns package content synchronously if already pre-loaded into memory.
- */
 export function getCachedPackageContent(name: string): Uint8Array | undefined {
   return packageMemoryCache.get(name);
 }
 
-/**
- * Scans a LaTeX document's preamble for required packages and document classes,
- * then concurrently pre-fetches any missing assets from the edge endpoint before
- * the WebAssembly compiler starts typesetting.
- *
- * This turns 20-30 sequential synchronous XHR stalls inside WASM into a single
- * parallel HTTP/2 batch (~300ms total), completely eliminating WAN freezes.
- */
 export async function preloadDocumentPackages(
   texContent: string,
   remoteEndpointUrl?: string,
@@ -263,38 +255,31 @@ export async function preloadDocumentPackages(
     }
   }
 
-  // Match \input{foo} or \include{foo} for common external macro or package files
-  const inputMatches = texContent.matchAll(/\\(?:input|include)\{([^}]+)\}/g);
-  for (const match of inputMatches) {
-    const raw = match[1]?.trim();
-    if (raw && !raw.startsWith('/') && !raw.startsWith('.')) {
-      const name = raw.includes('.') ? raw : `${raw}.tex`;
-      targetFiles.push({ name, format: 26 });
-    }
-  }
-
-  // Deduplicate target files and filter out packages already baked into texlive-basic.data!
+  // Filter out packages already in texlive-basic.data or known 404 misses
   const uniqueTargets = new Map<string, { name: string; format: number }>();
   for (const tf of targetFiles) {
-    if (TEXLIVE_BASIC_PACKAGES.has(tf.name.toLowerCase())) {
-      // Already bundled inside WASM texlive-basic.data virtual filesystem
-      continue;
-    }
+    if (TEXLIVE_BASIC_PACKAGES.has(tf.name.toLowerCase())) continue;
+    if (failedFetchCache.has(tf.name)) continue;
     if (!uniqueTargets.has(tf.name)) {
       uniqueTargets.set(tf.name, tf);
     }
   }
+
   const targets = Array.from(uniqueTargets.values());
   if (targets.length === 0) return [];
 
   const resolvedPackages: LoadedPackage[] = [];
   const neededFiles: Array<{ name: string; format: number }> = [];
 
-  // Check in-memory cache first
   for (const target of targets) {
     const memBuf = packageMemoryCache.get(target.name);
     if (memBuf) {
-      resolvedPackages.push({ name: target.name, format: target.format, content: memBuf });
+      resolvedPackages.push({
+        name: target.name,
+        format: target.format,
+        content: memBuf,
+        contents: memBuf,
+      });
     } else {
       neededFiles.push(target);
     }
@@ -303,8 +288,6 @@ export async function preloadDocumentPackages(
   if (neededFiles.length === 0) return resolvedPackages;
 
   const db = await openPackagesDb();
-
-  // If in IndexedDB, hydrate immediately
   if (db) {
     try {
       const tx = db.transaction(STORE_PACKAGES, 'readonly');
@@ -320,7 +303,12 @@ export async function preloadDocumentPackages(
                     ? req.result.content
                     : new Uint8Array(req.result.content);
                 packageMemoryCache.set(target.name, buf);
-                resolvedPackages.push({ name: target.name, format: target.format, content: buf });
+                resolvedPackages.push({
+                  name: target.name,
+                  format: target.format,
+                  content: buf,
+                  contents: buf,
+                });
               }
               resolve();
             };
@@ -333,8 +321,9 @@ export async function preloadDocumentPackages(
     }
   }
 
-  // Files still missing from both memory and IndexedDB: fetch concurrently in parallel!
-  const toFetch = neededFiles.filter((target) => !packageMemoryCache.has(target.name));
+  const toFetch = neededFiles.filter(
+    (target) => !packageMemoryCache.has(target.name) && !failedFetchCache.has(target.name)
+  );
   if (toFetch.length === 0) return resolvedPackages;
 
   const endpoint =
@@ -351,20 +340,23 @@ export async function preloadDocumentPackages(
           ? `/packages/${encodeURIComponent(target.name)}`
           : `${endpoint}/${target.format}/${encodeURIComponent(target.name)}`;
 
-        const res = await fetch(url, { signal: AbortSignal.timeout(2500) });
+        const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
         if (res.ok) {
           const buf = new Uint8Array(await res.arrayBuffer());
           const loaded: LoadedPackage = {
             name: target.name,
             format: target.format,
             content: buf,
+            contents: buf,
           };
           packageMemoryCache.set(target.name, buf);
           saveToIndexedDb(loaded);
           resolvedPackages.push(loaded);
+        } else if (res.status === 404) {
+          failedFetchCache.add(target.name);
         }
       } catch {
-        // Fallback to runtime compiler resolution
+        failedFetchCache.add(target.name);
       }
     }),
   );

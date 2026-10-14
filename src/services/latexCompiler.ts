@@ -196,13 +196,14 @@ export class TexEngineService {
       const mountedSet = new Set<string>();
       this.mountedPackagesByEngine.set(engine, mountedSet);
 
+      // BLOCK 1: Pre-seed bundled packages once on worker initialization
       try {
         const bundled = await getBundledPackages();
         if (bundled.length > 0) {
           await runner.writeTexliveRemoteFiles(bundled);
           for (const pkg of bundled) {
-            if ('filename' in pkg && typeof pkg.filename === 'string') {
-              mountedSet.add(pkg.filename);
+            if (pkg.name) {
+              mountedSet.add(pkg.name);
             }
           }
         }
@@ -357,23 +358,21 @@ export class TexEngineService {
 
     this.setStatus({ phase: 'compiling', engine });
 
-    // Only scan and mount remote packages when the preamble actually changes,
-    // and only write files not already mounted into the WASM worker filesystem.
+    // BLOCK 2: Only scan and mount remote packages when the preamble changes,
+    // and only write packages not already mounted in the WASM filesystem.
     try {
       const { sig: preambleSig, preambleText } = extractPreambleSig(input.files);
       if (this.lastPreambleSig.get(engine) !== preambleSig) {
         const preloaded = await preloadDocumentPackages(preambleText, remoteEndpoint());
         const mountedSet = this.mountedPackagesByEngine.get(engine) ?? new Set<string>();
-        const unmounted = preloaded.filter((pkg: any) => {
-          const key = pkg.filename || pkg.path || '';
-          return !key || !mountedSet.has(key);
-        });
+        const unmounted = preloaded.filter((pkg) => !mountedSet.has(pkg.name));
 
         if (unmounted.length > 0) {
           await runner.writeTexliveRemoteFiles(unmounted);
-          for (const pkg of unmounted as any[]) {
-            const key = pkg.filename || pkg.path || '';
-            if (key) mountedSet.add(key);
+          for (const pkg of unmounted) {
+            if (pkg.name) {
+              mountedSet.add(pkg.name);
+            }
           }
           this.mountedPackagesByEngine.set(engine, mountedSet);
         }
@@ -411,7 +410,7 @@ export class TexEngineService {
       let log = result.log || '';
       let parsed = parseTexLog(log, { root: entry.name });
 
-      // Skip second pass if a newer compile is already waiting in the queue!
+      // Skip second pass if a newer compile is already waiting in the queue
       const needsFollowUp =
         !this.queued &&
         parsed.rerunRequired &&
