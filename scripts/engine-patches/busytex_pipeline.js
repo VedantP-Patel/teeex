@@ -596,7 +596,7 @@ class BusytexPipeline {
         this.print('Data packages used (not preloaded): ' + fmt_packages_list(Array.from(new Set(filter_map(v => v.used && v.source != 'local' && v.source != null && !this.preload_data_packages_js.includes(v.source), false))).sort()));
         this.print('Data packages used: ' + fmt_packages_list(data_packages_js));
 
-        if (tex_packages_not_resolved.length > 0) {
+        if (!remote_endpoint && tex_packages_not_resolved.length > 0) {
             data_packages_js = this.data_package_resolver.data_packages_js;
             this.print('Because of unresolved TeX packages, enabling all available data packages: ' + data_packages_js.sort().toString());
         }

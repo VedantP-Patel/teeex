@@ -6985,12 +6985,30 @@ changes have the same license
       fetch: function (name, format) {
         var endpoint = Module.ENV['TEXLIVE_REMOTE_ENDPOINT'];
         if (!endpoint) return null;
+
+        // 1. Fast-path: check same-origin /packages/<name> for bundled assets (<10ms)
+        try {
+          var localXhr = new XMLHttpRequest();
+          localXhr.open('GET', '/packages/' + encodeURIComponent(name), false);
+          localXhr.timeout = 1000;
+          localXhr.responseType = 'arraybuffer';
+          localXhr.send();
+          if (localXhr.status === 200 && localXhr.response && localXhr.response.byteLength > 0) {
+            var localBytes = new Uint8Array(localXhr.response);
+            return KPSE_REMOTE.register(name, format, localBytes);
+          }
+        } catch (_localErr) {}
+
+        // 2. Fetch from remote endpoint with a 2.5s circuit breaker (never block for 30s)
         var url = endpoint + (endpoint.endsWith('/') ? '' : '/') + format + '/' + encodeURIComponent(name);
         var xhr = new XMLHttpRequest();
         xhr.open('GET', url, false);
-        xhr.timeout = 30000;
+        xhr.timeout = 2500;
         xhr.responseType = 'arraybuffer';
-        try { xhr.send(); } catch (e) { return null; }
+        try { xhr.send(); } catch (e) {
+          KPSE_REMOTE.misses[format + '/' + name] = 1;
+          return null;
+        }
         if (xhr.status === 200 && xhr.response && xhr.response.byteLength > 0) {
           var bytes = new Uint8Array(xhr.response);
           if (typeof indexedDB !== 'undefined') {
@@ -7012,26 +7030,25 @@ changes have the same license
           }
           return KPSE_REMOTE.register(name, format, bytes);
         }
-        if (xhr.status === 404) {
-          KPSE_REMOTE.misses[format + '/' + name] = 1;
-          if (typeof indexedDB !== 'undefined') {
-            try {
-              var missReq = indexedDB.open('teeex_packages_db', 1);
-              missReq.onupgradeneeded = function (ev) {
-                var db = ev.target.result;
-                if (!db.objectStoreNames.contains('packages')) db.createObjectStore('packages', { keyPath: 'key' });
-                if (!db.objectStoreNames.contains('misses')) db.createObjectStore('misses', { keyPath: 'key' });
-              };
-              missReq.onsuccess = function (ev) {
-                var db = ev.target.result;
-                try {
-                  var tx = db.transaction('misses', 'readwrite');
-                  tx.objectStore('misses').put({ key: format + '/' + name });
-                } catch (e2) {}
-              };
-            } catch (e1) {}
-          }
-          return null;
+
+        // 3. Record all non-200 responses (404, 500, timeout) in misses so they never hang again
+        KPSE_REMOTE.misses[format + '/' + name] = 1;
+        if (typeof indexedDB !== 'undefined') {
+          try {
+            var missReq = indexedDB.open('teeex_packages_db', 1);
+            missReq.onupgradeneeded = function (ev) {
+              var db = ev.target.result;
+              if (!db.objectStoreNames.contains('packages')) db.createObjectStore('packages', { keyPath: 'key' });
+              if (!db.objectStoreNames.contains('misses')) db.createObjectStore('misses', { keyPath: 'key' });
+            };
+            missReq.onsuccess = function (ev) {
+              var db = ev.target.result;
+              try {
+                var tx = db.transaction('misses', 'readwrite');
+                tx.objectStore('misses').put({ key: format + '/' + name });
+              } catch (e2) {}
+            };
+          } catch (e1) {}
         }
         return null;
       },

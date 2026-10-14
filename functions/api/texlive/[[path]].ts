@@ -26,10 +26,39 @@ export const onRequest: PagesFunction = async (context) => {
     });
   }
 
+  // Check static bundled /packages/<filename> first (<1ms local edge cache)
+  const filename = subpath.slice(subpath.lastIndexOf('/') + 1);
+  if (filename) {
+    try {
+      const packageUrl = new URL(`/packages/${encodeURIComponent(filename)}`, url.origin);
+      const localRes = await fetch(packageUrl.toString());
+      if (localRes.ok && localRes.body) {
+        const headers = new Headers(localRes.headers);
+        headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+        headers.set('Access-Control-Allow-Origin', '*');
+        headers.set('Access-Control-Expose-Headers', 'fileid, Content-Length');
+        headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+        if (
+          filename.endsWith('.cls') ||
+          filename.endsWith('.sty') ||
+          filename.endsWith('.tex') ||
+          filename.endsWith('.def') ||
+          filename.endsWith('.fd')
+        ) {
+          headers.set('Content-Type', 'text/plain; charset=utf-8');
+        } else if (filename.endsWith('.tfm')) {
+          headers.set('Content-Type', 'application/x-tex-tfm');
+        }
+        return new Response(localRes.body, { headers });
+      }
+    } catch (_e) {}
+  }
+
   const upstreamUrl = `${UPSTREAM_TEXLIVE_BASE}/${subpath}`;
 
   try {
     const upstreamRes = await fetch(upstreamUrl, {
+      signal: AbortSignal.timeout(3000),
       headers: {
         'User-Agent': 'Teeex-Edge-Proxy/1.0',
         'Accept': '*/*',
