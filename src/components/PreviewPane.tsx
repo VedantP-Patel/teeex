@@ -30,7 +30,7 @@ import { PdfPreviewPane } from './PdfPreviewPane';
 
 type Surface = 'hybrid' | 'pdf' | 'outline';
 
-const SURFACE_STORAGE_KEY = 'teeex_preview_surface';
+const SURFACE_STORAGE_KEY = 'teeex_preview_surface_v2';
 
 interface Props {
   /** Draft HTML rendering of the source, for the outline surface. */
@@ -145,61 +145,69 @@ export function PreviewPane({
       </div>
 
       {surface === 'hybrid' ? (
-        isDebouncing || !pdf ? (
-          <div className="outline-pane">
-            <div
-              className="outline-notice"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                background: 'rgba(56, 189, 248, 0.08)',
-                color: '#38bdf8',
-                borderBottom: '1px solid rgba(56, 189, 248, 0.2)',
-                padding: '6px 14px',
-                fontSize: '12px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="pulse-dot" style={{ backgroundColor: '#38bdf8' }} />
-                <span>
-                  <strong>⚡ Instant 60fps Live Sync</strong> — typing feedback in &lt;15ms
-                </span>
-              </div>
-              <span style={{ fontSize: '11px', opacity: 0.8 }}>
-                {isCompiling ? 'Typesetting vector PDF in background...' : 'Live draft active'}
+        <div className="outline-pane">
+          <div
+            className="outline-notice"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'rgba(56, 189, 248, 0.08)',
+              color: '#38bdf8',
+              borderBottom: '1px solid rgba(56, 189, 248, 0.2)',
+              padding: '6px 14px',
+              fontSize: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="pulse-dot" style={{ backgroundColor: '#38bdf8' }} />
+              <span>
+                <strong>⚡ Instant 60fps Live Sync</strong> — typing feedback in &lt;15ms
               </span>
             </div>
-
-            <div className="outline-scroll">
-              <article className="outline-sheet" onClick={handleOutlineClick}>
-                {parsedDoc.title && <h1 className="outline-title">{parsedDoc.title}</h1>}
-                {parsedDoc.authors.length > 0 && (
-                  <p className="outline-authors">{parsedDoc.authors.join(' · ')}</p>
-                )}
-                <div
-                  className="outline-body latex-paper-sheet"
-                  dangerouslySetInnerHTML={{ __html: renderedHtml }}
-                />
-              </article>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: '11px', opacity: 0.85 }}>
+                {isCompiling
+                  ? 'Typesetting vector PDF in background...'
+                  : pdf
+                    ? '✓ Vector PDF in sync'
+                    : 'Live draft active'}
+              </span>
+              {pdf && (
+                <button
+                  type="button"
+                  onClick={() => selectSurface('pdf')}
+                  style={{
+                    background: 'rgba(56, 189, 248, 0.15)',
+                    border: '1px solid rgba(56, 189, 248, 0.4)',
+                    borderRadius: '4px',
+                    color: '#38bdf8',
+                    padding: '2px 8px',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    fontWeight: 500,
+                  }}
+                  title="Switch to PDF view to see authoritative vector pages"
+                >
+                  View PDF →
+                </button>
+              )}
             </div>
           </div>
-        ) : (
-          <PdfPreviewPane
-            pdf={pdf}
-            status={status}
-            isCompiling={isCompiling}
-            isDebouncing={isDebouncing}
-            durationMs={durationMs}
-            isStale={isStale}
-            errorSummary={errorSummary}
-            documentTitle={documentTitle}
-            onCompile={onCompile}
-            syncTexIndex={syncTexIndex}
-            forwardTarget={forwardTarget}
-            onInverseSync={onInverseSync}
-          />
-        )
+
+          <div className="outline-scroll">
+            <article className="outline-sheet" onClick={handleOutlineClick}>
+              {parsedDoc.title && <h1 className="outline-title">{parsedDoc.title}</h1>}
+              {parsedDoc.authors.length > 0 && (
+                <p className="outline-authors">{parsedDoc.authors.join(' · ')}</p>
+              )}
+              <div
+                className="outline-body latex-paper-sheet"
+                dangerouslySetInnerHTML={{ __html: renderedHtml }}
+              />
+            </article>
+          </div>
+        </div>
       ) : surface === 'pdf' ? (
         pdf ? (
           <PdfPreviewPane

@@ -21,6 +21,23 @@ const ESSENTIAL_PACKAGES = [
   'microtype.sty',
   'microtype-pdftex.def',
   'everysel.sty',
+  'fancyhdr.sty',
+  'tabularx.sty',
+  'longtable.sty',
+  'array.sty',
+  'bm.sty',
+  'hypcap.sty',
+  'tfrupee.sty',
+  'xcolor.sty',
+  'colortbl.sty',
+  'multicol.sty',
+  'multirow.sty',
+  'subcaption.sty',
+  'listings.sty',
+  'algorithm.sty',
+  'algorithmic.sty',
+  'algpseudocode.sty',
+  'wrapfig.sty',
 ];
 
 const UPSTREAM_BASE = 'https://texlive2026.texlyre.org/26';

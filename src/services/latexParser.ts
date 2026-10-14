@@ -1352,6 +1352,26 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   const bodyMatch = cleanCode.match(/\\begin\{document\}([\s\S]*?)\\end\{document\}/);
   let bodyText = bodyMatch ? bodyMatch[1] : cleanCode;
 
+  // Clean preamble/setup macros that appear inside document body
+  bodyText = bodyText
+    .replace(/\\hypersetup\{[\s\S]*?\}/g, '')
+    .replace(/\\thispagestyle\{[^}]*\}/g, '')
+    .replace(/\\pagestyle\{[^}]*\}/g, '')
+    .replace(/\\pagenumbering\{[^}]*\}/g, '')
+    .replace(/\\setcounter\{[^}]*\}\{[^}]*\}/g, '')
+    .replace(/\\addtocounter\{[^}]*\}\{[^}]*\}/g, '')
+    .replace(/\\setlength\{[^}]*\}\{[^}]*\}/g, '')
+    .replace(/\\geometry\{[^}]*\}/g, '')
+    .replace(/\\bibliographystyle\{[^}]*\}/g, '')
+    .replace(/\\nocite\{[^}]*\}/g, '')
+    .replace(/\\graphicspath\{[^}]*\}/g, '')
+    .replace(/\\DeclareGraphicsExtensions\{[^}]*\}/g, '')
+    .replace(/\\pdfinfo\{[\s\S]*?\}/g, '')
+    .replace(/\\pdfbookmark(?:\[[^\]]*\])?\{[^}]*\}\{[^}]*\}/g, '')
+    .replace(/\\microtypesetup\{[^}]*\}/g, '')
+    .replace(/\\(?:frontmatter|mainmatter|backmatter|appendix)\b/g, '')
+    .replace(/\\(?:tolerance|emergencystretch)\s*=\s*[0-9.]+(?:em|pt|cm|mm)?\b/g, '');
+
   // --------------------------------------------------------------------------
   // STAGE 1: TOKEN STASHING (Verbatim & Display Math Preservers)
   // Ensures code snippets containing $, &, _, %, \ are NEVER altered
@@ -1506,7 +1526,15 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
       .replace(/\\small\b/g, '')
       .replace(/\\footnotesize\b/g, '')
       .replace(/\\par\b/g, '<div style="height: 6px;"></div>')
-      .replace(/\\\\/g, '<br/>');
+      .replace(/\\\\(?:\[\s*([-0-9.]+)\s*(cm|mm|in|pt|em|ex|px)?\s*\])?/g, (_, val, unit) => {
+        if (val) {
+          const u = unit || 'px';
+          return `<div style="height: ${val}${u}; min-height: ${val}${u};"></div>`;
+        }
+        return '<br/>';
+      })
+      .replace(/\{\s*\\bfseries\s+([\s\S]*?)\}/g, '<strong>$1</strong>')
+      .replace(/(?:^|\n)\s*\{([^}]+)\}\s*(?:\n|$)/g, '\n$1\n');
 
     parsedTp = parseInlineFormatting(parsedTp);
 
@@ -2111,13 +2139,22 @@ function parseInlineFormatting(text: string): string {
     .replace(/\\(?:sout|st)\{([^}]+)\}/g, '<del>$1</del>')
     .replace(/\\textsuperscript\{([^}]+)\}/g, '<sup>$1</sup>')
     .replace(/\\textsubscript\{([^}]+)\}/g, '<sub>$1</sub>')
-    // {\bfseries ...} and {\itshape ...} forms
-    .replace(/\{\\bfseries\s+([^}]+)\}/g, '<strong>$1</strong>')
-    .replace(/\{\\itshape\s+([^}]+)\}/g, '<em>$1</em>')
-    .replace(/\{\\ttfamily\s+([^}]+)\}/g, '<code class="latex-code">$1</code>')
-    .replace(/\{\\scshape\s+([^}]+)\}/g, '<span style="font-variant: small-caps;">$1</span>')
-    .replace(/\{\\sffamily\s+([^}]+)\}/g, '<span style="font-family: sans-serif;">$1</span>')
-    .replace(/\{\\slshape\s+([^}]+)\}/g, '<span style="font-style: oblique;">$1</span>')
+    // {\bfseries ...} and {\itshape ...} forms (supporting multi-line content)
+    .replace(/\{\s*\\bfseries\s+([\s\S]*?)\}/g, '<strong>$1</strong>')
+    .replace(/\{\s*\\itshape\s+([\s\S]*?)\}/g, '<em>$1</em>')
+    .replace(/\{\s*\\ttfamily\s+([\s\S]*?)\}/g, '<code class="latex-code">$1</code>')
+    .replace(/\{\s*\\scshape\s+([\s\S]*?)\}/g, '<span style="font-variant: small-caps;">$1</span>')
+    .replace(/\{\s*\\sffamily\s+([\s\S]*?)\}/g, '<span style="font-family: sans-serif;">$1</span>')
+    .replace(/\{\s*\\slshape\s+([\s\S]*?)\}/g, '<span style="font-style: oblique;">$1</span>')
+    // Declarative font sizes with groups: {\Huge ...}, {\LARGE ...}, etc.
+    .replace(/\{\s*\\Huge\s+([\s\S]*?)\}/g, '<span style="font-size: 2em; font-weight: 800;">$1</span>')
+    .replace(/\{\s*\\huge\s+([\s\S]*?)\}/g, '<span style="font-size: 1.7em; font-weight: 700;">$1</span>')
+    .replace(/\{\s*\\LARGE\s+([\s\S]*?)\}/g, '<span style="font-size: 1.5em; font-weight: 700;">$1</span>')
+    .replace(/\{\s*\\Large\s+([\s\S]*?)\}/g, '<span style="font-size: 1.3em; font-weight: 600;">$1</span>')
+    .replace(/\{\s*\\large\s+([\s\S]*?)\}/g, '<span style="font-size: 1.1em; font-weight: 600;">$1</span>')
+    .replace(/\{\s*\\normalsize\s+([\s\S]*?)\}/g, '$1')
+    .replace(/\{\s*\\small\s+([\s\S]*?)\}/g, '<span style="font-size: 0.9em;">$1</span>')
+    .replace(/\{\s*\\footnotesize\s+([\s\S]*?)\}/g, '<span style="font-size: 0.8em;">$1</span>')
     // Font sizes in inline context
     .replace(/\\Huge\{([^}]+)\}/g, '<span style="font-size: 2em; font-weight: 800;">$1</span>')
     .replace(/\\huge\{([^}]+)\}/g, '<span style="font-size: 1.7em; font-weight: 700;">$1</span>')
@@ -2129,6 +2166,9 @@ function parseInlineFormatting(text: string): string {
     .replace(/\\footnotesize\{([^}]+)\}/g, '<span style="font-size: 0.8em;">$1</span>')
     .replace(/\\scriptsize\{([^}]+)\}/g, '<span style="font-size: 0.75em;">$1</span>')
     .replace(/\\tiny\{([^}]+)\}/g, '<span style="font-size: 0.65em;">$1</span>')
+    // Clean remaining bare font switch commands
+    .replace(/\\(?:bfseries|itshape|scshape|ttfamily|sffamily)\b/g, '')
+    .replace(/\\(?:Huge|huge|LARGE|Large|large|normalsize|small|footnotesize|scriptsize|tiny)\b/g, '')
 
     // Horizontal Spacing, Indentation & Fillers
     .replace(/\\indent\b/g, '<span class="latex-indent" style="display: inline-block; width: 1.5em;"></span>')
@@ -2142,7 +2182,13 @@ function parseInlineFormatting(text: string): string {
     .replace(/\\thickspace\b/g, '&emsp;')
     .replace(/\\hfill\b/g, '<span class="latex-hfill" style="display: inline-block; flex: 1; min-width: 12px;"></span>')
     .replace(/\\newline\b/g, '<br/>')
-    .replace(/\\\\/g, '<br/>')
+    .replace(/\\\\(?:\[\s*([-0-9.]+)\s*(cm|mm|in|pt|em|ex|px)?\s*\])?/g, (_, val, unit) => {
+      if (val) {
+        const u = unit || 'px';
+        return `<br/><span style="display:inline-block; height: ${val}${u}; min-height: ${val}${u};"></span>`;
+      }
+      return '<br/>';
+    })
 
     // Colors
     .replace(/\\textcolor\{([^}]+)\}\{([^}]+)\}/g, (_, color, body) => `<span style="color: ${color};">${body}</span>`)

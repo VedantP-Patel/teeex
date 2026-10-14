@@ -49,6 +49,22 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'microtype.sty', format: 26 },
   { name: 'microtype-pdftex.def', format: 26 },
   { name: 'everysel.sty', format: 26 },
+  { name: 'fancyhdr.sty', format: 26 },
+  { name: 'tabularx.sty', format: 26 },
+  { name: 'longtable.sty', format: 26 },
+  { name: 'array.sty', format: 26 },
+  { name: 'bm.sty', format: 26 },
+  { name: 'hypcap.sty', format: 26 },
+  { name: 'xcolor.sty', format: 26 },
+  { name: 'colortbl.sty', format: 26 },
+  { name: 'multicol.sty', format: 26 },
+  { name: 'multirow.sty', format: 26 },
+  { name: 'subcaption.sty', format: 26 },
+  { name: 'listings.sty', format: 26 },
+  { name: 'algorithm.sty', format: 26 },
+  { name: 'algorithmic.sty', format: 26 },
+  { name: 'algpseudocode.sty', format: 26 },
+  { name: 'wrapfig.sty', format: 26 },
 ];
 
 const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));

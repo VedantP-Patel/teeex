@@ -619,7 +619,7 @@ class BusytexPipeline {
         const shell_escape_args = shell_escape ? ['--shell-escape'] : ['--no-shell-escape'];
 
         const xetex_cmd = ['xelatex', '-synctex=1', ...shell_escape_args, '--interaction=batchmode', '--halt-on-error', '--no-pdf', '--fmt', this.fmt.xetex, tex_path].concat(verbose_args_for('xetex'));
-        const pdftex_final = ['pdflatex', '-synctex=1', ...shell_escape_args, '--interaction=nonstopmode', '--halt-on-error', '--output-format=pdf', '--fmt', this.fmt.pdftex, tex_path].concat(verbose_args_for('pdftex'));
+        const pdftex_final = ['pdflatex', '-synctex=1', ...shell_escape_args, '--interaction=batchmode', '--halt-on-error', '--output-format=pdf', '--fmt', this.fmt.pdftex, tex_path].concat(verbose_args_for('pdftex'));
         const pdftex_nonfinal = ['pdflatex', '-synctex=1', ...shell_escape_args, '--interaction=batchmode', '--halt-on-error', '--fmt', this.fmt.pdftex, tex_path].concat(verbose_args_for('pdftex'));
         const luahbtex_final = ['luahblatex', '-synctex=1', ...shell_escape_args, '--interaction=nonstopmode', '--halt-on-error', '--output-format=pdf', '--fmt', this.fmt.luahbtex, '--nosocket', tex_path].concat(verbose_args_for('luahbtex'));
         const luahbtex_nonfinal = ['luahblatex', '-synctex=1', ...shell_escape_args, '--interaction=nonstopmode', '--halt-on-error', '--fmt', this.fmt.luahbtex, '--nosocket', tex_path].concat(verbose_args_for('luahbtex'));
