@@ -1,10 +1,5 @@
 /**
  * Teeex — React hook for asynchronous LaTeX parsing and draft HTML compilation.
- *
- * Dispatches heavy diagnoseLatex + parseLatexDocument + renderLatexToHtml tasks
- * to a dedicated persistent Web Worker (latexWorker.ts). This completely eliminates
- * main-thread CPU spikes and typing latency, keeping editor framerates at a solid
- * 60–120 FPS even on large papers with intensive KaTeX mathematics.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -15,13 +10,12 @@ import {
   parseLatexDocument,
   renderLatexToHtml,
 } from '../services/latexParser';
-import { preloadDocumentPackages } from '../services/bundledPackages';
 
 export interface UseLatexParserOptions {
   content: string;
   files: ProjectFile[];
   activeFileName?: string;
-  /** Quiet period after last keystroke before sending parse job to worker. Default: 80ms */
+  /** Quiet period after last keystroke before sending parse job to worker. Default: 180ms */
   debounceMs?: number;
 }
 
@@ -32,6 +26,18 @@ export interface LatexParserResult {
   durationMs: number;
   isParsing: boolean;
 }
+
+const EMPTY_PARSED_DOC: ParsedDocument = {
+  title: '',
+  authors: [],
+  date: '',
+  abstract: '',
+  sections: [],
+  mathBlocks: [],
+  citations: [],
+  isTwoColumn: false,
+  documentClass: 'article',
+};
 
 function syncParse(content: string, files: ProjectFile[], isTex: boolean): LatexParserResult {
   const t0 = performance.now();
@@ -54,24 +60,26 @@ export function useLatexParser({
   content,
   files,
   activeFileName = 'main.tex',
-  debounceMs = 80,
+  debounceMs = 180,
 }: UseLatexParserOptions): LatexParserResult {
   const isTex = activeFileName.endsWith('.tex');
 
-  // One-time synchronous parse on mount: ensures instant preview render with zero blank frames
-  const [result, setResult] = useState<LatexParserResult>(() =>
-    syncParse(content, files, isTex)
-  );
+  // Lightweight initial state so mount never blocks the main UI thread
+  const [result, setResult] = useState<LatexParserResult>({
+    diagnostics: [],
+    parsedDoc: EMPTY_PARSED_DOC,
+    renderedHtml: '',
+    durationMs: 1,
+    isParsing: true,
+  });
 
   const workerRef = useRef<Worker | null>(null);
   const nextRequestIdRef = useRef<number>(1);
   const acceptedRequestIdRef = useRef<number>(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFileNameRef = useRef<string>(activeFileName);
-  const latestContentRef = useRef<string>(content);
-  latestContentRef.current = content;
+  const isFirstRunRef = useRef<boolean>(true);
 
-  // Initialize and maintain persistent Web Worker
   useEffect(() => {
     if (typeof Worker === 'undefined') return;
 
@@ -85,7 +93,7 @@ export function useLatexParser({
       worker.onmessage = (event: MessageEvent<ParseWorkerResponse>) => {
         const data = event.data;
         if (!data || data.requestId < acceptedRequestIdRef.current) {
-          return; // Ignore superseded or outdated parse result
+          return;
         }
 
         acceptedRequestIdRef.current = data.requestId;
@@ -96,11 +104,6 @@ export function useLatexParser({
           durationMs: data.durationMs,
           isParsing: false,
         });
-
-        // Proactive background prefetch of packages into IndexedDB & memory while typing
-        if (data.requiredPackages && data.requiredPackages.length > 0) {
-          void preloadDocumentPackages(latestContentRef.current).catch(() => {});
-        }
       };
 
       worker.onerror = (err) => {
@@ -116,7 +119,6 @@ export function useLatexParser({
     }
   }, []);
 
-  // Dispatch work to worker or fallback synchronously
   useEffect(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
@@ -126,8 +128,8 @@ export function useLatexParser({
     const fileChanged = activeFileName !== lastFileNameRef.current;
     lastFileNameRef.current = activeFileName;
 
-    // If switching files, process immediately (0ms). For typing within current file, debounce.
-    const delay = fileChanged ? 0 : debounceMs;
+    const delay = isFirstRunRef.current || fileChanged ? 0 : debounceMs;
+    isFirstRunRef.current = false;
 
     timerRef.current = setTimeout(() => {
       const requestId = ++nextRequestIdRef.current;
@@ -135,6 +137,7 @@ export function useLatexParser({
       const worker = workerRef.current;
       if (worker) {
         setResult((prev) => (prev.isParsing ? prev : { ...prev, isParsing: true }));
+        // Only send files needed by the parser (or referenced images) to minimize structured clone overhead
         const request: ParseWorkerRequest = {
           requestId,
           content,
@@ -143,7 +146,6 @@ export function useLatexParser({
         };
         worker.postMessage(request);
       } else {
-        // Fallback for environments where Web Worker is unavailable (e.g. tests)
         const syncResult = syncParse(content, files, isTex);
         acceptedRequestIdRef.current = requestId;
         setResult(syncResult);

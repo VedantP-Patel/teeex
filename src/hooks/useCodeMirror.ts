@@ -38,8 +38,8 @@ export function useCodeMirror({
 }: UseCodeMirrorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const lastEmittedDocRef = useRef<string>(code);
 
-  // Keep latest callbacks in refs to avoid recreating update listeners
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -52,7 +52,9 @@ export function useCodeMirror({
 
     const updateListener = EditorView.updateListener.of((update: ViewUpdate) => {
       if (update.docChanged) {
-        onChangeRef.current(update.state.doc.toString());
+        const nextDoc = update.state.doc.toString();
+        lastEmittedDocRef.current = nextDoc;
+        onChangeRef.current(nextDoc);
       }
 
       if (update.selectionSet || update.docChanged) {
@@ -76,28 +78,54 @@ export function useCodeMirror({
     });
 
     viewRef.current = view;
+    lastEmittedDocRef.current = code;
 
     return () => {
       view.destroy();
       viewRef.current = null;
     };
-  }, []); // Run once on mount
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync external code changes into editor without dropping cursor
+  // Sync external code changes (tab switch, formatting, quick-fix) with minimal diff
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
 
+    // Fast path: if `code` matches what CodeMirror itself just emitted, do nothing!
+    if (code === lastEmittedDocRef.current) return;
+
     const currentDoc = view.state.doc.toString();
-    if (code !== currentDoc) {
-      view.dispatch({
-        changes: {
-          from: 0,
-          to: currentDoc.length,
-          insert: code,
-        },
-      });
+    if (code === currentDoc) {
+      lastEmittedDocRef.current = code;
+      return;
     }
+
+    // Compute minimal prefix/suffix diff so cursor and undo history survive
+    let start = 0;
+    const minLen = Math.min(currentDoc.length, code.length);
+    while (start < minLen && currentDoc.charCodeAt(start) === code.charCodeAt(start)) {
+      start++;
+    }
+
+    let endCurrent = currentDoc.length;
+    let endNext = code.length;
+    while (
+      endCurrent > start &&
+      endNext > start &&
+      currentDoc.charCodeAt(endCurrent - 1) === code.charCodeAt(endNext - 1)
+    ) {
+      endCurrent--;
+      endNext--;
+    }
+
+    lastEmittedDocRef.current = code;
+    view.dispatch({
+      changes: {
+        from: start,
+        to: endCurrent,
+        insert: code.slice(start, endNext),
+      },
+    });
   }, [code]);
 
   // Update theme when theme or isLight changes
@@ -155,7 +183,7 @@ export function useCodeMirror({
     view.dispatch(setDiagnostics(view.state, cmDiagnostics));
   }, [diagnostics]);
 
-  // Jump to targetLine when requested (e.g. from SyncTeX or error log click)
+  // Jump to targetLine when requested
   useEffect(() => {
     const view = viewRef.current;
     if (!view || targetLine === null || targetLine === undefined) return;
@@ -176,7 +204,6 @@ export function useCodeMirror({
     }
   }, [targetLine, onClearTargetLine]);
 
-  // Helper method: Insert text or snippet at current selection
   const insertText = useCallback((text: string, cursorOffset?: number) => {
     const view = viewRef.current;
     if (!view) return;
@@ -199,7 +226,6 @@ export function useCodeMirror({
     view.focus();
   }, []);
 
-  // Helper method: Wrap selection with before/after tags (e.g. \textbf{...})
   const wrapSelection = useCallback((before: string, after: string) => {
     const view = viewRef.current;
     if (!view) return;
@@ -225,7 +251,6 @@ export function useCodeMirror({
     view.focus();
   }, []);
 
-  // Helper method: Jump to specific line
   const jumpToLine = useCallback((line: number) => {
     const view = viewRef.current;
     if (!view) return;

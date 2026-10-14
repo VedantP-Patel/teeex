@@ -89,6 +89,7 @@ export interface ParsedDocument {
     display: boolean;
     line: number;
   }>;
+  citations: string[];
   isTwoColumn: boolean;
   documentClass: string;
   hasTitlePage?: boolean;

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import {
   X,
   MessageSquare,
@@ -82,7 +82,6 @@ export const Editor: React.FC<Props> = ({
   onRejectTrackedChange,
   onOpenSnippets,
   onFormatDocument,
-  onOpenCommandPalette,
   onOpenImageUpload,
 }) => {
   const [editorMode, setEditorMode] = useState<'code' | 'visual'>(() => {
@@ -121,6 +120,20 @@ export const Editor: React.FC<Props> = ({
   const [viewportScrollTop, setViewportScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(600);
 
+  // Debounced code for Minimap & Labels extraction so typing stays 0ms lag
+  const [debouncedCode, setDebouncedCode] = useState(code);
+  const [labelKeys, setLabelKeys] = useState<string[]>(() =>
+    extractLatexLabels(files).map((l) => l.key)
+  );
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedCode(code);
+      setLabelKeys(extractLatexLabels(files).map((l) => l.key));
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [code, files]);
+
   // Sync theme attribute changes
   useEffect(() => {
     const checkTheme = () => {
@@ -132,32 +145,31 @@ export const Editor: React.FC<Props> = ({
     return () => observer.disconnect();
   }, []);
 
-  // Active file & Image asset detection
   const currentFile = files.find((f) => (activeFileId && f.id === activeFileId) || f.name === fileName);
   const isImageFile = currentFile?.type === 'image' || /\.(png|jpe?g|gif|svg|webp|ico)$/i.test(fileName);
 
-  // Extract labels for cross-reference autocomplete
-  const labels = useMemo(() => extractLatexLabels(files), [files]);
-
-  // Assemble CodeMirror 6 extensions
   const extensions = useLatexExtensions({
     theme: syntaxTheme,
     isLight: isLightMode,
     bibEntries,
-    labels: labels.map((l) => l.key),
+    labels: labelKeys,
     readOnly: role === 'viewer',
     onCompileShortcut,
     onForwardSync,
   });
 
-  // CodeMirror 6 core hook
+  const handleInternalCursorChange = useCallback(
+    (line: number, col: number) => {
+      setCurrentCursorLine((prev) => (prev !== line ? line : prev));
+      onCursorChange(line, col);
+    },
+    [onCursorChange]
+  );
+
   const { containerRef, viewRef, insertText, wrapSelection, jumpToLine } = useCodeMirror({
     code,
     onChange,
-    onCursorChange: (line, col) => {
-      setCurrentCursorLine(line);
-      onCursorChange(line, col);
-    },
+    onCursorChange: handleInternalCursorChange,
     extensions,
     theme: syntaxTheme,
     isLight: isLightMode,
@@ -168,24 +180,32 @@ export const Editor: React.FC<Props> = ({
     onClearTargetLine,
   });
 
-  // Track scroll and dimensions from CodeMirror scrollDOM for Minimap
+  // Track scroll with requestAnimationFrame throttling when Minimap is open
   useEffect(() => {
+    if (!isMinimapOpen) return;
     const view = viewRef.current;
     if (!view) return;
 
     const scrollEl = view.scrollDOM;
+    let rafId: number | null = null;
+
     const handleScroll = () => {
-      setViewportScrollTop(scrollEl.scrollTop);
-      setViewportHeight(scrollEl.clientHeight);
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        setViewportScrollTop(scrollEl.scrollTop);
+        setViewportHeight(scrollEl.clientHeight);
+      });
     };
 
     scrollEl.addEventListener('scroll', handleScroll, { passive: true });
     handleScroll();
 
     return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
       scrollEl.removeEventListener('scroll', handleScroll);
     };
-  }, [viewRef]);
+  }, [viewRef, isMinimapOpen]);
 
   // Forward SyncTeX: Debounced tracking when cursor line changes
   const lastAutoSyncedLineRef = useRef<number>(1);
@@ -196,33 +216,19 @@ export const Editor: React.FC<Props> = ({
     const timer = setTimeout(() => {
       lastAutoSyncedLineRef.current = currentCursorLine;
       onForwardSync(currentCursorLine);
-    }, 260);
+    }, 350);
 
     return () => clearTimeout(timer);
   }, [autoSyncPreview, currentCursorLine, onForwardSync]);
 
-  // Global keyboard shortcuts (Cmd+K for Command Palette)
-  useEffect(() => {
-    const handleGlobalKeys = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault();
-        onOpenCommandPalette?.();
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeys);
-    return () => window.removeEventListener('keydown', handleGlobalKeys);
-  }, [onOpenCommandPalette]);
-
-  // Open native CodeMirror Search Panel
-  const handleOpenFind = () => {
+  const handleOpenFind = useCallback(() => {
     const view = viewRef.current;
     if (view) {
       openSearchPanel(view);
       setIsFindOpen(true);
     }
-  };
+  }, [viewRef]);
 
-  // Comments map: line -> ReviewComment[]
   const commentMap = useMemo(() => {
     const map = new Map<number, ReviewComment[]>();
     comments
@@ -242,15 +248,24 @@ export const Editor: React.FC<Props> = ({
     setActiveCommentLine(null);
   };
 
+  // Fast line count without allocating an array of every line on every keystroke
   const lineCount = useMemo(() => {
-    return code.split('\n').length;
-  }, [code]);
+    let count = 1;
+    for (let i = 0; i < debouncedCode.length; i++) {
+      if (debouncedCode.charCodeAt(i) === 10) count++;
+    }
+    return count;
+  }, [debouncedCode]);
 
-  const activeReviewCount = comments.filter((c) => !c.resolved).length + trackedChanges.filter((t) => t.status === 'pending').length;
+  const activeReviewCount = useMemo(
+    () =>
+      comments.filter((c) => !c.resolved).length +
+      trackedChanges.filter((t) => t.status === 'pending').length,
+    [comments, trackedChanges]
+  );
 
   return (
     <div style={editorContainerStyle}>
-      {/* Multi-File Tab Bar */}
       {openFileIds && openFileIds.length > 0 && onSelectFile && (
         <div
           style={tabStripStyle}
@@ -296,7 +311,6 @@ export const Editor: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Viewer Notice Ribbon */}
       {role === 'viewer' && (
         <div style={viewerNoticeStyle}>
           <Eye size={13} color="#f59e0b" style={{ flexShrink: 0 }} />
@@ -306,7 +320,6 @@ export const Editor: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Memoized Editor Toolbar */}
       <EditorToolbar
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={onToggleSidebar}
@@ -344,7 +357,6 @@ export const Editor: React.FC<Props> = ({
         onAddCommentClick={() => setActiveCommentLine(currentCursorLine)}
       />
 
-      {/* RENDER ASSET VIEWER, VISUAL, OR CODEMIRROR 6 EDITOR */}
       {isImageFile ? (
         <div
           style={{
@@ -368,7 +380,6 @@ export const Editor: React.FC<Props> = ({
               gap: 20,
             }}
           >
-            {/* Visual Canvas Preview Frame */}
             <div
               style={{
                 padding: 20,
@@ -422,7 +433,6 @@ export const Editor: React.FC<Props> = ({
               )}
             </div>
 
-            {/* Asset Metadata & Action Box */}
             <div
               style={{
                 display: 'flex',
@@ -524,9 +534,7 @@ export const Editor: React.FC<Props> = ({
           }}
         />
       ) : (
-        /* High-Performance CodeMirror 6 Editor Body */
         <div style={editorBodyStyle}>
-          {/* CodeMirror 6 Mount Node */}
           <div
             ref={containerRef}
             className="codemirror-wrapper"
@@ -538,7 +546,6 @@ export const Editor: React.FC<Props> = ({
             }}
           />
 
-          {/* Active Comment Bubble Overlay */}
           {activeCommentLine !== null && (
             <div
               style={{
@@ -563,7 +570,6 @@ export const Editor: React.FC<Props> = ({
                 </button>
               </div>
 
-              {/* Existing Comments on this line */}
               {(commentMap.get(activeCommentLine) || []).map((c) => (
                 <div
                   key={c.id}
@@ -591,7 +597,6 @@ export const Editor: React.FC<Props> = ({
                 </div>
               ))}
 
-              {/* New Comment Input */}
               <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                 <input
                   type="text"
@@ -609,7 +614,6 @@ export const Editor: React.FC<Props> = ({
             </div>
           )}
 
-          {/* Floating Review & Suggestions Drawer */}
           {isReviewPanelOpen && (
             <div
               style={{
@@ -651,7 +655,6 @@ export const Editor: React.FC<Props> = ({
               </div>
 
               <div style={{ flex: 1, padding: 10, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Tracked Suggestions */}
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
                     Tracked Suggestions ({trackedChanges.filter((t) => t.status === 'pending').length})
@@ -730,7 +733,6 @@ export const Editor: React.FC<Props> = ({
                   )}
                 </div>
 
-                {/* Review Comments */}
                 <div style={{ marginTop: 6, borderTop: '1px solid var(--border-subtle)', paddingTop: 10 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
                     Review Comments ({comments.filter((c) => !c.resolved).length})
@@ -800,10 +802,9 @@ export const Editor: React.FC<Props> = ({
             </div>
           )}
 
-          {/* Synchronized Canvas Code Minimap */}
           {isMinimapOpen && (
             <EditorMinimap
-              code={code}
+              code={debouncedCode}
               theme={syntaxTheme}
               isLightMode={isLightMode}
               scrollTop={viewportScrollTop}

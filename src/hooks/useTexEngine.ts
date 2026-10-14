@@ -149,12 +149,14 @@ export function useTexEngine({
   // Ultra-responsive debounce for live editing:
   // Short docs: 250ms, medium: 350ms, large papers: 450ms.
   // Eliminates up to 1.35s of dead-time lag while preserving typing fluidity.
+  // Balanced debounce for WASM pdfLaTeX compilation:
+  // Waits until user pauses typing so WASM worker isn't saturated mid-sentence.
   const effectiveDebounceMs = useMemo(() => {
     if (debounceMs !== undefined) return debounceMs;
     const totalChars = files.reduce((acc, f) => acc + (f.content ? f.content.length : 0), 0);
-    if (totalChars < 5000) return 250;
-    if (totalChars < 25000) return 350;
-    return 450;
+    if (totalChars < 5000) return 750;
+    if (totalChars < 25000) return 900;
+    return 1150;
   }, [debounceMs, files]);
 
   const isInitialMount = useRef(true);

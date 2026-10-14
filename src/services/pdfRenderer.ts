@@ -1,23 +1,5 @@
 /**
- * Teeex — PDF rasterisation.
- *
- * Renders the compiled PDF that the TeX engine produced. This module is a
- * *viewer*, not a layout engine: it must paint exactly the bytes being shipped
- * and never reinterpret geometry.
- *
- * Three correctness requirements drive the design:
- *
- *  1. The worker and CMap/standard-font data must match the installed pdf.js
- *     exactly. Loading them from a CDN at a hardcoded, different version makes
- *     PDF.js throw on version mismatch and breaks CID font support. Everything
- *     here is resolved from the local install.
- *
- *  2. pdf.js transfers the input ArrayBuffer to its worker, which *detaches*
- *     it. The same bytes are handed to export, so the document is opened on a
- *     copy and the caller's buffer is left pristine.
- *
- *  3. Re-rendering a canvas while a previous RenderTask is live throws in
- *     pdf.js. Tasks are tracked per page and cancelled before being replaced.
+ * Teeex — PDF rasterisation (Double-Buffered & Flicker-Free).
  */
 
 import {
@@ -35,18 +17,9 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
-/**
- * CMaps and standard fonts are directory trees, so they cannot be imported as
- * URLs; `scripts/sync-pdfjs-assets.mjs` copies them from the installed
- * pdfjs-dist into public/ as part of the build.
- */
 const CMAP_URL = '/pdfjs/cmaps/';
 const STANDARD_FONT_URL = '/pdfjs/standard_fonts/';
 
-/**
- * Primes the PDF.js Web Worker off the main thread at app boot time.
- * Eliminates 150-300ms worker spawn delay when the first PDF arrives.
- */
 let isPrewarmed = false;
 export function prewarmPdfRenderer(): void {
   if (isPrewarmed || typeof window === 'undefined') return;
@@ -58,31 +31,23 @@ export function prewarmPdfRenderer(): void {
       cMapPacked: true,
       standardFontDataUrl: STANDARD_FONT_URL,
     });
-    dummyTask.promise.catch(() => {});
-    dummyTask.destroy().catch(() => {});
+    dummyTask.promise.catch(() => { });
+    dummyTask.destroy().catch(() => { });
   } catch {
     // Non-fatal
   }
 }
 
-/**
- * PDF user space is 72 units per inch; CSS reference pixels are 96 per inch.
- * Taken from pdf.js rather than written out, so the viewer and the library can
- * never disagree about the conversion.
- */
-export const CSS_PX_PER_PT = PixelsPerInch.PDF_TO_CSS_UNITS;
+// Auto-prewarm when module is imported in browser
+if (typeof window !== 'undefined') {
+  setTimeout(prewarmPdfRenderer, 50);
+}
 
-/**
- * Upper bound on backing-store pixels per canvas. Browsers silently fail to
- * allocate beyond an implementation-defined area (notably ~16.7M on iOS), and
- * a blank page is far worse than a slightly softer one, so device pixel ratio
- * is reduced to fit rather than letting allocation fail.
- */
+export const CSS_PX_PER_PT = PixelsPerInch.PDF_TO_CSS_UNITS;
 const MAX_CANVAS_PIXELS = 16_777_216;
 
 export interface PageGeometry {
   pageNumber: number;
-  /** CSS pixels at 100% zoom. */
   width: number;
   height: number;
   rotation: number;
@@ -91,27 +56,20 @@ export interface PageGeometry {
 export interface RenderPageOptions {
   canvas: HTMLCanvasElement;
   pageNumber: number;
-  /** 1 = 100%. */
   zoom: number;
   devicePixelRatio?: number;
 }
 
-/** pdf.js signals a superseded render by rejecting with this, not an error. */
 function isCancellation(error: unknown): boolean {
   return error instanceof RenderingCancelledException;
 }
 
-/**
- * One open PDF. Instances own worker-side resources and must be `destroy()`ed;
- * the previous implementation kept a module-level singleton that replaced its
- * document without releasing it, so every compile leaked a document into the
- * pdf.js worker for the lifetime of the tab.
- */
 export class PdfDocument {
   private readonly doc: PDFDocumentProxy;
   private readonly loadingTask: PDFDocumentLoadingTask;
   private readonly pages = new Map<number, PDFPageProxy>();
   private readonly tasks = new Map<number, RenderTask>();
+  private readonly renderSeq = new Map<number, number>();
   private readonly textLayers = new Map<number, TextLayer>();
   private geometryCache: PageGeometry[] | null = null;
   private destroyed = false;
@@ -130,8 +88,6 @@ export class PdfDocument {
   }
 
   static async open(bytes: Uint8Array): Promise<PdfDocument> {
-    // Copy: getDocument detaches the buffer it is given, and these bytes are
-    // also the export artifact.
     const owned = new Uint8Array(bytes.byteLength);
     owned.set(bytes);
 
@@ -143,7 +99,6 @@ export class PdfDocument {
     });
 
     const doc = await loadingTask.promise;
-
     return new PdfDocument(doc, loadingTask);
   }
 
@@ -161,12 +116,6 @@ export class PdfDocument {
     this.onGeometryUpdate = cb;
   }
 
-  /**
-   * Per-page dimensions.
-   * Fast-path: query page 1 first (<15ms) to immediately establish document geometry.
-   * In LaTeX, document pages share identical geometry in 99.9% of documents.
-   * Background task verifies subsequent pages asynchronously without blocking page 1 display.
-   */
   async geometry(): Promise<PageGeometry[]> {
     if (this.geometryCache) return this.geometryCache;
 
@@ -193,7 +142,6 @@ export class PdfDocument {
 
     this.geometryCache = initial;
 
-    // Asynchronously verify remaining pages in the background without blocking page 1 display
     void (async () => {
       try {
         const remaining = await Promise.all(
@@ -229,9 +177,10 @@ export class PdfDocument {
   }
 
   /**
-   * Paints one page. Resolves `false` if the render was superseded or the
-   * document was destroyed mid-flight; both are normal during fast scrolling
-   * and zooming, and neither is an error.
+   * Double-buffered page rasterisation:
+   * Renders onto an offscreen canvas first and copies the finished bitmap onto
+   * the visible `canvas` in a single synchronous frame. This prevents canvas
+   * clearing flashes on recompile/zoom and eliminates concurrent canvas usage errors.
    */
   async renderPage({
     canvas,
@@ -241,14 +190,17 @@ export class PdfDocument {
   }: RenderPageOptions): Promise<boolean> {
     if (this.destroyed) return false;
 
+    const seq = (this.renderSeq.get(pageNumber) ?? 0) + 1;
+    this.renderSeq.set(pageNumber, seq);
+
     await this.cancelPage(pageNumber);
-    if (this.destroyed) return false;
+    if (this.destroyed || this.renderSeq.get(pageNumber) !== seq) return false;
 
     const page = await this.page(pageNumber);
+    if (this.destroyed || this.renderSeq.get(pageNumber) !== seq) return false;
+
     const viewport = page.getViewport({ scale: CSS_PX_PER_PT * zoom });
 
-    // Clamp the backing store, then derive the ratio actually used so the
-    // transform matches the allocation exactly.
     const requested = devicePixelRatio;
     const area = viewport.width * viewport.height * requested * requested;
     const ratio =
@@ -256,17 +208,19 @@ export class PdfDocument {
         ? Math.max(1, requested * Math.sqrt(MAX_CANVAS_PIXELS / area))
         : requested;
 
-    const context = canvas.getContext('2d', { alpha: false });
-    if (!context) return false;
+    const pixelWidth = Math.max(1, Math.floor(viewport.width * ratio));
+    const pixelHeight = Math.max(1, Math.floor(viewport.height * ratio));
 
-    canvas.width = Math.max(1, Math.floor(viewport.width * ratio));
-    canvas.height = Math.max(1, Math.floor(viewport.height * ratio));
-    canvas.style.width = `${viewport.width}px`;
-    canvas.style.height = `${viewport.height}px`;
+    // Render to an offscreen staging canvas so the visible canvas never blanks out
+    const offscreen = document.createElement('canvas');
+    offscreen.width = pixelWidth;
+    offscreen.height = pixelHeight;
+    const offscreenCtx = offscreen.getContext('2d', { alpha: false });
+    if (!offscreenCtx) return false;
 
     const task = page.render({
       canvas: null,
-      canvasContext: context,
+      canvasContext: offscreenCtx,
       viewport,
       transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
     });
@@ -274,12 +228,27 @@ export class PdfDocument {
 
     try {
       await task.promise;
+      if (this.destroyed || this.renderSeq.get(pageNumber) !== seq) return false;
+
+      // Atomically swap the completed frame onto the visible canvas
+      const visibleCtx = canvas.getContext('2d', { alpha: false });
+      if (!visibleCtx) return false;
+
+      if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+      if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      visibleCtx.drawImage(offscreen, 0, 0);
+
       return true;
     } catch (error) {
       if (isCancellation(error)) return false;
       throw error;
     } finally {
       if (this.tasks.get(pageNumber) === task) this.tasks.delete(pageNumber);
+      // Release offscreen backing store memory immediately
+      offscreen.width = 0;
+      offscreen.height = 0;
     }
   }
 
@@ -288,19 +257,9 @@ export class PdfDocument {
     if (!task) return;
     this.tasks.delete(pageNumber);
     task.cancel();
-    // Awaiting the rejection guarantees the canvas is free before reuse.
     await task.promise.catch(() => undefined);
   }
 
-  /**
-   * Builds (or re-positions) the selectable text layer over a page.
-   *
-   * Uses pdf.js's own TextLayer rather than placing spans by hand: glyph
-   * advance, rotation, and font-ascent correction all have to match the
-   * rasterised output or selection drifts away from the visible text. On zoom
-   * it calls `update()`, which re-positions the existing spans instead of
-   * re-streaming the page's text.
-   */
   async renderTextLayer(
     pageNumber: number,
     zoom: number,
@@ -309,9 +268,9 @@ export class PdfDocument {
     if (this.destroyed) return;
 
     const page = await this.page(pageNumber);
+    if (this.destroyed) return;
     const viewport = page.getViewport({ scale: CSS_PX_PER_PT * zoom });
 
-    // pdf.js positions text spans relative to this custom property.
     container.style.setProperty('--scale-factor', String(viewport.scale));
     container.style.width = `${viewport.width}px`;
     container.style.height = `${viewport.height}px`;
@@ -333,13 +292,10 @@ export class PdfDocument {
     try {
       await layer.render();
     } catch {
-      // A cancelled or failed text layer costs selection on one page; it must
-      // never break rasterisation, which is the actual fidelity guarantee.
       this.textLayers.delete(pageNumber);
     }
   }
 
-  /** Discards a page's text layer, e.g. when it scrolls far out of view. */
   releaseTextLayer(pageNumber: number): void {
     const layer = this.textLayers.get(pageNumber);
     if (!layer) return;
@@ -347,7 +303,6 @@ export class PdfDocument {
     this.textLayers.delete(pageNumber);
   }
 
-  /** Link and widget annotations, so PDF hyperlinks stay clickable. */
   async annotations(pageNumber: number) {
     const page = await this.page(pageNumber);
     return page.getAnnotations({ intent: 'display' });

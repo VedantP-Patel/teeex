@@ -24,6 +24,7 @@ const CommandPaletteModal = lazy(() => import('./components/modals/CommandPalett
 const AuditLogModal = lazy(() => import('./components/modals/AuditLogModal').then(m => ({ default: m.AuditLogModal })));
 const EncryptionModal = lazy(() => import('./components/modals/EncryptionModal').then(m => ({ default: m.EncryptionModal })));
 const AdminUsersModal = lazy(() => import('./components/modals/AdminUsersModal').then(m => ({ default: m.AdminUsersModal })));
+
 import { formatLatexCode } from './services/latexFormatter';
 import {
   isPlatformDeveloper,
@@ -83,19 +84,18 @@ export function App() {
   });
 
   useEffect(() => {
-    // Set data-theme immediately on mount to match stored theme
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('teeex_theme', theme);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggleTheme = () => {
-    const next = theme === 'dark' ? 'light' : 'dark';
-    // Synchronously update data-theme BEFORE React re-renders
-    // so CSS variable transitions and inline-style transitions land in the same frame
-    document.documentElement.setAttribute('data-theme', next);
-    localStorage.setItem('teeex_theme', next);
-    setTheme(next);
-  };
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('teeex_theme', next);
+      return next;
+    });
+  }, []);
 
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     return getStoredSession().user;
@@ -111,11 +111,7 @@ export function App() {
     if (isSupabaseConnected() && getStoredSession().user !== null) {
       verifyActiveSupabaseSession().then(verifiedUser => {
         if (!isMounted) return;
-        if (verifiedUser) {
-          setCurrentUser(verifiedUser);
-        } else {
-          setCurrentUser(null);
-        }
+        setCurrentUser(verifiedUser || null);
         setIsAuthChecking(false);
       }).catch(() => {
         if (!isMounted) return;
@@ -143,7 +139,7 @@ export function App() {
     return projects.find(p => p.id === activeProjectId) || projects[0];
   }, [projects, activeProjectId]);
 
-  // Project & Files State (Bound to active project)
+  // Project & Files State
   const [files, setFiles] = useState<ProjectFile[]>(() => activeProject?.files || STARTER_TEMPLATES[0].files);
   const [folders, setFolders] = useState<string[]>(() => activeProject?.folders || ['sections', 'figures']);
   const [activeFileId, setActiveFileId] = useState<string>(() => activeProject?.files?.[0]?.id || 'main.tex');
@@ -155,32 +151,60 @@ export function App() {
   const [isTwoColumn, setIsTwoColumn] = useState<boolean>(() => {
     const saved = localStorage.getItem('teeex_column_mode');
     if (saved !== null) return saved === '2';
-    return true; // Default standard format is 2-column (IEEE Transactions)
+    return true;
   });
 
-  // Column count belongs to the document class, not to the viewer: LaTeX
-  // derives column width, gutter and float placement from it. So the toggle
-  // amends `\documentclass` and lets the engine re-typeset, rather than
-  // restyling a preview that the exported PDF would not match.
+  // Keep latest files & activeFileId in refs so callbacks never suffer from stale closures
+  const filesRef = useRef(files);
+  filesRef.current = files;
+  const activeFileIdRef = useRef(activeFileId);
+  activeFileIdRef.current = activeFileId;
+  const activeProjectIdRef = useRef(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
+
+  // Debounced Project Persistence (prevents synchronous localStorage & IndexedDB blocking on every keystroke)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const updatedProjects = updateProject(activeProjectId, {
+        files,
+        folders,
+        title: projectTitle,
+      });
+      setProjects(updatedProjects);
+
+      if (activeProject) {
+        saveProjectOffline({
+          ...activeProject,
+          files,
+          folders,
+          title: projectTitle,
+          updatedAt: new Date().toISOString(),
+        }).catch(console.error);
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [files, folders, projectTitle, activeProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleToggleTwoColumn = useCallback(() => {
     setIsTwoColumn(prev => {
       const next = !prev;
       try {
         localStorage.setItem('teeex_column_mode', next ? '2' : '1');
       } catch {
-        // Losing the remembered choice is harmless.
+        // Ignore storage errors
       }
 
-      setFiles(files => {
+      setFiles(currFiles => {
         const entry =
-          files.find(f => f.name.endsWith('.tex') && f.isEntry) ??
-          files.find(f => f.name === 'main.tex') ??
-          files.find(f => /\\documentclass/.test(f.content));
-        if (!entry) return files;
+          currFiles.find(f => f.name.endsWith('.tex') && f.isEntry) ??
+          currFiles.find(f => f.name === 'main.tex') ??
+          currFiles.find(f => /\\documentclass/.test(f.content));
+        if (!entry) return currFiles;
 
         const updated = setTwoColumn(entry.content, next);
-        if (updated === entry.content) return files;
-        return files.map(f => (f.id === entry.id ? { ...f, content: updated } : f));
+        if (updated === entry.content) return currFiles;
+        return currFiles.map(f => (f.id === entry.id ? { ...f, content: updated } : f));
       });
 
       return next;
@@ -193,9 +217,6 @@ export function App() {
     return params.get('room') || 'quantum-project-alpha';
   });
 
-  // Active Role Resolution:
-  // If ?room= is present (shared collaboration link), validate through cryptographic capability token (?key=...).
-  // Query param tampering (e.g. ?role=editor) is strictly ignored to eliminate privilege escalation vulnerabilities.
   const currentRole = useMemo<ProjectRole>(() => {
     const params = new URLSearchParams(window.location.search);
     const isSharedRoom = Boolean(params.get('room'));
@@ -206,11 +227,9 @@ export function App() {
         const verified = verifyShareKey(roomId, key);
         if (verified) return verified;
       }
-      // If user is the logged-in owner of this active project, preserve owner role
       if (currentUser && activeProject?.ownerEmail === currentUser.email) {
         return 'owner';
       }
-      // Any missing, untrusted, or tampered keys strictly default to read-only viewer
       return 'viewer';
     }
 
@@ -218,17 +237,8 @@ export function App() {
     return activeProject?.role || 'owner';
   }, [activeProject, currentUser, roomId]);
 
-  // Checkpoints State (Time Machine)
-  // Version checkpoints start empty — a new project has no history until the
-  // author creates a checkpoint. (Previously seeded with a fake "Dr. Elena
-  // Rostova" draft, which made an empty project look like someone else's work.)
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
-
-  // Review comments start empty. (Previously seeded with a fabricated reviewer
-  // comment attributed to a person who does not exist.)
   const [comments, setComments] = useState<ReviewComment[]>([]);
-
-  // Cloud & Supabase State (automatically detected from Vercel)
   const [isCloudConnected, setIsCloudConnected] = useState(() => isSupabaseConnected());
 
   const [hub] = useState<CollaborationHub>(() => new CollaborationHub(roomId));
@@ -249,12 +259,15 @@ export function App() {
       color: '#38bdf8',
     };
   });
-  // Co-Authors: Simulated peers only appear on the introductory sample demo project or when developer enabled
+
+  // Cursor line tracked separately with throttling for Sidebar outline highlight
+  const [activeCursorLine, setActiveCursorLine] = useState<number>(1);
+  const cursorThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [peers, setPeers] = useState<Collaborator[]>(() => {
     return areSimulatedPeersEnabled(activeProjectId) ? DEFAULT_PEERS : [];
   });
 
-  // Website Developer / Platform Owner Clearance State
   const [isPlatformDev, setIsPlatformDev] = useState<boolean>(() => isPlatformDeveloper());
   const [isDevDemoActive, setIsDevDemoActive] = useState<boolean>(() => isDemoModeEnabled());
   const [isDevUnlockOpen, setIsDevUnlockOpen] = useState<boolean>(false);
@@ -281,19 +294,17 @@ export function App() {
     return files.find(f => f.id === activeFileId) || files[0];
   }, [files, activeFileId]);
 
-  // Extract structured BibTeX entries for live citation autocomplete
-  const bibEntries = useMemo(() => {
-    const bibFile = files.find(f => f.name.endsWith('.bib'));
-    return bibFile ? parseBibtex(bibFile.content) : [];
+  // Performance fix: Only re-parse BibTeX when the .bib file's actual content changes!
+  const bibContent = useMemo(() => {
+    return files.find(f => f.name.endsWith('.bib'))?.content ?? '';
   }, [files]);
 
-  // Target line for SyncTeX jumps (Reverse: Preview -> Code, Forward: Code -> Preview)
+  const bibEntries = useMemo(() => {
+    return bibContent ? parseBibtex(bibContent) : [];
+  }, [bibContent]);
+
   const [targetLine, setTargetLine] = useState<number | null>(null);
   const [forwardTargetLine, setForwardTargetLine] = useState<number | null>(null);
-
-  // Transient notices. Used where an action cannot be completed and the reason
-  // belongs to the user's intent rather than to the document — e.g. asking to
-  // export before any successful build exists.
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -302,7 +313,6 @@ export function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  // Compilation State
   const [compileState, setCompileState] = useState<CompileState>({
     status: 'success',
     durationMs: 14,
@@ -326,26 +336,15 @@ export function App() {
   const [isEncryptionModalOpen, setIsEncryptionModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
-  // Offline PWA & Airplane mode state
   const [isOffline, setIsOffline] = useState<boolean>(() => !navigator.onLine);
-
-  // Tracked changes start empty — real suggestions come from collaborators via
-  // the collaboration hub, not from fabricated reviewers. (Previously seeded
-  // with changes attributed to people who do not exist.)
   const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
 
-  // Split Pane & Sidebar Layout
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [splitPercent, setSplitPercent] = useState<number>(50);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
 
-  // The authoritative layout engine: real pdfLaTeX. Always compiles the
-  // project entry file with every project file mounted, never whichever file
-  // happens to be open in the editor.
   const texEngineView = useTexEngine({ files });
 
-  // Real SyncTeX index, parsed from the engine's own output. Replaces the
-  // fuzzy source-text search that was previously labelled "SyncTeX".
   const [syncTexIndex, setSyncTexIndex] = useState<SyncTexIndex | null>(null);
 
   useEffect(() => {
@@ -358,8 +357,6 @@ export function App() {
         if (!cancelled) setSyncTexIndex(index);
       })
       .catch(() => {
-        // Without SyncTeX the preview simply loses click-to-source; the
-        // document itself is unaffected, so this is not surfaced as an error.
         if (!cancelled) setSyncTexIndex(null);
       });
 
@@ -368,21 +365,16 @@ export function App() {
     };
   }, [texEngineView.outcome?.synctex]);
 
-  // Forward sync: where the editor caret maps to in the compiled page. Only
-  // meaningful once a build with SyncTeX output exists.
   const forwardTarget = useMemo<ForwardMatch | null>(() => {
     if (!syncTexIndex || forwardTargetLine === null) return null;
     return forwardSync(syncTexIndex, activeFile.name, forwardTargetLine);
   }, [syncTexIndex, forwardTargetLine, activeFile.name]);
 
-  // Inverse sync: a click in the PDF resolves to a file and line via the
-  // engine's own record, so it works inside tables, math, and macro output
-  // where text matching cannot.
   const handleInverseSync = useCallback(
     (file: string, line: number) => {
       const target =
-        files.find(f => f.name === file) ??
-        files.find(f => f.name.endsWith(`/${file}`));
+        filesRef.current.find(f => f.name === file) ??
+        filesRef.current.find(f => f.name.endsWith(`/${file}`));
 
       if (target) {
         setActiveFileId(target.id);
@@ -390,10 +382,9 @@ export function App() {
       }
       setTargetLine(line);
     },
-    [files],
+    [],
   );
 
-  /** First engine error, for compact status surfaces. */
   const engineErrorSummary = useMemo(() => {
     const outcome = texEngineView.outcome;
     if (!outcome || outcome.ok) return null;
@@ -403,21 +394,12 @@ export function App() {
     return `${firstError.message}${where}`;
   }, [texEngineView.outcome]);
 
-  /**
-   * Switching academic format rewrites the document's `\documentclass` and adds
-   * the packages that class needs, then lets the engine re-typeset.
-   *
-   * This used to set a UI-only preference that restyled an HTML mock without
-   * touching the source, so the "format" shown had no relationship to what
-   * LaTeX would produce. Changing the document is the only version of this
-   * feature that can be correct.
-   */
   const handleSelectFormat = useCallback((format: PaperFormatId) => {
     setPaperFormat(format);
     try {
       localStorage.setItem('teeex_paper_format', format);
     } catch {
-      // Losing the remembered choice is harmless.
+      // Ignore
     }
 
     setFiles(prev => {
@@ -436,30 +418,21 @@ export function App() {
       return prev.map(f => (f.id === entry.id ? { ...f, content: next } : f));
     });
 
-    // Be honest when a preset's class is not in the bundled set and will pull a
-    // large dependency tree (acmart, sn-jnl): the user has just rewritten their
-    // document to it, so tell them what the next compile will do rather than
-    // letting it silently hang.
     const notice = formatResolutionNotice(format);
     if (notice) setToast(notice);
   }, []);
 
-  // Real-Time High-Performance Live Compilation Pipeline (Persistent Web Worker)
-  // Completely offloads AST parsing, syntax diagnostics, and KaTeX rendering to a dedicated worker.
-  // Guarantees 0ms editor main-thread blocking on every keystroke.
+  // Debounce live parser to 220ms so fast typing doesn't flood worker postMessage
   const liveCompileResult = useLatexParser({
     content: activeFile.content,
     files,
     activeFileName: activeFile.name,
-    debounceMs: 80,
+    debounceMs: 220,
   });
 
   const parsedDoc = liveCompileResult.parsedDoc;
   const renderedHtml = liveCompileResult.renderedHtml;
 
-  // Diagnostics: the engine is authoritative about the document, so its
-  // findings lead. The draft parser's checks are kept because they are
-  // available instantly while a compile is still running.
   const diagnostics = useMemo(() => {
     const parserDiags = liveCompileResult.diagnostics;
     const outcome = texEngineView.outcome;
@@ -478,8 +451,6 @@ export function App() {
     return [...engineDiags, ...parserDiags];
   }, [liveCompileResult.diagnostics, texEngineView.outcome]);
 
-  // Compile state reflects the engine, which is the only thing that actually
-  // typesets the document.
   useEffect(() => {
     if (texEngineView.isCompiling) {
       setCompileState(prev => ({ ...prev, status: 'compiling', isDebouncing: false }));
@@ -515,18 +486,19 @@ export function App() {
     });
   }, [texEngineView.isCompiling, texEngineView.isDebouncing, texEngineView.outcome, texEngineView.lastCompiledAt, liveCompileResult.durationMs]);
 
-  // Document Stats
-  const wordCount = useMemo(() => {
-    const textOnly = activeFile.content.replace(/\\(.*?)\{.*?\}/g, '').replace(/%.*/g, '');
-    const words = textOnly.trim().split(/\s+/).filter(w => w.length > 0);
-    return words.length;
+  // Debounced Word Count to avoid running regex over the whole file on every keystroke
+  const [wordCount, setWordCount] = useState(0);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const textOnly = activeFile.content.replace(/\\[a-zA-Z]+\*?(\[[^\]]*\])?(\{[^}]*\})?/g, ' ').replace(/%.*/g, ' ');
+      const words = textOnly.trim().split(/\s+/).filter(w => w.length > 0);
+      setWordCount(words.length);
+    }, 300);
+    return () => clearTimeout(timer);
   }, [activeFile.content]);
 
-  const equationCount = useMemo(() => {
-    return parsedDoc.mathBlocks.length;
-  }, [parsedDoc.mathBlocks]);
+  const equationCount = parsedDoc.mathBlocks.length;
 
-  // Run a full typesetting pass immediately, bypassing the edit debounce.
   const triggerCompile = useCallback(() => {
     setCompileState(prev => ({ ...prev, status: 'compiling' }));
     texEngineView.compile();
@@ -566,7 +538,6 @@ export function App() {
     return () => unsubscribe();
   }, [hub]);
 
-  // Offline network listener
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
@@ -578,20 +549,6 @@ export function App() {
     };
   }, []);
 
-  // IndexedDB Auto-Caching for Airplane/Offline mode resilience
-  useEffect(() => {
-    if (activeProject) {
-      saveProjectOffline({
-        ...activeProject,
-        files,
-        folders,
-        title: projectTitle,
-        updatedAt: new Date().toISOString(),
-      }).catch(console.error);
-    }
-  }, [activeProject, files, folders, projectTitle]);
-
-  // Multi-File Tabs Management
   const handleSelectFile = useCallback((fileId: string) => {
     setActiveFileId(fileId);
     setOpenFileIds(prev => prev.includes(fileId) ? prev : [...prev, fileId]);
@@ -601,49 +558,52 @@ export function App() {
     setOpenFileIds(prev => {
       const next = prev.filter(id => id !== fileId);
       if (next.length === 0) {
-        const fallback = files[0]?.id || fileId;
+        const fallback = filesRef.current[0]?.id || fileId;
         setActiveFileId(fallback);
         return [fallback];
       }
-      if (activeFileId === fileId) {
+      if (activeFileIdRef.current === fileId) {
         const idx = prev.indexOf(fileId);
         const nextActive = next[Math.max(0, idx - 1)] || next[0];
         setActiveFileId(nextActive);
       }
       return next;
     });
-  }, [activeFileId, files]);
+  }, []);
 
-  // Track Changes & Reviewer Suggestions Handlers
   const handleAcceptTrackedChange = useCallback((changeId: string) => {
-    const c = trackedChanges.find(t => t.id === changeId);
-    if (c) {
-      logAuditAction(
-        activeProjectId,
-        'CHANGE_ACCEPTED',
-        `Accepted review suggestion: "${c.text.slice(0, 35)}..."`,
-        currentUser?.fullName || 'Current User',
-        currentRole,
-        'collaboration'
-      );
-      setTrackedChanges(prev => prev.filter(t => t.id !== changeId));
-    }
-  }, [trackedChanges, activeProjectId, currentUser, currentRole]);
+    setTrackedChanges(prev => {
+      const c = prev.find(t => t.id === changeId);
+      if (c) {
+        logAuditAction(
+          activeProjectIdRef.current,
+          'CHANGE_ACCEPTED',
+          `Accepted review suggestion: "${c.text.slice(0, 35)}..."`,
+          currentUser?.fullName || 'Current User',
+          currentRole,
+          'collaboration'
+        );
+      }
+      return prev.filter(t => t.id !== changeId);
+    });
+  }, [currentUser, currentRole]);
 
   const handleRejectTrackedChange = useCallback((changeId: string) => {
-    const c = trackedChanges.find(t => t.id === changeId);
-    if (c) {
-      logAuditAction(
-        activeProjectId,
-        'CHANGE_REJECTED',
-        `Rejected review suggestion: "${c.text.slice(0, 35)}..."`,
-        currentUser?.fullName || 'Current User',
-        currentRole,
-        'collaboration'
-      );
-      setTrackedChanges(prev => prev.filter(t => t.id !== changeId));
-    }
-  }, [trackedChanges, activeProjectId, currentUser, currentRole]);
+    setTrackedChanges(prev => {
+      const c = prev.find(t => t.id === changeId);
+      if (c) {
+        logAuditAction(
+          activeProjectIdRef.current,
+          'CHANGE_REJECTED',
+          `Rejected review suggestion: "${c.text.slice(0, 35)}..."`,
+          currentUser?.fullName || 'Current User',
+          currentRole,
+          'collaboration'
+        );
+      }
+      return prev.filter(t => t.id !== changeId);
+    });
+  }, [currentUser, currentRole]);
 
   const handleAddTrackedChange = useCallback((change: Omit<TrackedChange, 'id' | 'status' | 'timestamp'>) => {
     const newChange: TrackedChange = {
@@ -655,26 +615,23 @@ export function App() {
     setTrackedChanges(prev => [newChange, ...prev]);
   }, []);
 
-  // Insert the format document handler below.
-
-  // Client-Side E2EE Document Encryption Handler
   const handleToggleEncryption = useCallback(async (enabled: boolean, passphrase: string, salt: string) => {
     if (enabled) {
       const encryptedFiles = await Promise.all(
-        files.map(async f => ({
+        filesRef.current.map(async f => ({
           ...f,
           content: await encryptText(f.content, passphrase, salt),
         }))
       );
       setFiles(encryptedFiles);
-      const updated = updateProject(activeProjectId, {
+      const updated = updateProject(activeProjectIdRef.current, {
         files: encryptedFiles,
         isEncrypted: true,
         encryptionSalt: salt,
       });
       setProjects(updated);
       logAuditAction(
-        activeProjectId,
+        activeProjectIdRef.current,
         'ENCRYPTION_ENABLED',
         'Enabled client-side AES-256-GCM vault encryption',
         currentUser?.fullName || 'Current User',
@@ -684,20 +641,20 @@ export function App() {
     } else {
       try {
         const decryptedFiles = await Promise.all(
-          files.map(async f => ({
+          filesRef.current.map(async f => ({
             ...f,
             content: await decryptText(f.content, passphrase, salt),
           }))
         );
         setFiles(decryptedFiles);
-        const updated = updateProject(activeProjectId, {
+        const updated = updateProject(activeProjectIdRef.current, {
           files: decryptedFiles,
           isEncrypted: false,
           encryptionSalt: undefined,
         });
         setProjects(updated);
         logAuditAction(
-          activeProjectId,
+          activeProjectIdRef.current,
           'ENCRYPTION_DISABLED',
           'Decrypted document vault back to plaintext',
           currentUser?.fullName || 'Current User',
@@ -710,49 +667,54 @@ export function App() {
       }
     }
     setIsEncryptionModalOpen(false);
-  }, [files, activeProjectId, currentUser, currentRole]);
+  }, [currentUser, currentRole]);
 
-  // Update file content & broadcast & sync project
-  const handleCodeChange = (newCode: string) => {
-    const updated = files.map(f => f.id === activeFileId ? { ...f, content: newCode } : f);
-    setFiles(updated);
-    hub.broadcastFileUpdate(activeFileId, newCode);
-    const updatedProjects = updateProject(activeProjectId, { files: updated });
-    setProjects(updatedProjects);
-  };
+  // Fast, non-blocking file content update
+  const handleCodeChange = useCallback((newCode: string) => {
+    const currentId = activeFileIdRef.current;
+    setFiles(prev => prev.map(f => f.id === currentId ? { ...f, content: newCode } : f));
+    hub.broadcastFileUpdate(currentId, newCode);
+  }, [hub]);
 
-  // Cursor change & broadcast
-  const handleCursorChange = (line: number, col: number) => {
-    setSelfUser(prev => ({ ...prev, cursorLine: line, cursorCol: col }));
-    hub.broadcastCursor(activeFileId, line, col);
-  };
+  // Cursor change: Broadcasts immediately to peers, throttles local UI outline update to 200ms
+  const handleCursorChange = useCallback((line: number, col: number) => {
+    hub.broadcastCursor(activeFileIdRef.current, line, col);
+    if (cursorThrottleRef.current) clearTimeout(cursorThrottleRef.current);
+    cursorThrottleRef.current = setTimeout(() => {
+      setActiveCursorLine(prev => (prev !== line ? line : prev));
+    }, 200);
+  }, [hub]);
 
-  // Apply Quick Fix action
-  const handleApplyFix = (fix: SuggestedFix) => {
-    const lines = activeFile.content.split('\n');
-    lines[fix.startLine - 1] = fix.replacement;
-    const updated = lines.join('\n');
+  // Apply Quick Fix action safely across single or multiple lines
+  const handleApplyFix = useCallback((fix: SuggestedFix) => {
+    const currentFile = filesRef.current.find(f => f.id === activeFileIdRef.current) || filesRef.current[0];
+    if (!currentFile) return;
+    const lines = currentFile.content.split('\n');
+    const startIdx = Math.max(0, fix.startLine - 1);
+    const deleteCount = Math.max(1, (fix.endLine ?? fix.startLine) - fix.startLine + 1);
+    lines.splice(startIdx, deleteCount, fix.replacement);
+    handleCodeChange(lines.join('\n'));
+    setTimeout(() => triggerCompile(), 50);
+  }, [handleCodeChange, triggerCompile]);
+
+  const handleInsertCode = useCallback((latexSnippet: string) => {
+    const currentFile = filesRef.current.find(f => f.id === activeFileIdRef.current) || filesRef.current[0];
+    if (!currentFile) return;
+    const updated = currentFile.content + '\n' + latexSnippet + '\n';
     handleCodeChange(updated);
     setTimeout(() => triggerCompile(), 50);
-  };
+  }, [handleCodeChange, triggerCompile]);
 
-  // Insert code snippet helper
-  const handleInsertCode = (latexSnippet: string) => {
-    const updated = activeFile.content + '\n' + latexSnippet + '\n';
-    handleCodeChange(updated);
-    setTimeout(() => triggerCompile(), 50);
-  };
-
-  // Pure deterministic LaTeX formatting
   const handleFormatDocument = useCallback(() => {
-    if (!activeFile || !activeFile.name.endsWith('.tex')) return;
-    const formatted = formatLatexCode(activeFile.content);
-    if (formatted !== activeFile.content) {
+    const currentFile = filesRef.current.find(f => f.id === activeFileIdRef.current) || filesRef.current[0];
+    if (!currentFile || !currentFile.name.endsWith('.tex')) return;
+    const formatted = formatLatexCode(currentFile.content);
+    if (formatted !== currentFile.content) {
       handleCodeChange(formatted);
     }
-  }, [activeFile]);
+  }, [handleCodeChange]);
 
-  // Global Shortcut: Universal Command Palette (Ctrl+K / Cmd+K)
+  // Single authoritative Global Shortcut for Command Palette (Ctrl+K / Cmd+K)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
@@ -764,11 +726,10 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Review Comment Handlers
-  const handleAddComment = (line: number, text: string) => {
+  const handleAddComment = useCallback((line: number, text: string) => {
     const newComment: ReviewComment = {
       id: 'comment-' + Date.now(),
-      fileId: activeFile.id,
+      fileId: activeFileIdRef.current,
       line,
       authorName: selfUser.name,
       authorAvatar: selfUser.avatar,
@@ -778,40 +739,34 @@ export function App() {
       resolved: false,
     };
     setComments(prev => [...prev, newComment]);
-  };
+  }, [selfUser]);
 
-  const handleResolveComment = (commentId: string) => {
+  const handleResolveComment = useCallback((commentId: string) => {
     setComments(prev => prev.map(c => c.id === commentId ? { ...c, resolved: true } : c));
-  };
+  }, []);
 
-  // Checkpoints Management (Time Machine)
-  const handleCreateCheckpoint = (name: string) => {
+  const handleCreateCheckpoint = useCallback((name: string) => {
     const newCp: Checkpoint = {
       id: 'cp-' + Date.now(),
       name,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       author: selfUser.name,
-      files: JSON.parse(JSON.stringify(files)),
+      files: structuredClone ? structuredClone(filesRef.current) : JSON.parse(JSON.stringify(filesRef.current)),
     };
     setCheckpoints(prev => [newCp, ...prev]);
-  };
+  }, [selfUser.name]);
 
-  const handleRestoreCheckpoint = (cp: Checkpoint) => {
-    setFiles(JSON.parse(JSON.stringify(cp.files)));
-    const updatedProjects = updateProject(activeProjectId, { files: cp.files });
-    setProjects(updatedProjects);
+  const handleRestoreCheckpoint = useCallback((cp: Checkpoint) => {
+    const cloned = structuredClone ? structuredClone(cp.files) : JSON.parse(JSON.stringify(cp.files));
+    setFiles(cloned);
     setTimeout(() => triggerCompile(), 50);
-  };
+  }, [triggerCompile]);
 
-  // Revert a single file to its checkpoint snapshot
   const handleRestoreSingleFile = useCallback((file: ProjectFile) => {
     setFiles(prev => prev.map(f => (f.id === file.id || f.name === file.name) ? { ...file } : f));
-    const updated = files.map(f => (f.id === file.id || f.name === file.name) ? { ...file } : f);
-    updateProject(activeProjectId, { files: updated });
     setTimeout(() => triggerCompile(), 50);
-  }, [files, activeProjectId]);
+  }, [triggerCompile]);
 
-  // Inject a custom \newcommand into the preamble (before \begin{document})
   const handleAddPreambleMacro = useCallback((macroDef: string) => {
     setFiles(prev => {
       const mainFile = prev.find(f => f.name.endsWith('.tex') && f.isEntry) || prev.find(f => f.name.endsWith('.tex')) || prev[0];
@@ -829,11 +784,8 @@ export function App() {
       return prev.map(f => f.id === mainFile.id ? { ...f, content } : f);
     });
     setTimeout(() => triggerCompile(), 50);
-  }, []);
+  }, [triggerCompile]);
 
-  // Export writes out the exact bytes the engine produced and the preview is
-  // showing. There is no alternative rendering path to fall back to: if no
-  // successful build exists, say so rather than printing an approximation.
   const handleExportPdf = useCallback(() => {
     const bytes = texEngineView.pdf;
     if (!bytes) {
@@ -852,13 +804,11 @@ export function App() {
     }
   }, [texEngineView.pdf, texEngineView.isCompiling, projectTitle, parsedDoc.title]);
 
-  // Export full project as .zip package
-  const handleExportZip = () => {
-    exportProjectAsZip(projectTitle, files);
-  };
+  const handleExportZip = useCallback(() => {
+    exportProjectAsZip(projectTitle, filesRef.current);
+  }, [projectTitle]);
 
-  // File & Folder management
-  const handleCreateFile = (name: string, type: 'tex' | 'bib', targetFolder?: string) => {
+  const handleCreateFile = useCallback((name: string, type: 'tex' | 'bib', targetFolder?: string) => {
     let fullName = name.trim();
     let folder = targetFolder;
 
@@ -876,44 +826,34 @@ export function App() {
       folder,
       content: type === 'bib' ? `% Bibliography File\n` : `\\section{New Section}\nContent goes here...\n`,
     };
-    const updated = [...files, newFile];
-    setFiles(updated);
+    setFiles(prev => [...prev, newFile]);
     setActiveFileId(fullName);
     setOpenFileIds(prev => prev.includes(fullName) ? prev : [...prev, fullName]);
-    const updatedProjects = updateProject(activeProjectId, { files: updated });
-    setProjects(updatedProjects);
-  };
+  }, []);
 
-  const handleCreateFolder = (folderName: string) => {
+  const handleCreateFolder = useCallback((folderName: string) => {
     const clean = folderName.trim().replace(/^\/+|\/+$/g, '');
     if (!clean) return;
-    const nextFolders = folders.includes(clean) ? folders : [...folders, clean];
-    setFolders(nextFolders);
-    const updatedProjects = updateProject(activeProjectId, { folders: nextFolders });
-    setProjects(updatedProjects);
-  };
+    setFolders(prev => prev.includes(clean) ? prev : [...prev, clean]);
+  }, []);
 
-  const handleDeleteFolder = (folderName: string) => {
-    const nextFolders = folders.filter(f => f !== folderName);
-    setFolders(nextFolders);
-    const updatedFiles = files.filter(f => {
-      const fFolder = f.folder || (f.name.includes('/') ? f.name.split('/')[0] : null);
-      return fFolder !== folderName;
+  const handleDeleteFolder = useCallback((folderName: string) => {
+    setFolders(prev => prev.filter(f => f !== folderName));
+    setFiles(prev => {
+      const updatedFiles = prev.filter(f => {
+        const fFolder = f.folder || (f.name.includes('/') ? f.name.split('/')[0] : null);
+        return fFolder !== folderName;
+      });
+      if (!updatedFiles.some(f => f.id === activeFileIdRef.current)) {
+        const fallback = updatedFiles[0]?.id || 'main.tex';
+        setActiveFileId(fallback);
+        setOpenFileIds(open => open.filter(id => updatedFiles.some(f => f.id === id)).concat(open.length === 0 ? [fallback] : []));
+      }
+      return updatedFiles;
     });
-    setFiles(updatedFiles);
-    if (!updatedFiles.some(f => f.id === activeFileId)) {
-      const fallback = updatedFiles[0]?.id || 'main.tex';
-      setActiveFileId(fallback);
-      setOpenFileIds(prev => prev.filter(id => updatedFiles.some(f => f.id === id)).concat(prev.length === 0 ? [fallback] : []));
-    }
-    const updatedProjects = updateProject(activeProjectId, {
-      folders: nextFolders,
-      files: updatedFiles,
-    });
-    setProjects(updatedProjects);
-  };
+  }, []);
 
-  const handleAddImageFile = (imageFile: ProjectFile) => {
+  const handleAddImageFile = useCallback((imageFile: ProjectFile) => {
     const targetFolder = folders.includes('figures') ? 'figures' : undefined;
     const resolvedName = targetFolder && !imageFile.name.startsWith('figures/')
       ? `figures/${imageFile.name}`
@@ -926,13 +866,10 @@ export function App() {
       folder: targetFolder,
     };
 
-    const updated = [...files, fileToSave];
-    setFiles(updated);
-    const updatedProjects = updateProject(activeProjectId, { files: updated });
-    setProjects(updatedProjects);
-  };
+    setFiles(prev => [...prev, fileToSave]);
+  }, [folders]);
 
-  const handleImportFiles = async (fileList: FileList | File[], targetFolder?: string) => {
+  const handleImportFiles = useCallback(async (fileList: FileList | File[], targetFolder?: string) => {
     const rawFiles = Array.from(fileList);
     if (rawFiles.length === 0) return;
 
@@ -946,7 +883,7 @@ export function App() {
       const safeName = file.name.replace(/\s+/g, '_');
 
       if (isImage) {
-        const destFolder = targetFolder || (folders.includes('figures') ? 'figures' : 'figures');
+        const destFolder = targetFolder || 'figures';
         addedFolders.add(destFolder);
         const resolvedName = destFolder && !safeName.startsWith(destFolder + '/')
           ? `${destFolder}/${safeName}`
@@ -991,76 +928,60 @@ export function App() {
       }
     }
 
-    let mergedFiles = [...files];
-    newFiles.forEach(nf => {
-      const existingIdx = mergedFiles.findIndex(f => f.id === nf.id || f.name === nf.name);
-      if (existingIdx >= 0) {
-        mergedFiles[existingIdx] = nf;
-      } else {
-        mergedFiles.push(nf);
-      }
+    setFiles(prev => {
+      const mergedFiles = [...prev];
+      newFiles.forEach(nf => {
+        const existingIdx = mergedFiles.findIndex(f => f.id === nf.id || f.name === nf.name);
+        if (existingIdx >= 0) {
+          mergedFiles[existingIdx] = nf;
+        } else {
+          mergedFiles.push(nf);
+        }
+      });
+      return mergedFiles;
     });
 
-    const nextFoldersList = Array.from(addedFolders);
-    setFiles(mergedFiles);
-    setFolders(nextFoldersList);
+    setFolders(Array.from(addedFolders));
 
     const firstTextFile = newFiles.find(f => f.type === 'tex' || f.type === 'bib');
-    if (firstTextFile) {
-      setActiveFileId(firstTextFile.id);
-      setOpenFileIds(prev => Array.from(new Set([...prev, firstTextFile.id])));
-    } else if (newFiles.length > 0) {
-      setActiveFileId(newFiles[0].id);
-      setOpenFileIds(prev => Array.from(new Set([...prev, newFiles[0].id])));
+    const targetOpen = firstTextFile || newFiles[0];
+    if (targetOpen) {
+      setActiveFileId(targetOpen.id);
+      setOpenFileIds(prev => Array.from(new Set([...prev, targetOpen.id])));
     }
 
-    const updatedProjects = updateProject(activeProjectId, {
-      files: mergedFiles,
-      folders: nextFoldersList,
-    });
-    setProjects(updatedProjects);
     setTimeout(() => triggerCompile(), 100);
-  };
+  }, [folders, triggerCompile]);
 
-  const handleDeleteFile = (fileId: string) => {
-    if (files.length <= 1) return;
-    const updated = files.filter(f => f.id !== fileId);
-    setFiles(updated);
-    setOpenFileIds(prev => {
-      const next = prev.filter(id => id !== fileId);
-      return next.length > 0 ? next : [updated[0]?.id || 'main.tex'];
+  const handleDeleteFile = useCallback((fileId: string) => {
+    setFiles(prev => {
+      if (prev.length <= 1) return prev;
+      const updated = prev.filter(f => f.id !== fileId);
+      setOpenFileIds(open => {
+        const next = open.filter(id => id !== fileId);
+        return next.length > 0 ? next : [updated[0]?.id || 'main.tex'];
+      });
+      if (activeFileIdRef.current === fileId) {
+        setActiveFileId(updated[0].id);
+      }
+      return updated;
     });
-    if (activeFileId === fileId) {
-      setActiveFileId(updated[0].id);
-    }
-    const updatedProjects = updateProject(activeProjectId, { files: updated });
-    setProjects(updatedProjects);
-  };
+  }, []);
 
-  // Template Selection
-  const handleSelectTemplate = (template: Template) => {
+  const handleSelectTemplate = useCallback((template: Template) => {
     setFiles(template.files);
     const firstId = template.files[0]?.id || 'main.tex';
     setActiveFileId(firstId);
     setOpenFileIds([firstId]);
     setProjectTitle(template.name);
-    const updatedProjects = updateProject(activeProjectId, {
-      title: template.name,
-      files: template.files
-    });
-    setProjects(updatedProjects);
     setTimeout(() => triggerCompile(), 50);
-  };
+  }, [triggerCompile]);
 
-  // Title changes
-  const handleTitleChange = (newTitle: string) => {
+  const handleTitleChange = useCallback((newTitle: string) => {
     setProjectTitle(newTitle);
-    const updatedProjects = updateProject(activeProjectId, { title: newTitle });
-    setProjects(updatedProjects);
-  };
+  }, []);
 
-  // Multi-Project Switching & Management
-  const handleSelectProject = (projId: string) => {
+  const handleSelectProject = useCallback((projId: string) => {
     const proj = projects.find(p => p.id === projId);
     if (!proj) return;
     setActiveProjectId(projId);
@@ -1073,42 +994,62 @@ export function App() {
     setProjectTitle(proj.title);
     setPeers(areSimulatedPeersEnabled(projId) ? DEFAULT_PEERS : []);
     setTimeout(() => triggerCompile(), 60);
-  };
+  }, [projects, triggerCompile]);
 
-  const handleCreateProject = (title: string, templateId?: string) => {
+  const handleCreateProject = useCallback((title: string, templateId?: string) => {
     const newProj = createProject(
       title,
       currentUser?.email || 'you@teeex.local',
       currentUser?.fullName || 'You',
       templateId
     );
-    setProjects(loadProjects());
-    handleSelectProject(newProj.id);
-  };
+    const updated = loadProjects();
+    setProjects(updated);
+    const proj = updated.find(p => p.id === newProj.id);
+    if (proj) {
+      setActiveProjectId(proj.id);
+      setActiveProjectIdState(proj.id);
+      setFiles(proj.files);
+      setFolders(proj.folders || ['sections', 'figures']);
+      const firstId = proj.files[0]?.id || 'main.tex';
+      setActiveFileId(firstId);
+      setOpenFileIds([firstId]);
+      setProjectTitle(proj.title);
+    }
+  }, [currentUser]);
 
-  const handleDuplicateProject = (projId: string) => {
+  const handleDuplicateProject = useCallback((projId: string) => {
     const cloned = duplicateProject(projId);
     if (cloned) {
-      setProjects(loadProjects());
-      handleSelectProject(cloned.id);
+      const updated = loadProjects();
+      setProjects(updated);
+      setActiveProjectId(cloned.id);
+      setActiveProjectIdState(cloned.id);
+      setFiles(cloned.files);
+      setFolders(cloned.folders || ['sections', 'figures']);
+      setProjectTitle(cloned.title);
     }
-  };
+  }, []);
 
-  const handleToggleArchiveProject = (projId: string) => {
+  const handleToggleArchiveProject = useCallback((projId: string) => {
     const updated = toggleArchiveProject(projId);
     setProjects(updated);
-  };
+  }, []);
 
-  const handleDeleteProject = (projId: string) => {
+  const handleDeleteProject = useCallback((projId: string) => {
     const updated = deleteProject(projId);
     setProjects(updated);
-    if (activeProjectId === projId && updated.length > 0) {
-      handleSelectProject(updated[0].id);
+    if (activeProjectIdRef.current === projId && updated.length > 0) {
+      const next = updated[0];
+      setActiveProjectId(next.id);
+      setActiveProjectIdState(next.id);
+      setFiles(next.files);
+      setFolders(next.folders || ['sections', 'figures']);
+      setProjectTitle(next.title);
     }
-  };
+  }, []);
 
-  // Collaborator Invitations & Role Updates
-  const handleInviteMember = (email: string, role: ProjectRole) => {
+  const handleInviteMember = useCallback((email: string, role: ProjectRole) => {
     const newMember: ProjectMember = {
       id: `usr-${Date.now().toString(36)}`,
       email,
@@ -1118,26 +1059,25 @@ export function App() {
       role,
       joinedAt: new Date().toISOString().split('T')[0],
     };
-    const members = [...(activeProject.members || []), newMember];
-    const updated = updateProject(activeProjectId, { members });
+    const members = [...(activeProject?.members || []), newMember];
+    const updated = updateProject(activeProjectIdRef.current, { members });
     setProjects(updated);
-  };
+  }, [activeProject]);
 
-  const handleUpdateMemberRole = (memberId: string, newRole: ProjectRole) => {
-    const members = (activeProject.members || []).map(m =>
+  const handleUpdateMemberRole = useCallback((memberId: string, newRole: ProjectRole) => {
+    const members = (activeProject?.members || []).map(m =>
       m.id === memberId ? { ...m, role: newRole } : m
     );
-    const updated = updateProject(activeProjectId, { members });
+    const updated = updateProject(activeProjectIdRef.current, { members });
     setProjects(updated);
-  };
+  }, [activeProject]);
 
-  const handleRemoveMember = (memberId: string) => {
-    const members = (activeProject.members || []).filter(m => m.id !== memberId);
-    const updated = updateProject(activeProjectId, { members });
+  const handleRemoveMember = useCallback((memberId: string) => {
+    const members = (activeProject?.members || []).filter(m => m.id !== memberId);
+    const updated = updateProject(activeProjectIdRef.current, { members });
     setProjects(updated);
-  };
+  }, [activeProject]);
 
-  // Synchronize authentic full name across active project members if needed
   useEffect(() => {
     if (!currentUser?.email || !currentUser?.fullName) return;
     const targetEmail = currentUser.email.toLowerCase();
@@ -1146,10 +1086,10 @@ export function App() {
       const updatedMembers = (activeProject.members || []).map(m =>
         m.email?.toLowerCase() === targetEmail
           ? {
-              ...m,
-              name: currentUser.fullName,
-              avatar: currentUser.fullName.substring(0, 2).toUpperCase() || m.avatar,
-            }
+            ...m,
+            name: currentUser.fullName,
+            avatar: currentUser.fullName.substring(0, 2).toUpperCase() || m.avatar,
+          }
           : m
       );
       const updated = updateProject(activeProjectId, { members: updatedMembers });
@@ -1157,8 +1097,7 @@ export function App() {
     }
   }, [currentUser, activeProject, activeProjectId]);
 
-  // Auth Handlers
-  const handleAuthSuccess = (user: UserProfile) => {
+  const handleAuthSuccess = useCallback((user: UserProfile) => {
     setCurrentUser(user);
     setIsAuthOpen(false);
     setSelfUser(prev => ({
@@ -1167,8 +1106,7 @@ export function App() {
       avatar: user.fullName.substring(0, 2).toUpperCase(),
       color: user.avatarColor || '#38bdf8',
     }));
-    
-    // Reload projects based on newly authenticated user
+
     const loadedProjects = loadProjects(user.email, user.fullName);
     setProjects(loadedProjects);
     const nextActiveId = getActiveProjectId(loadedProjects);
@@ -1185,45 +1123,48 @@ export function App() {
       setPeers(areSimulatedPeersEnabled(nextProj.id) ? DEFAULT_PEERS : []);
       setTimeout(() => triggerCompile(), 80);
     }
-  };
+  }, [triggerCompile]);
 
-  const handleSignOut = async () => {
+  const handleSignOut = useCallback(async () => {
     await signOutUser();
     setCurrentUser(null);
     setIsAuthOpen(false);
-  };
+  }, []);
 
-  // Draggable Split Divider Handlers
   const handleMouseDownSplit = () => {
     setIsDraggingSplit(true);
   };
 
   useEffect(() => {
+    if (!isDraggingSplit) return;
+
+    let rafId: number | null = null;
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isDraggingSplit) return;
-      const sidebarWidth = isSidebarOpen ? 210 : 0;
-      const availableWidth = window.innerWidth - sidebarWidth;
-      const mouseRelativeX = e.clientX - sidebarWidth;
-      const newPercent = Math.min(78, Math.max(22, (mouseRelativeX / availableWidth) * 100));
-      setSplitPercent(newPercent);
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const sidebarWidth = isSidebarOpen ? 236 : 0;
+        const availableWidth = window.innerWidth - sidebarWidth;
+        const mouseRelativeX = e.clientX - sidebarWidth;
+        const newPercent = Math.min(78, Math.max(22, (mouseRelativeX / availableWidth) * 100));
+        setSplitPercent(newPercent);
+      });
     };
 
     const handleMouseUp = () => {
-      if (isDraggingSplit) setIsDraggingSplit(false);
+      setIsDraggingSplit(false);
     };
 
-    if (isDraggingSplit) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-    }
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
 
     return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDraggingSplit, isSidebarOpen]);
 
-  // Global Drag & Drop Handlers for workspace files import
   const [isDragOverApp, setIsDragOverApp] = useState(false);
   const dragCounterRef = useRef(0);
 
@@ -1254,7 +1195,7 @@ export function App() {
     dragCounterRef.current = 0;
     setIsDragOverApp(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleImportFiles(e.dataTransfer.files);
+      void handleImportFiles(e.dataTransfer.files);
     }
   };
 
@@ -1293,7 +1234,6 @@ export function App() {
     );
   }
 
-  // Impermeable Security Gate: Zero workspace DOM/components rendered if unauthenticated
   if (!currentUser) {
     return (
       <AuthPortal
@@ -1318,7 +1258,6 @@ export function App() {
         position: 'relative',
       }}
     >
-      {/* Global Drag and Drop Overlay Indicator */}
       {isDragOverApp && (
         <div
           style={{
@@ -1379,7 +1318,7 @@ export function App() {
           </div>
         </div>
       )}
-      {/* Top Navigation */}
+
       <Navbar
         projectTitle={projectTitle}
         onTitleChange={handleTitleChange}
@@ -1420,9 +1359,7 @@ export function App() {
         isOffline={isOffline}
       />
 
-      {/* Main Workspace Body */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* Left Sidebar */}
         <div style={{
           width: isSidebarOpen ? 236 : 0,
           transition: 'width 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -1442,7 +1379,7 @@ export function App() {
             onDeleteFolder={handleDeleteFolder}
             documentOutline={parsedDoc.sections}
             parsedDoc={parsedDoc}
-            activeCursorLine={selfUser.cursorLine}
+            activeCursorLine={activeCursorLine}
             onJumpToLine={setTargetLine}
             wordCount={wordCount}
             equationCount={equationCount}
@@ -1455,9 +1392,7 @@ export function App() {
           />
         </div>
 
-        {/* Center & Right Split Pane */}
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
-          {/* Left Split: Code Editor */}
           <div style={{ width: `${splitPercent}%`, height: '100%', display: 'flex', flexDirection: 'column' }}>
             <Editor
               code={activeFile.content}
@@ -1497,7 +1432,6 @@ export function App() {
             />
           </div>
 
-          {/* Draggable Divider with Double-Click Snap Presets */}
           <div
             onMouseDown={handleMouseDownSplit}
             onDoubleClick={() => setSplitPercent(prev => prev === 50 ? 70 : prev === 70 ? 30 : 50)}
@@ -1512,7 +1446,6 @@ export function App() {
             title="Drag to resize panels • Double-click to cycle 50/50, 70/30, 30/70"
           />
 
-          {/* Right Split: Publication Preview Pane with SyncTeX */}
           <div style={{
             width: `${100 - splitPercent}%`,
             height: '100%',
@@ -1541,7 +1474,6 @@ export function App() {
         </div>
       </div>
 
-      {/* Bottom Diagnostics Dock */}
       <DiagnosticsDock
         diagnostics={diagnostics}
         onApplyFix={handleApplyFix}
@@ -1558,7 +1490,6 @@ export function App() {
         </div>
       )}
 
-      {/* Modals: Lazy-loaded on demand with Suspense */}
       <Suspense fallback={null}>
         {isImageUploadOpen && (
           <ImageUploadModal
@@ -1650,7 +1581,6 @@ export function App() {
           />
         )}
 
-        {/* Authentication Modal */}
         {isAuthOpen && (
           <AuthModal
             isOpen={isAuthOpen}
@@ -1661,7 +1591,6 @@ export function App() {
           />
         )}
 
-        {/* Website Developer & Platform Owner Access Modal */}
         {isDevUnlockOpen && (
           <DeveloperUnlockModal
             isOpen={isDevUnlockOpen}
@@ -1671,7 +1600,6 @@ export function App() {
           />
         )}
 
-        {/* Multi-Project Hub Dashboard */}
         {isProjectsHubOpen && (
           <ProjectsDashboardModal
             isOpen={isProjectsHubOpen}
@@ -1687,7 +1615,6 @@ export function App() {
           />
         )}
 
-        {/* Client-Side E2EE Document Vault Modal */}
         {isEncryptionModalOpen && (
           <EncryptionModal
             isOpen={isEncryptionModalOpen}
@@ -1699,7 +1626,6 @@ export function App() {
           />
         )}
 
-        {/* Security & Activity Audit Log Modal */}
         {isAuditModalOpen && (
           <AuditLogModal
             isOpen={isAuditModalOpen}
@@ -1709,7 +1635,6 @@ export function App() {
           />
         )}
 
-        {/* Admin Users Dashboard */}
         {isAdminUsersOpen && (
           <AdminUsersModal
             isOpen={isAdminUsersOpen}
@@ -1718,7 +1643,6 @@ export function App() {
           />
         )}
 
-        {/* Universal Command Palette */}
         {isCommandPaletteOpen && (
           <CommandPaletteModal
             isOpen={isCommandPaletteOpen}

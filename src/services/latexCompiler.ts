@@ -1,19 +1,5 @@
 /**
  * Teeex — TeX engine service.
- *
- * This is the single authoritative layout engine. Nothing else in the
- * application computes page geometry, line breaks, or pagination: the preview
- * renders the PDF this service produces, and export ships those same bytes.
- * Preview/PDF divergence is therefore structurally impossible rather than
- * something to be tuned down.
- *
- * Responsibilities:
- *   - own the WASM engine lifecycle and report it as an explicit state machine
- *   - mount the project (including binary assets) into the engine filesystem
- *   - compile the project *entry* file, never whichever file happens to be open
- *   - serialise compiles, coalesce superseded requests, and tag results so
- *     consumers can discard stale ones
- *   - resolve packages outside the preloaded set on demand
  */
 
 import { BusyTexRunner, LuaLatex, PdfLatex, XeLatex } from 'texlyre-busytex';
@@ -45,17 +31,14 @@ export type EnginePhase =
 
 export interface EngineStatus {
   phase: EnginePhase;
-  /** Download completion, 0–100. Only meaningful while `phase === 'fetching'`. */
   progress: number;
   engine: EngineId;
-  /** Present only while `phase === 'failed'`. */
   error?: string;
 }
 
 export interface CompileInput {
   files: ProjectFile[];
   engine?: EngineId;
-  /** Overrides automatic entry detection. */
   entryPath?: string;
   bibtex?: boolean;
   makeindex?: boolean;
@@ -73,32 +56,16 @@ export interface CompileOutcome {
   engine: EngineId;
   durationMs: number;
   requestId: number;
-  /**
-   * True when a newer request displaced this one before it ran. The result
-   * carries no output and should be ignored rather than surfaced as a failure.
-   */
   superseded: boolean;
 }
 
 const ENGINE_BASE_PATH = '/core/busytex';
-
-/**
- * TeX Live 2026 package server implementing busytex's
- * `GET /<format_id>/<filename>` contract. Anything outside the preloaded
- * `texlive-basic` set resolves through here at compile time, which is what
- * makes broad \usepackage support real rather than claimed.
- *
- * Self-hostable (see texlyre-busytex-build/texlive-server); override with
- * VITE_TEXLIVE_REMOTE_ENDPOINT to avoid the third-party dependency.
- */
 const DEFAULT_REMOTE_ENDPOINT = 'https://texlive2026.texlyre.org';
 
 function remoteEndpoint(): string | undefined {
   const configured = import.meta.env.VITE_TEXLIVE_REMOTE_ENDPOINT;
   if (configured === 'off') return undefined;
   if (configured) return configured.replace(/\/+$/, '');
-  // Route through Cloudflare Pages edge proxy for 1-year immutable caching,
-  // 404 negative caching, same-origin HTTP/2, and zero WAN latency
   if (typeof window !== 'undefined' && window.location?.origin) {
     return `${window.location.origin}/api/texlive`;
   }
@@ -121,6 +88,18 @@ function extractCrossRefSig(content: string): string {
   return hashString(matches.join(';'));
 }
 
+function extractPreambleSig(files: ProjectFile[]): { sig: string; preambleText: string } {
+  const chunks: string[] = [];
+  for (const f of files) {
+    if (f.name.endsWith('.tex') || f.name.endsWith('.cls') || f.name.endsWith('.sty')) {
+      const idx = f.content.indexOf('\\begin{document}');
+      chunks.push(idx !== -1 ? f.content.slice(0, idx) : f.content);
+    }
+  }
+  const preambleText = chunks.join('\n');
+  return { sig: hashString(preambleText), preambleText };
+}
+
 interface QueuedRequest {
   input: CompileInput;
   requestId: number;
@@ -128,7 +107,6 @@ interface QueuedRequest {
 }
 
 export class TexEngineService {
-  /** One runner per engine binary; each is fetched only when first used. */
   private runners = new Map<EngineId, BusyTexRunner>();
   private initPromises = new Map<EngineId, Promise<BusyTexRunner>>();
 
@@ -139,12 +117,12 @@ export class TexEngineService {
   private queued: QueuedRequest | null = null;
   private nextRequestId = 1;
 
-  /** Cross-reference and aux tracking for smart single-pass compile acceleration. */
+  /** Cross-reference, preamble, and mounted package tracking for fast single-pass compiles. */
   private lastAuxHashes = new Map<string, string>();
   private lastRerunRequired = new Map<string, boolean>();
   private lastDocSig = new Map<string, string>();
-
-  // --- status ------------------------------------------------------------
+  private lastPreambleSig = new Map<EngineId, string>();
+  private mountedPackagesByEngine = new Map<EngineId, Set<string>>();
 
   subscribe(listener: (status: EngineStatus) => void): () => void {
     this.listeners.add(listener);
@@ -166,20 +144,11 @@ export class TexEngineService {
     for (const listener of this.listeners) listener(this.status);
   }
 
-  // --- engine lifecycle --------------------------------------------------
-
-  /**
-   * Begins fetching an engine without compiling. Called on app start so the
-   * download overlaps with the user writing their first paragraph instead of
-   * blocking their first compile.
-   */
   prewarm(engine: EngineId = 'pdflatex'): void {
     if (typeof window !== 'undefined') {
-      void getBundledPackages().catch(() => {});
+      void getBundledPackages().catch(() => { });
     }
-    void this.ensureRunner(engine).catch(() => {
-      // Surfaced through status; nothing to do here.
-    });
+    void this.ensureRunner(engine).catch(() => { });
   }
 
   private async ensureRunner(engine: EngineId): Promise<BusyTexRunner> {
@@ -195,8 +164,6 @@ export class TexEngineService {
     try {
       return await promise;
     } catch (error) {
-      // Clear the memo so a later attempt can retry rather than replaying the
-      // same rejection forever.
       this.initPromises.delete(engine);
       throw error;
     }
@@ -209,8 +176,6 @@ export class TexEngineService {
       busytexBasePath: ENGINE_BASE_PATH,
       engineMode: 'combined',
       verbose: false,
-      // Only the basic TeX Live package is preloaded; everything else is
-      // fetched per-file from the remote endpoint at compile time.
       preloadDataPackages: [
         `${ENGINE_BASE_PATH}/texlive-basic.js`,
       ],
@@ -226,19 +191,26 @@ export class TexEngineService {
 
     try {
       const runner = new BusyTexRunner(config);
-      await runner.initialize(true); // off the main thread
+      await runner.initialize(true);
 
-      // Pre-seed academic packages (IEEEtran, cite, acmart) & font metrics into WASM kpathsea
+      const mountedSet = new Set<string>();
+      this.mountedPackagesByEngine.set(engine, mountedSet);
+
       try {
         const bundled = await getBundledPackages();
         if (bundled.length > 0) {
           await runner.writeTexliveRemoteFiles(bundled);
+          for (const pkg of bundled) {
+            if ('filename' in pkg && typeof pkg.filename === 'string') {
+              mountedSet.add(pkg.filename);
+            }
+          }
         }
         const misses = await getCachedMisses();
         if (misses.length > 0) {
           await runner.writeTexliveRemoteMisses(misses);
         }
-      } catch (_bundledErr) {
+      } catch {
         // Non-fatal, compiler will fall back to remote endpoint
       }
 
@@ -258,20 +230,6 @@ export class TexEngineService {
     }
   }
 
-  // --- compilation -------------------------------------------------------
-
-  /**
-   * Compiles the project.
-   *
-   * At most one compile runs at a time. A request arriving mid-compile becomes
-   * the queued request, displacing any previously queued one — the displaced
-   * promise resolves with `superseded: true` rather than hanging or erroring.
-   *
-   * There is deliberately no abort: busytex exposes no per-compile
-   * cancellation, only worker termination, which would discard the engine's
-   * warm filesystem cache. Coalescing achieves the same user-visible result
-   * without that cost.
-   */
   compile(input: CompileInput): Promise<CompileOutcome> {
     const requestId = this.nextRequestId++;
 
@@ -399,18 +357,29 @@ export class TexEngineService {
 
     this.setStatus({ phase: 'compiling', engine });
 
-    // Concurrently pre-hydrate all packages and document classes referenced
-    // across project files into WASM kpathsea before typesetting launches.
+    // Only scan and mount remote packages when the preamble actually changes,
+    // and only write files not already mounted into the WASM worker filesystem.
     try {
-      const allTexContent = input.files
-        .filter((f) => f.name.endsWith('.tex') || f.name.endsWith('.cls') || f.name.endsWith('.sty'))
-        .map((f) => f.content)
-        .join('\n');
-      const preloaded = await preloadDocumentPackages(allTexContent, remoteEndpoint());
-      if (preloaded.length > 0) {
-        await runner.writeTexliveRemoteFiles(preloaded);
+      const { sig: preambleSig, preambleText } = extractPreambleSig(input.files);
+      if (this.lastPreambleSig.get(engine) !== preambleSig) {
+        const preloaded = await preloadDocumentPackages(preambleText, remoteEndpoint());
+        const mountedSet = this.mountedPackagesByEngine.get(engine) ?? new Set<string>();
+        const unmounted = preloaded.filter((pkg: any) => {
+          const key = pkg.filename || pkg.path || '';
+          return !key || !mountedSet.has(key);
+        });
+
+        if (unmounted.length > 0) {
+          await runner.writeTexliveRemoteFiles(unmounted);
+          for (const pkg of unmounted as any[]) {
+            const key = pkg.filename || pkg.path || '';
+            if (key) mountedSet.add(key);
+          }
+          this.mountedPackagesByEngine.set(engine, mountedSet);
+        }
+        this.lastPreambleSig.set(engine, preambleSig);
       }
-    } catch (_preloadErr) {
+    } catch {
       // Non-fatal, compiler falls back to runtime endpoint
     }
 
@@ -427,13 +396,12 @@ export class TexEngineService {
             ? new LuaLatex(runner, false)
             : new PdfLatex(runner, false);
 
-      // Always pass rerun: false to BusyTex to avoid its internal 3-pass loop.
-      // We explicitly control multi-pass compilation: Pass 1 (fast baseline + bibtex),
-      // and at most ONE follow-up pass if LaTeX explicitly requested rerun for labels/citations.
+      const engineFiles = toEngineFiles(input.files, entry.name);
+
       let result = await tool.compile({
         input: entry.content,
         mainTexPath: entry.name,
-        additionalFiles: toEngineFiles(input.files, entry.name),
+        additionalFiles: engineFiles,
         bibtex: input.bibtex ?? needsBibtex(input.files, entry.content),
         makeindex: input.makeindex ?? needsMakeindex(entry.content),
         rerun: false,
@@ -443,9 +411,9 @@ export class TexEngineService {
       let log = result.log || '';
       let parsed = parseTexLog(log, { root: entry.name });
 
-      // Run follow-up pass only when auxiliary files are unsettled or cross-references/citations
-      // actually changed. If only body text was edited, pass 1 is already complete and accurate!
+      // Skip second pass if a newer compile is already waiting in the queue!
       const needsFollowUp =
+        !this.queued &&
         parsed.rerunRequired &&
         (!prevAuxHash || currentSig !== prevSig) &&
         Boolean(result.pdf && result.pdf.byteLength > 0);
@@ -454,7 +422,7 @@ export class TexEngineService {
         const followUp = await tool.compile({
           input: entry.content,
           mainTexPath: entry.name,
-          additionalFiles: toEngineFiles(input.files, entry.name),
+          additionalFiles: engineFiles,
           bibtex: false,
           makeindex: false,
           rerun: false,
@@ -474,9 +442,6 @@ export class TexEngineService {
         this.lastAuxHashes.set(cacheKey, hashString(finalLog.aux));
       }
 
-      // A PDF is the only proof of success. busytex can report a zero exit code
-      // while producing no output, so the artifact is the authority, not the
-      // status flag.
       const pdf = result.pdf && result.pdf.byteLength > 0 ? result.pdf : null;
 
       this.setStatus({ phase: 'ready', engine });
@@ -502,7 +467,6 @@ export class TexEngineService {
     }
   }
 
-  /** Releases every engine worker. */
   terminate(): void {
     for (const runner of this.runners.values()) runner.terminate();
     this.runners.clear();
@@ -510,6 +474,8 @@ export class TexEngineService {
     this.lastAuxHashes.clear();
     this.lastRerunRequired.clear();
     this.lastDocSig.clear();
+    this.lastPreambleSig.clear();
+    this.mountedPackagesByEngine.clear();
     this.setStatus({ phase: 'idle', progress: 0 });
   }
 }

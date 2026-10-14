@@ -4,8 +4,9 @@ import { renderTikzToSvg } from './tikzRenderer';
 import { resolveProjectAsset } from './virtualFileSystem';
 
 // High-speed KaTeX formula LRU cache (eliminates redundant formula typesetting during editing)
+// High-speed KaTeX formula LRU cache with strict bounds
 const katexFormulaCache = new Map<string, string>();
-const MAX_KATEX_CACHE = 3000;
+const MAX_KATEX_CACHE = 1000;
 
 export function renderKatexCached(latex: string, displayMode: boolean): string {
   const key = `${displayMode ? 'D' : 'I'}:${latex}`;
@@ -15,8 +16,8 @@ export function renderKatexCached(latex: string, displayMode: boolean): string {
   try {
     const rendered = katex.renderToString(latex, { displayMode, throwOnError: false });
     if (katexFormulaCache.size >= MAX_KATEX_CACHE) {
-      const oldestKeys = Array.from(katexFormulaCache.keys()).slice(0, 500);
-      for (const k of oldestKeys) katexFormulaCache.delete(k);
+      const firstKey = katexFormulaCache.keys().next().value;
+      if (firstKey !== undefined) katexFormulaCache.delete(firstKey);
     }
     katexFormulaCache.set(key, rendered);
     return rendered;
@@ -1092,8 +1093,8 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
   if (files && files.length > 0) {
     expandedCode = expandedCode.replace(/\\(?:input|include)\{([^}]+)\}/g, (orig, path) => {
       const cleanPath = path.trim();
-      const target = files.find(f => 
-        f.name === cleanPath || 
+      const target = files.find(f =>
+        f.name === cleanPath ||
         f.name === `${cleanPath}.tex` ||
         f.name.endsWith(`/${cleanPath}`) ||
         f.name.endsWith(`/${cleanPath}.tex`)
@@ -1178,6 +1179,7 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
 
   const sections: ParsedDocument['sections'] = [];
   const mathBlocks: ParsedDocument['mathBlocks'] = [];
+  const citations: string[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     const lineNum = i + 1;
@@ -1202,6 +1204,18 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
         line: lineNum,
       });
     }
+
+    const citeMatches = line.matchAll(/\\(?:cite|citep|citet|citealp|citealt)\{([^}]+)\}/g);
+    for (const cm of citeMatches) {
+      if (cm[1]) {
+        for (const k of cm[1].split(',')) {
+          const key = k.trim();
+          if (key && !citations.includes(key)) {
+            citations.push(key);
+          }
+        }
+      }
+    }
   }
 
   return {
@@ -1215,6 +1229,7 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
     abstractLine,
     sections,
     mathBlocks,
+    citations,
     isTwoColumn,
     documentClass,
     hasTitlePage,
@@ -1330,8 +1345,8 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   if (files && files.length > 0) {
     cleanCode = cleanCode.replace(/\\(?:input|include)\{([^}]+)\}/g, (orig, path) => {
       const cleanPath = path.trim();
-      const target = files.find(f => 
-        f.name === cleanPath || 
+      const target = files.find(f =>
+        f.name === cleanPath ||
         f.name === `${cleanPath}.tex` ||
         f.name.endsWith(`/${cleanPath}`) ||
         f.name.endsWith(`/${cleanPath}.tex`)
@@ -1479,9 +1494,9 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
       const docTitle = titleMatch2 ? cleanLatexInline(titleMatch2[1]).trim() : '';
       const docAuthors = authorMatch2
         ? authorMatch2[1]
-            .split(/\\and|\\\\|\s*,\s*/)
-            .map(a => cleanLatexInline(a).trim())
-            .filter(a => a.length > 0)
+          .split(/\\and|\\\\|\s*,\s*/)
+          .map(a => cleanLatexInline(a).trim())
+          .filter(a => a.length > 0)
         : [];
       const docDate = dateMatch2
         ? cleanLatexInline(dateMatch2[1]).trim().replace(/\\today/g, new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }))

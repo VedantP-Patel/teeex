@@ -1,9 +1,5 @@
 /**
  * Teeex — Web Worker for real-time LaTeX parsing, diagnostics, and HTML draft rendering.
- *
- * Runs diagnoseLatex, parseLatexDocument, and renderLatexToHtml completely off
- * the main browser thread. This ensures editor typing remains butter-smooth
- * (0ms main thread blocking) regardless of document complexity or KaTeX formulas.
  */
 
 import {
@@ -48,9 +44,12 @@ self.onmessage = (event: MessageEvent<ParseWorkerRequest>) => {
   const t0 = performance.now();
 
   try {
+    // Strip heavy base64 dataUrl properties from image files before passing to parser
+    const lightweightFiles = files.map(f => f.dataUrl ? { ...f, dataUrl: undefined } : f);
+
     const diagnostics = isTex ? diagnoseLatex(content) : [];
-    const parsedDoc = parseLatexDocument(content, files);
-    const renderedHtml = renderLatexToHtml(content, files);
+    const parsedDoc = parseLatexDocument(content, lightweightFiles);
+    const renderedHtml = renderLatexToHtml(content, lightweightFiles);
     const requiredPackages = isTex ? extractPackages(content) : [];
     const t1 = performance.now();
     const elapsed = t1 - t0;
@@ -85,6 +84,7 @@ self.onmessage = (event: MessageEvent<ParseWorkerRequest>) => {
         abstract: '',
         sections: [],
         mathBlocks: [],
+        citations: [],
         isTwoColumn: false,
         documentClass: 'article',
       },

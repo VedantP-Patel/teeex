@@ -119,6 +119,7 @@ function PdfPageView({
           setPainted(true);
           const container = textRef.current;
           if (container) {
+            container.replaceChildren();
             void doc.renderTextLayer(geometry.pageNumber, zoom, container).catch((err) => {
               console.warn(`[PdfPageView] Page ${geometry.pageNumber} text layer error:`, err);
             });
@@ -747,7 +748,7 @@ export function PdfPreviewPane({
                 : isCompiling
                   ? 'Running pdfLaTeX.'
                   : errorSummary ??
-                    'Start writing, or press Recompile to typeset the document.'
+                  'Start writing, or press Recompile to typeset the document.'
             }
           />
         )}
