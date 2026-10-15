@@ -92,12 +92,15 @@ create table if not exists public.projects (
   owner_email text not null,
   role text not null default 'owner',
   files jsonb not null default '[]'::jsonb,
+  folders text[] default array['sections', 'figures']::text[],
   tags text[] default array[]::text[],
   members jsonb default '[]'::jsonb,
   is_archived boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+alter table if exists public.projects add column if not exists folders text[] default array['sections', 'figures']::text[];
 
 alter table public.projects enable row level security;
 create policy "Allow select on projects" on public.projects for select using (true);
@@ -119,8 +122,19 @@ create table if not exists public.checkpoints (
 alter table public.checkpoints enable row level security;
 create policy "Allow all on checkpoints" on public.checkpoints for all using (true);
 
--- 4. Enable Supabase Realtime for Projects Table
-alter publication supabase_realtime add table public.projects;
+-- 4. Enable Supabase Realtime for Projects Table (safe idempotent check)
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'projects'
+  ) then
+    alter publication supabase_realtime add table public.projects;
+  end if;
+end $$;
 
 -- 5. Auto-create profile trigger on sign up
 create or replace function public.handle_new_user()

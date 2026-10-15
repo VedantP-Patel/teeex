@@ -10,18 +10,14 @@ import {
   FileText,
   FileCode,
   GitCompare,
-  Copy
+  Copy,
+  Trash2,
+  RefreshCw,
 } from 'lucide-react';
 import type { ProjectFile } from '../../types/latex';
 import { computeLineDiff } from '../../services/diffService';
-
-export interface Checkpoint {
-  id: string;
-  name: string;
-  timestamp: string;
-  author: string;
-  files: ProjectFile[];
-}
+import type { Checkpoint } from '../../services/checkpointsService';
+export type { Checkpoint };
 
 interface Props {
   isOpen: boolean;
@@ -31,6 +27,9 @@ interface Props {
   onCreateCheckpoint: (name: string) => void;
   onRestoreCheckpoint: (checkpoint: Checkpoint) => void;
   onRestoreSingleFile?: (file: ProjectFile) => void;
+  onDeleteCheckpoint?: (checkpointId: string) => void;
+  onSyncCloud?: () => void;
+  isCloudConnected?: boolean;
 }
 
 export const VersionHistoryModal: React.FC<Props> = ({
@@ -41,8 +40,12 @@ export const VersionHistoryModal: React.FC<Props> = ({
   onCreateCheckpoint,
   onRestoreCheckpoint,
   onRestoreSingleFile,
+  onDeleteCheckpoint,
+  onSyncCloud,
+  isCloudConnected = false,
 }) => {
   const [newCheckpointName, setNewCheckpointName] = useState('');
+  const [filterType, setFilterType] = useState<'all' | 'manual' | 'auto'>('all');
   const [selectedCheckpointId, setSelectedCheckpointId] = useState<string>(
     checkpoints && checkpoints.length > 0 ? checkpoints[0].id : ''
   );
@@ -157,41 +160,158 @@ export const VersionHistoryModal: React.FC<Props> = ({
               </div>
             </form>
 
+            {/* Filter Tabs & Cloud Status */}
+            <div style={{ padding: '8px 12px 4px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => setFilterType('all')}
+                  style={{
+                    padding: '2px 7px',
+                    fontSize: 10,
+                    borderRadius: 3,
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: filterType === 'all' ? 'rgba(56, 189, 248, 0.18)' : 'transparent',
+                    color: filterType === 'all' ? '#38bdf8' : 'var(--text-muted)',
+                    fontWeight: filterType === 'all' ? 700 : 500,
+                  }}
+                >
+                  All ({checkpoints.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterType('manual')}
+                  style={{
+                    padding: '2px 7px',
+                    fontSize: 10,
+                    borderRadius: 3,
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: filterType === 'manual' ? 'rgba(56, 189, 248, 0.18)' : 'transparent',
+                    color: filterType === 'manual' ? '#38bdf8' : 'var(--text-muted)',
+                    fontWeight: filterType === 'manual' ? 700 : 500,
+                  }}
+                >
+                  Snapshots
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterType('auto')}
+                  style={{
+                    padding: '2px 7px',
+                    fontSize: 10,
+                    borderRadius: 3,
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: filterType === 'auto' ? 'rgba(56, 189, 248, 0.18)' : 'transparent',
+                    color: filterType === 'auto' ? '#38bdf8' : 'var(--text-muted)',
+                    fontWeight: filterType === 'auto' ? 700 : 500,
+                  }}
+                >
+                  Auto-saves
+                </button>
+              </div>
+
+              {onSyncCloud && (
+                <button
+                  type="button"
+                  onClick={onSyncCloud}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: isCloudConnected ? '#38bdf8' : 'var(--text-muted)',
+                    padding: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                  title="Sync checkpoints with Supabase Cloud"
+                >
+                  <RefreshCw size={11} />
+                </button>
+              )}
+            </div>
+
             {/* Checkpoints List */}
             <div style={{ flex: 1, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', padding: '4px 6px', letterSpacing: '0.05em' }}>
-                CHECKPOINTS ({checkpoints.length})
-              </div>
-              {checkpoints.map(cp => {
-                const isSelected = cp.id === selectedCheckpointId;
-                return (
-                  <div
-                    key={cp.id}
-                    onClick={() => setSelectedCheckpointId(cp.id)}
-                    style={{
-                      ...checkpointItemStyle,
-                      backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.12)' : 'var(--bg-surface-0)',
-                      borderColor: isSelected ? '#38bdf8' : 'var(--border-subtle)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                        <GitCommit size={14} color={isSelected ? '#38bdf8' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
-                        <span style={{ fontSize: 12, fontWeight: 600, color: isSelected ? '#38bdf8' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {cp.name}
-                        </span>
+              {(() => {
+                const filtered = checkpoints.filter(cp => {
+                  const isAuto = cp.isAutoSave || cp.name.toLowerCase().startsWith('auto-save');
+                  if (filterType === 'manual') return !isAuto;
+                  if (filterType === 'auto') return isAuto;
+                  return true;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                      No {filterType === 'auto' ? 'automatic saves' : filterType === 'manual' ? 'manual snapshots' : 'checkpoints'} yet.
+                    </div>
+                  );
+                }
+
+                return filtered.map(cp => {
+                  const isSelected = cp.id === selectedCheckpointId;
+                  const isAuto = cp.isAutoSave || cp.name.toLowerCase().startsWith('auto-save');
+                  return (
+                    <div
+                      key={cp.id}
+                      onClick={() => setSelectedCheckpointId(cp.id)}
+                      style={{
+                        ...checkpointItemStyle,
+                        backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.12)' : 'var(--bg-surface-0)',
+                        borderColor: isSelected ? '#38bdf8' : 'var(--border-subtle)',
+                        position: 'relative',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+                          <GitCommit size={14} color={isSelected ? '#38bdf8' : isAuto ? '#10b981' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, fontWeight: 600, color: isSelected ? '#38bdf8' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {cp.name}
+                          </span>
+                          {isAuto && (
+                            <span style={{ fontSize: 9, padding: '1px 4px', borderRadius: 3, backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#10b981', fontWeight: 600, flexShrink: 0 }}>
+                              Auto
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                          <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                            {cp.timestamp}
+                          </span>
+                          {onDeleteCheckpoint && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteCheckpoint(cp.id);
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                padding: '2px',
+                                cursor: 'pointer',
+                                color: 'var(--text-muted)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                              }}
+                              title="Delete this checkpoint"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                        {cp.timestamp}
-                      </span>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+                        <span>by {cp.author}</span>
+                        <span>{cp.files?.length || 0} file{(cp.files?.length || 0) > 1 ? 's' : ''}</span>
+                      </div>
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
-                      <span>by {cp.author}</span>
-                      <span>{cp.files?.length || 0} file{(cp.files?.length || 0) > 1 ? 's' : ''}</span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
           </div>
 

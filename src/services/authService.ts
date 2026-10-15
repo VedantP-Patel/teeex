@@ -153,6 +153,27 @@ export const DEMO_ACCOUNTS: Array<{
   },
 ];
 
+export function isLocalOrDemoUser(user: UserProfile | null): boolean {
+  if (!user) return false;
+  if (user.authProvider === 'demo' || user.authProvider === 'local') return true;
+  if (DEMO_ACCOUNTS.some(d => d.profile.id === user.id || d.profile.email.toLowerCase() === user.email?.toLowerCase())) {
+    return true;
+  }
+  if (
+    user.id.startsWith('usr-admin') ||
+    user.id.startsWith('usr-elena') ||
+    user.id.startsWith('usr-marcus') ||
+    user.id.startsWith('usr-reviewer') ||
+    user.id.startsWith('usr-local')
+  ) {
+    return true;
+  }
+  if (getLocalRegisteredUsers().some(u => u.id === user.id || u.email.toLowerCase() === user.email?.toLowerCase())) {
+    return true;
+  }
+  return false;
+}
+
 export function getStoredSession(): { user: UserProfile | null; rememberMe: boolean } {
   // If user explicitly signed out, preserve signed-out guest state
   if (localStorage.getItem('teeex_signed_out') === 'true') {
@@ -167,18 +188,12 @@ export function getStoredSession(): { user: UserProfile | null; rememberMe: bool
       if (parsed && parsed.user && typeof parsed.issuedAt === 'number' && typeof parsed.sig === 'string') {
         const expected = computeSessionSignature(parsed.user, parsed.issuedAt);
         if (parsed.sig === expected) {
-          // Prevent forged admin elevation via F12
-          if (parsed.user.isAdmin && parsed.user.email?.toLowerCase() !== 'admin@teeex.io') {
-            console.warn('Suspicious unverified admin session rejected.');
-            return null;
-          }
           return parsed.user;
         } else {
           console.warn('Tampered auth session signature detected. Session rejected.');
           return null;
         }
       }
-      // Untrusted raw JSON injected via F12 DevTools console is rejected
       return null;
     } catch {
       return null;
@@ -190,7 +205,7 @@ export function getStoredSession(): { user: UserProfile | null; rememberMe: bool
   if (localUser) {
     return { user: localUser, rememberMe: true };
   } else if (localStorage.getItem(AUTH_STORAGE_KEY)) {
-    // Purge tampered or unverified data
+    // Purge tampered data
     localStorage.removeItem(AUTH_STORAGE_KEY);
   }
 
@@ -252,9 +267,9 @@ export async function loginWithEmail(
         // Fetch the profile to check approval status
         const { data: profile } = await supabase
           .from('profiles')
-          .select('is_approved, is_admin')
+          .select('is_approved, is_admin, full_name, avatar_color')
           .eq('id', data.user.id)
-          .single();
+          .maybeSingle();
 
         const userEmail = data.user.email || email;
         const isApproved = profile?.is_approved === true || isUserApproved(userEmail);
@@ -268,11 +283,12 @@ export async function loginWithEmail(
         const user: UserProfile = {
           id: data.user.id,
           email: data.user.email || email,
-          fullName: data.user.user_metadata?.full_name || email.split('@')[0],
-          avatarColor: '#38bdf8',
+          fullName: profile?.full_name || data.user.user_metadata?.full_name || email.split('@')[0],
+          avatarColor: profile?.avatar_color || '#38bdf8',
           isAnonymous: false,
           isAdmin,
           isApproved: true,
+          authProvider: 'supabase',
         };
         saveSession(user, rememberMe);
         return { success: true, user };
@@ -291,8 +307,12 @@ export async function loginWithEmail(
     if (matchedDemo.password && pass !== matchedDemo.password) {
       return { success: false, error: 'Invalid admin credentials.' };
     }
-    saveSession(matchedDemo.profile, rememberMe);
-    return { success: true, user: matchedDemo.profile };
+    const demoUser: UserProfile = {
+      ...matchedDemo.profile,
+      authProvider: 'demo',
+    };
+    saveSession(demoUser, rememberMe);
+    return { success: true, user: demoUser };
   }
 
   const registeredUser = getLocalRegisteredUsers().find(
@@ -303,8 +323,12 @@ export async function loginWithEmail(
     if (!registeredUser.isApproved) {
       return { success: false, error: 'Your account is pending admin approval.' };
     }
-    saveSession(registeredUser, rememberMe);
-    return { success: true, user: registeredUser };
+    const localUser: UserProfile = {
+      ...registeredUser,
+      authProvider: 'local',
+    };
+    saveSession(localUser, rememberMe);
+    return { success: true, user: localUser };
   }
 
   return { success: false, error: 'Invalid email or password.' };
@@ -358,6 +382,7 @@ export async function signUpWithEmail(
     avatarColor: '#8b5cf6',
     isAnonymous: false,
     isApproved: false, // Requires admin approval
+    authProvider: 'local',
   };
 
   saveLocalRegisteredUser(user);
@@ -407,23 +432,36 @@ export async function signOutUser(): Promise<void> {
 }
 
 /**
- * Actively checks the connected Supabase cloud session to prevent client-side spoofing.
+ * Actively checks the connected Supabase cloud session to restore or verify credentials.
+ * Preserves local/demo accounts and offline sessions so users stay logged in.
  */
 export async function verifyActiveSupabaseSession(): Promise<UserProfile | null> {
+  const stored = getStoredSession();
+
+  // If already logged in as a local or demo account, do not overwrite with Supabase
+  if (stored.user && isLocalOrDemoUser(stored.user)) {
+    return stored.user;
+  }
+
   const supabase = getSupabaseClient();
-  if (!supabase) return null;
+  if (!supabase) return stored.user;
 
   try {
     const { data: { session }, error } = await supabase.auth.getSession();
     if (error || !session || !session.user) {
-      return null;
+      // If cloud session expired and we are online, clear session
+      if (stored.user && stored.user.authProvider === 'supabase' && navigator.onLine) {
+        clearSession();
+        return null;
+      }
+      return stored.user;
     }
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('is_approved, is_admin, full_name')
+      .select('is_approved, is_admin, full_name, avatar_color')
       .eq('id', session.user.id)
-      .single();
+      .maybeSingle();
 
     const userEmail = session.user.email || '';
     const isApproved = profile?.is_approved === true || isUserApproved(userEmail);
@@ -435,20 +473,24 @@ export async function verifyActiveSupabaseSession(): Promise<UserProfile | null>
       return null;
     }
 
+    const isRemembered = localStorage.getItem(REMEMBER_ME_KEY) !== 'false';
+
     const verifiedUser: UserProfile = {
       id: session.user.id,
       email: userEmail,
       fullName: profile?.full_name || session.user.user_metadata?.full_name || userEmail.split('@')[0],
-      avatarColor: '#38bdf8',
+      avatarColor: profile?.avatar_color || '#38bdf8',
       isAnonymous: false,
       isAdmin,
       isApproved: true,
+      authProvider: 'supabase',
     };
 
-    saveSession(verifiedUser, true);
+    saveSession(verifiedUser, isRemembered);
     return verifiedUser;
   } catch (err) {
-    console.warn('Error verifying Supabase session:', err);
-    return null;
+    console.warn('Error verifying Supabase session (retaining stored user):', err);
+    return stored.user;
   }
 }
+

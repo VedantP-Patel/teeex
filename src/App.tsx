@@ -6,7 +6,14 @@ import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
 import { PreviewPane } from './components/PreviewPane';
 import { DiagnosticsDock } from './components/DiagnosticsDock';
-import type { Checkpoint } from './components/modals/VersionHistoryModal';
+import type { Checkpoint } from './services/checkpointsService';
+import {
+  loadProjectCheckpoints,
+  createCheckpoint,
+  deleteCheckpoint,
+  fetchProjectCheckpointsFromCloud,
+  haveFilesChanged,
+} from './services/checkpointsService';
 
 // Performance: Lazy-loaded modal dialogs for zero initial bundle overhead
 const SymbolPaletteModal = lazy(() => import('./components/modals/SymbolPaletteModal').then(m => ({ default: m.SymbolPaletteModal })));
@@ -74,7 +81,8 @@ import {
   duplicateProject,
   toggleArchiveProject,
   deleteProject,
-  updateProject
+  updateProject,
+  syncProjectsWithCloudBiDirectional,
 } from './services/projectsService';
 
 export function App() {
@@ -105,23 +113,35 @@ export function App() {
   });
   const [isAuthOpen, setIsAuthOpen] = useState(false);
 
-  // Active Cloud / Supabase session verification on startup
+  // Active Cloud / Supabase session verification & Bi-directional project sync on startup
   useEffect(() => {
     let isMounted = true;
-    if (isSupabaseConnected() && getStoredSession().user !== null) {
+    if (isSupabaseConnected()) {
       verifyActiveSupabaseSession().then(verifiedUser => {
         if (!isMounted) return;
-        setCurrentUser(verifiedUser || null);
+        if (verifiedUser) {
+          setCurrentUser(verifiedUser);
+        }
         setIsAuthChecking(false);
       }).catch(() => {
         if (!isMounted) return;
         setIsAuthChecking(false);
       });
+
+      // Bi-directional cloud project sync on startup
+      syncProjectsWithCloudBiDirectional(currentUser?.email, currentUser?.fullName).then(res => {
+        if (!isMounted) return;
+        if (res.success && res.projects && res.projects.length > 0) {
+          setProjects(res.projects);
+        }
+      }).catch(() => {});
+    } else {
+      setIsAuthChecking(false);
     }
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Multi-Project State
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -161,30 +181,67 @@ export function App() {
   activeFileIdRef.current = activeFileId;
   const activeProjectIdRef = useRef(activeProjectId);
   activeProjectIdRef.current = activeProjectId;
+  const foldersRef = useRef(folders);
+  foldersRef.current = folders;
+  const projectTitleRef = useRef(projectTitle);
+  projectTitleRef.current = projectTitle;
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
 
-  // Debounced Project Persistence (prevents synchronous localStorage & IndexedDB blocking on every keystroke)
+  // Immediate save flush (safely called before project switch, on page reload, or tab close)
+  const flushCurrentProjectSave = useCallback(() => {
+    const pid = activeProjectIdRef.current;
+    if (!pid) return;
+    const currFiles = filesRef.current;
+    const currFolders = foldersRef.current;
+    const currTitle = projectTitleRef.current;
+
+    const updatedProjects = updateProject(pid, {
+      files: currFiles,
+      folders: currFolders,
+      title: currTitle,
+    });
+    setProjects(updatedProjects);
+
+    const currProj = projectsRef.current.find(p => p.id === pid);
+    if (currProj) {
+      saveProjectOffline({
+        ...currProj,
+        files: currFiles,
+        folders: currFolders,
+        title: currTitle,
+        updatedAt: new Date().toISOString(),
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Listen to window unload and visibility change to immediately flush saves so no edits are lost
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      flushCurrentProjectSave();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushCurrentProjectSave();
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [flushCurrentProjectSave]);
+
+  // Debounced Project Persistence (regular periodic saving during typing)
   useEffect(() => {
     const timer = setTimeout(() => {
-      const updatedProjects = updateProject(activeProjectId, {
-        files,
-        folders,
-        title: projectTitle,
-      });
-      setProjects(updatedProjects);
-
-      if (activeProject) {
-        saveProjectOffline({
-          ...activeProject,
-          files,
-          folders,
-          title: projectTitle,
-          updatedAt: new Date().toISOString(),
-        }).catch(console.error);
-      }
+      flushCurrentProjectSave();
     }, 800);
 
     return () => clearTimeout(timer);
-  }, [files, folders, projectTitle, activeProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [files, folders, projectTitle, activeProjectId, flushCurrentProjectSave]);
 
   const handleToggleTwoColumn = useCallback(() => {
     setIsTwoColumn(prev => {
@@ -237,7 +294,10 @@ export function App() {
     return activeProject?.role || 'owner';
   }, [activeProject, currentUser, roomId]);
 
-  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>(() => {
+    return loadProjectCheckpoints(activeProjectId, activeProject?.files, currentUser?.fullName || 'You');
+  });
+
   const [comments, setComments] = useState<ReviewComment[]>([]);
   const [isCloudConnected, setIsCloudConnected] = useState(() => isSupabaseConnected());
 
@@ -267,6 +327,48 @@ export function App() {
   const [peers, setPeers] = useState<Collaborator[]>(() => {
     return areSimulatedPeersEnabled(activeProjectId) ? DEFAULT_PEERS : [];
   });
+
+  // Keep checkpoints in sync whenever activeProjectId changes, and pull from Supabase Cloud
+  useEffect(() => {
+    const localCps = loadProjectCheckpoints(activeProjectId, filesRef.current, currentUser?.fullName || 'You');
+    setCheckpoints(localCps);
+
+    if (isSupabaseConnected()) {
+      fetchProjectCheckpointsFromCloud(activeProjectId).then(res => {
+        if (res.success && res.checkpoints && res.checkpoints.length > 0) {
+          setCheckpoints(res.checkpoints);
+        }
+      }).catch(() => {});
+    }
+  }, [activeProjectId, currentUser?.fullName]);
+
+  // Periodic autosaving of history (automatic checkpoints every 90s if files changed)
+  const lastAutoCheckpointTimeRef = useRef<number>(Date.now());
+  const lastAutoCheckpointFilesRef = useRef<ProjectFile[]>(files);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const elapsed = now - lastAutoCheckpointTimeRef.current;
+      if (elapsed >= 90_000) {
+        if (haveFilesChanged(lastAutoCheckpointFilesRef.current, filesRef.current)) {
+          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const autoCp = createCheckpoint(
+            activeProjectIdRef.current,
+            `Auto-save (${timeStr})`,
+            currentUser?.fullName || selfUser.name,
+            filesRef.current,
+            true
+          );
+          setCheckpoints(prev => [autoCp, ...prev.filter(c => c.id !== autoCp.id)]);
+          lastAutoCheckpointTimeRef.current = now;
+          lastAutoCheckpointFilesRef.current = filesRef.current;
+        }
+      }
+    }, 15_000);
+
+    return () => clearInterval(interval);
+  }, [currentUser?.fullName, selfUser.name]);
 
   const [isPlatformDev, setIsPlatformDev] = useState<boolean>(() => isPlatformDeveloper());
   const [isDevDemoActive, setIsDevDemoActive] = useState<boolean>(() => isDemoModeEnabled());
@@ -746,25 +848,68 @@ export function App() {
   }, []);
 
   const handleCreateCheckpoint = useCallback((name: string) => {
-    const newCp: Checkpoint = {
-      id: 'cp-' + Date.now(),
+    const newCp = createCheckpoint(
+      activeProjectIdRef.current,
       name,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      author: selfUser.name,
-      files: structuredClone ? structuredClone(filesRef.current) : JSON.parse(JSON.stringify(filesRef.current)),
-    };
-    setCheckpoints(prev => [newCp, ...prev]);
-  }, [selfUser.name]);
+      currentUser?.fullName || selfUser.name,
+      filesRef.current,
+      false
+    );
+    setCheckpoints(prev => [newCp, ...prev.filter(c => c.id !== newCp.id)]);
+    setToast(`Snapshot "${name}" saved to history`);
+  }, [currentUser?.fullName, selfUser.name]);
+
+  const handleDeleteCheckpoint = useCallback((cpId: string) => {
+    deleteCheckpoint(activeProjectIdRef.current, cpId).then(updated => {
+      setCheckpoints(updated);
+      setToast('Checkpoint deleted');
+    }).catch(() => {});
+  }, []);
+
+  const handleSyncCheckpointsCloud = useCallback(() => {
+    if (!isSupabaseConnected()) {
+      setToast('Supabase is not connected');
+      return;
+    }
+    fetchProjectCheckpointsFromCloud(activeProjectIdRef.current).then(res => {
+      if (res.success && res.checkpoints) {
+        setCheckpoints(res.checkpoints);
+        setToast(`Checkpoints synchronized (${res.checkpoints.length} versions)`);
+      } else {
+        setToast('Cloud sync completed');
+      }
+    }).catch(err => {
+      setToast('Cloud sync error: ' + (err?.message || 'Unknown'));
+    });
+  }, []);
 
   const handleRestoreCheckpoint = useCallback((cp: Checkpoint) => {
+    // Save current state as pre-restore backup so nothing is ever lost
+    createCheckpoint(
+      activeProjectIdRef.current,
+      `Pre-restore Backup (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+      currentUser?.fullName || selfUser.name,
+      filesRef.current,
+      true
+    );
+
     const cloned = structuredClone ? structuredClone(cp.files) : JSON.parse(JSON.stringify(cp.files));
     setFiles(cloned);
+    filesRef.current = cloned;
+    updateProject(activeProjectIdRef.current, { files: cloned });
     setTimeout(() => triggerCompile(), 50);
-  }, [triggerCompile]);
+    setToast(`Restored to "${cp.name}"`);
+  }, [currentUser?.fullName, selfUser.name, triggerCompile]);
 
   const handleRestoreSingleFile = useCallback((file: ProjectFile) => {
-    setFiles(prev => prev.map(f => (f.id === file.id || f.name === file.name) ? { ...file } : f));
+    setFiles(prev => {
+      const updated = prev.map(f => (f.id === file.id || f.name === file.name) ? { ...file } : f);
+      filesRef.current = updated;
+      updateProject(activeProjectIdRef.current, { files: updated });
+      return updated;
+    });
     setTimeout(() => triggerCompile(), 50);
+    setToast(`Restored ${file.name}`);
   }, [triggerCompile]);
 
   const handleAddPreambleMacro = useCallback((macroDef: string) => {
@@ -982,7 +1127,10 @@ export function App() {
   }, []);
 
   const handleSelectProject = useCallback((projId: string) => {
-    const proj = projects.find(p => p.id === projId);
+    if (projId === activeProjectIdRef.current) return;
+    flushCurrentProjectSave();
+
+    const proj = projectsRef.current.find(p => p.id === projId) || loadProjects().find(p => p.id === projId);
     if (!proj) return;
     setActiveProjectId(projId);
     setActiveProjectIdState(projId);
@@ -994,16 +1142,18 @@ export function App() {
     setProjectTitle(proj.title);
     setPeers(areSimulatedPeersEnabled(projId) ? DEFAULT_PEERS : []);
     setTimeout(() => triggerCompile(), 60);
-  }, [projects, triggerCompile]);
+  }, [flushCurrentProjectSave, triggerCompile]);
 
   const handleCreateProject = useCallback((title: string, templateId?: string) => {
+    flushCurrentProjectSave();
+
     const newProj = createProject(
       title,
       currentUser?.email || 'you@teeex.local',
       currentUser?.fullName || 'You',
       templateId
     );
-    const updated = loadProjects();
+    const updated = loadProjects(currentUser?.email, currentUser?.fullName);
     setProjects(updated);
     const proj = updated.find(p => p.id === newProj.id);
     if (proj) {
@@ -1016,12 +1166,14 @@ export function App() {
       setOpenFileIds([firstId]);
       setProjectTitle(proj.title);
     }
-  }, [currentUser]);
+  }, [currentUser, flushCurrentProjectSave]);
 
   const handleDuplicateProject = useCallback((projId: string) => {
+    flushCurrentProjectSave();
+
     const cloned = duplicateProject(projId);
     if (cloned) {
-      const updated = loadProjects();
+      const updated = loadProjects(currentUser?.email, currentUser?.fullName);
       setProjects(updated);
       setActiveProjectId(cloned.id);
       setActiveProjectIdState(cloned.id);
@@ -1029,7 +1181,7 @@ export function App() {
       setFolders(cloned.folders || ['sections', 'figures']);
       setProjectTitle(cloned.title);
     }
-  }, []);
+  }, [currentUser, flushCurrentProjectSave]);
 
   const handleToggleArchiveProject = useCallback((projId: string) => {
     const updated = toggleArchiveProject(projId);
@@ -1107,29 +1259,64 @@ export function App() {
       color: user.avatarColor || '#38bdf8',
     }));
 
-    const loadedProjects = loadProjects(user.email, user.fullName);
-    setProjects(loadedProjects);
-    const nextActiveId = getActiveProjectId(loadedProjects);
-    const nextProj = loadedProjects.find(p => p.id === nextActiveId) || loadedProjects[0];
-    if (nextProj) {
-      setActiveProjectId(nextProj.id);
-      setActiveProjectIdState(nextProj.id);
-      setFiles(nextProj.files);
-      setFolders(nextProj.folders || ['sections', 'figures']);
-      const firstId = nextProj.files[0]?.id || 'main.tex';
-      setActiveFileId(firstId);
-      setOpenFileIds([firstId]);
-      setProjectTitle(nextProj.title);
-      setPeers(areSimulatedPeersEnabled(nextProj.id) ? DEFAULT_PEERS : []);
-      setTimeout(() => triggerCompile(), 80);
+    // Trigger cloud synchronization if Supabase is connected
+    if (isSupabaseConnected()) {
+      syncProjectsWithCloudBiDirectional(user.email, user.fullName).then(res => {
+        if (res.success && res.projects.length > 0) {
+          setProjects(res.projects);
+          const nextActiveId = getActiveProjectId(res.projects);
+          const nextProj = res.projects.find(p => p.id === nextActiveId) || res.projects[0];
+          if (nextProj) {
+            setActiveProjectId(nextProj.id);
+            setActiveProjectIdState(nextProj.id);
+            setFiles(nextProj.files);
+            setFolders(nextProj.folders || ['sections', 'figures']);
+            const firstId = nextProj.files[0]?.id || 'main.tex';
+            setActiveFileId(firstId);
+            setOpenFileIds([firstId]);
+            setProjectTitle(nextProj.title);
+            setPeers(areSimulatedPeersEnabled(nextProj.id) ? DEFAULT_PEERS : []);
+            setTimeout(() => triggerCompile(), 80);
+          }
+        }
+      }).catch(() => {});
+    } else {
+      const loadedProjects = loadProjects(user.email, user.fullName);
+      setProjects(loadedProjects);
+      const nextActiveId = getActiveProjectId(loadedProjects);
+      const nextProj = loadedProjects.find(p => p.id === nextActiveId) || loadedProjects[0];
+      if (nextProj) {
+        setActiveProjectId(nextProj.id);
+        setActiveProjectIdState(nextProj.id);
+        setFiles(nextProj.files);
+        setFolders(nextProj.folders || ['sections', 'figures']);
+        const firstId = nextProj.files[0]?.id || 'main.tex';
+        setActiveFileId(firstId);
+        setOpenFileIds([firstId]);
+        setProjectTitle(nextProj.title);
+        setPeers(areSimulatedPeersEnabled(nextProj.id) ? DEFAULT_PEERS : []);
+        setTimeout(() => triggerCompile(), 80);
+      }
     }
   }, [triggerCompile]);
 
   const handleSignOut = useCallback(async () => {
+    flushCurrentProjectSave();
     await signOutUser();
     setCurrentUser(null);
     setIsAuthOpen(false);
-  }, []);
+    const guestProjects = loadProjects();
+    setProjects(guestProjects);
+    const first = guestProjects[0];
+    if (first) {
+      setActiveProjectId(first.id);
+      setActiveProjectIdState(first.id);
+      setFiles(first.files);
+      setFolders(first.folders || ['sections', 'figures']);
+      setProjectTitle(first.title);
+      setActiveFileId(first.files[0]?.id || 'main.tex');
+    }
+  }, [flushCurrentProjectSave]);
 
   const handleMouseDownSplit = () => {
     setIsDraggingSplit(true);
@@ -1543,6 +1730,9 @@ export function App() {
             onCreateCheckpoint={handleCreateCheckpoint}
             onRestoreCheckpoint={handleRestoreCheckpoint}
             onRestoreSingleFile={handleRestoreSingleFile}
+            onDeleteCheckpoint={handleDeleteCheckpoint}
+            onSyncCloud={handleSyncCheckpointsCloud}
+            isCloudConnected={isCloudConnected}
           />
         )}
 

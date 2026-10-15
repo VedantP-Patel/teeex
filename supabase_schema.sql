@@ -77,12 +77,16 @@ create table if not exists public.projects (
   owner_email text not null,
   role text not null default 'owner',
   files jsonb not null default '[]'::jsonb,
+  folders text[] default array['sections', 'figures']::text[],
   tags text[] default array[]::text[],
   members jsonb default '[]'::jsonb,
   is_archived boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- Add column if projects table was created previously without folders
+alter table if exists public.projects add column if not exists folders text[] default array['sections', 'figures']::text[];
 
 -- Enable RLS on projects
 alter table public.projects enable row level security;
@@ -127,8 +131,19 @@ create policy "Allow all on checkpoints"
   using (true);
 
 -- 5. Enable Supabase Realtime for Projects Table
--- This powers live multi-user paper syncing across devices
-alter publication supabase_realtime add table public.projects;
+-- This powers live multi-user paper syncing across devices (safe idempotent check)
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'projects'
+  ) then
+    alter publication supabase_realtime add table public.projects;
+  end if;
+end $$;
 
 -- 6. Trigger to automatically create a profile when a new user signs up
 create or replace function public.handle_new_user()

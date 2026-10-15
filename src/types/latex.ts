@@ -118,6 +118,7 @@ export interface UserProfile {
   isAnonymous?: boolean;
   isAdmin?: boolean;
   isApproved?: boolean;
+  authProvider?: 'supabase' | 'local' | 'demo';
 }
 
 export interface ProjectMember {

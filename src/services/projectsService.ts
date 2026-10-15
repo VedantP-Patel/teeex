@@ -321,11 +321,21 @@ export async function pushProjectToCloud(project: Project): Promise<{ success: b
 
   try {
     const row = projectToRow(project);
-    const { error } = await supabase.from('projects').upsert(row, { onConflict: 'id' });
-    if (error) return { success: false, error: error.message };
+    let { error } = await supabase.from('projects').upsert(row, { onConflict: 'id' });
+    if (error && (error.code === 'PGRST204' || error.message?.includes('folders'))) {
+      // Schema compatibility: retry without 'folders' column if missing on remote table
+      const { folders, ...rowWithoutFolders } = row;
+      const retry = await supabase.from('projects').upsert(rowWithoutFolders, { onConflict: 'id' });
+      error = retry.error;
+    }
+    if (error) {
+      console.warn('Supabase project upsert error:', error.message);
+      return { success: false, error: error.message };
+    }
     return { success: true };
   } catch (err: unknown) {
     const e = err as { message?: string };
+    console.warn('Cloud sync failed with exception:', e);
     return { success: false, error: e?.message || 'Cloud sync failed' };
   }
 }
@@ -340,7 +350,10 @@ export async function fetchProjectsFromCloud(): Promise<{ success: boolean; proj
       .select('*')
       .order('updated_at', { ascending: false });
 
-    if (error) return { success: false, error: error.message };
+    if (error) {
+      console.warn('Fetch projects from cloud error:', error.message);
+      return { success: false, error: error.message };
+    }
     if (!data || data.length === 0) return { success: true, projects: [] };
 
     return { success: true, projects: data.map(rowToProject) };
@@ -360,7 +373,12 @@ export async function syncAllProjectsWithCloud(localProjects: Project[]): Promis
 
   try {
     const rows = localProjects.map(projectToRow);
-    const { error } = await supabase.from('projects').upsert(rows, { onConflict: 'id' });
+    let { error } = await supabase.from('projects').upsert(rows, { onConflict: 'id' });
+    if (error && (error.code === 'PGRST204' || error.message?.includes('folders'))) {
+      const rowsWithoutFolders = rows.map(({ folders, ...rest }) => rest);
+      const retry = await supabase.from('projects').upsert(rowsWithoutFolders, { onConflict: 'id' });
+      error = retry.error;
+    }
     if (error) return { success: false, syncedCount: 0, error: error.message };
     return { success: true, syncedCount: rows.length };
   } catch (err: unknown) {
@@ -368,4 +386,74 @@ export async function syncAllProjectsWithCloud(localProjects: Project[]): Promis
     return { success: false, syncedCount: 0, error: e?.message || 'Cloud sync failed' };
   }
 }
+
+/**
+ * Bi-directional cloud synchronization:
+ * Fetches remote projects, reconciles with local projects (resolving conflicts by latest timestamp),
+ * pushes any local-only projects to the cloud, and updates localStorage.
+ */
+export async function syncProjectsWithCloudBiDirectional(
+  userEmail?: string,
+  userName?: string
+): Promise<{ success: boolean; projects: Project[]; syncedCount: number }> {
+  const cloudRes = await fetchProjectsFromCloud();
+  const localRaw = getAllProjectsRaw();
+
+  if (!cloudRes.success || !cloudRes.projects) {
+    return {
+      success: false,
+      projects: loadProjects(userEmail, userName),
+      syncedCount: 0,
+    };
+  }
+
+  const projectMap = new Map<string, Project>();
+
+  // 1. Populate map with local projects
+  for (const p of localRaw) {
+    projectMap.set(p.id, p);
+  }
+
+  // 2. Reconcile with cloud projects
+  let newlyPushed = 0;
+  for (const cp of cloudRes.projects) {
+    const existing = projectMap.get(cp.id);
+    if (!existing) {
+      projectMap.set(cp.id, cp);
+    } else {
+      // Reconcile by comparing dates
+      const localTime = new Date(existing.createdAt || 0).getTime();
+      const cloudTime = new Date(cp.createdAt || 0).getTime();
+      // Keep cloud if newer or equal
+      if (cloudTime >= localTime) {
+        projectMap.set(cp.id, {
+          ...existing,
+          ...cp,
+          // Preserve local member display name if customized
+          members: cp.members && cp.members.length > 0 ? cp.members : existing.members,
+        });
+      }
+    }
+  }
+
+  // 3. For any local project that wasn't in cloud, push it to cloud in background
+  const cloudIds = new Set(cloudRes.projects.map(p => p.id));
+  for (const lp of localRaw) {
+    if (!cloudIds.has(lp.id) && lp.id !== 'proj-starter') {
+      pushProjectToCloud(lp).catch(() => {});
+      newlyPushed++;
+    }
+  }
+
+  const reconciledAll = Array.from(projectMap.values());
+  saveProjects(reconciledAll);
+
+  const finalFiltered = loadProjects(userEmail, userName);
+  return {
+    success: true,
+    projects: finalFiltered,
+    syncedCount: cloudRes.projects.length + newlyPushed,
+  };
+}
+
 

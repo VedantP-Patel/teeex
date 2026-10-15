@@ -20,7 +20,8 @@ import {
   loginWithEmail,
   signUpWithEmail,
   requestPasswordReset,
-  DEMO_ACCOUNTS
+  DEMO_ACCOUNTS,
+  saveSession,
 } from '../services/authService';
 import {
   isPlatformDeveloper,
@@ -156,8 +157,13 @@ export const AuthPortal: React.FC<Props> = ({
   const handleQuickDemoLogin = (demo: typeof DEMO_ACCOUNTS[0]) => {
     setIsLoading(true);
     setErrorMessage(null);
+    const demoUser: UserProfile = {
+      ...demo.profile,
+      authProvider: 'demo',
+    };
+    saveSession(demoUser, rememberMe);
     setTimeout(() => {
-      onAuthSuccess(demo.profile);
+      onAuthSuccess(demoUser);
       setIsLoading(false);
     }, 200);
   };
