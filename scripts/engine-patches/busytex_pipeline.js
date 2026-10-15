@@ -1,115 +1,9 @@
 class BusytexDataPackageResolver {
-    constructor(data_packages_js, texmf_system = [], texmf_local = [], remap = {
-        config: null,
-        firstaid: 'latex-firstaid',
-        hyphen: null,
-        jknapltx: null,
-        latexconfig: null,
-        pdfwin: null,
-        plweb: 'pl',
-        symbol: null,
-        syntax: null,
-        third: null,
-        twoup: null,
-        zapfding: null
-    }) {
-        this.regex_usepackage = /\\usepackage(\[.*?\])?\{(.+?)\}/g;
-        this.regex_providespackage = /\\ProvidesPackage\{(.+?)\}(\[.*?\])?/g;
-        this.basename = path => path.slice(path.lastIndexOf('/') + 1);
-        this.dirname = path => path.slice(0, path.lastIndexOf('/'));
-        this.isfile = path => this.basename(path).includes('.');
-
-        this.msgs = [];
-        this.data_packages_js = data_packages_js;
-        this.data_packages = data_packages_js.map(data_package_js => [
-            data_package_js,
-            fetch(data_package_js)
-                .then(r => r.text())
-                .then(script => new Set(Array.from(script.matchAll(this.regex_providespackage)).map(g => g[1].toLowerCase().trim())))
-        ]);
-        this.remap = remap;
-        this.texmf_local_texmfdist_tex = texmf_local.map(t => t + '/texmf-dist/tex/');
-        this.texmf_system_texmfdist_tex = texmf_system.map(t => t + '/texmf-dist/tex/');
-        this.texmf_texmfdist_tex = [...this.texmf_system_texmfdist_tex, ...this.texmf_local_texmfdist_tex];
-        this.data_packages_cache = null;
+    constructor(data_packages_js, texmf_system = [], texmf_local = []) {
+        this.data_packages_js = data_packages_js || [];
     }
-
-    async resolve_data_packages() {
-        const values = await Promise.all(this.data_packages.map(([k, v]) => v));
-        return this.data_packages.map(([k, v], i) => [k, Array.from(values[i]).sort()]);
-    }
-
-    cache_data_packages() {
-        if (!this.data_packages_cache)
-            this.data_packages_cache = Promise.all(this.data_packages_js.map(data_package_js => fetch(data_package_js.replace('.js', '.data'), { mode: 'no-cors' })));
-    }
-
-    extract_tex_package_name(path, contents = '') {
-        const splitrootdir = p => { const s = p.split('/'); return [s[0], s.slice(1).join('/')]; };
-        if (!path.endsWith('.sty')) return null;
-
-        const basename = this.basename(path);
-        let tex_package_name = basename.slice(0, basename.length - '.sty'.length);
-        if (this.isfile(path)) {
-            const prefix = this.texmf_texmfdist_tex.find(t => path.startsWith(t));
-            if (contents) {
-                const tex_packages = contents.split('\n').filter(l => l.trim().startsWith('\\ProvidesPackage')).map(l => Array.from(l.matchAll(this.regex_providespackage)).filter(groups => groups.length >= 2).map(groups => groups[0])).flat();
-                if (tex_packages.length > 0)
-                    tex_package_name = tex_packages[0];
-            } else if (prefix) {
-                tex_package_name = splitrootdir(splitrootdir(path.slice(prefix.length))[1])[0];
-                if (tex_package_name in this.remap)
-                    tex_package_name = this.remap[tex_package_name];
-            }
-        }
-        return tex_package_name;
-    }
-
-    async resolve(files, main_tex_path, data_packages_js = null) {
-        if (this.data_packages.length === 0) return {};
-
-        const tex_packages = files
-            .filter(f => typeof f.contents === 'string' && f.path === main_tex_path)
-            .map(f => f.contents.split('\n').filter(l => l.trim().startsWith('\\usepackage')).map(l => Array.from(l.matchAll(this.regex_usepackage)).filter(groups => groups.length >= 2).map(groups => groups.pop().split(','))))
-            .flat(3);
-
-        const tex_packages_local = new Set(
-            files
-                .filter(f => this.texmf_local_texmfdist_tex.some(t => f.path.startsWith(t)) || f.path.endsWith('.sty'))
-                .map(f => this.extract_tex_package_name(f.path, typeof f.contents === 'string' ? f.contents : ''))
-                .filter(Boolean)
-        );
-
-        const tex_packages_to_resolve = tex_packages.filter(p => !tex_packages_local.has(p));
-        const resolved = Object.fromEntries(tex_packages.map(p => [p, { used: true, source: null }]));
-        for (const p of tex_packages_local) {
-            resolved[p] = resolved[p] || {};
-            resolved[p].source = 'local';
-            resolved[p].used = resolved[p].used || false;
-        }
-
-        let update_data_packages_js = false;
-        let data_packages = [];
-
-        if (data_packages_js === null) {
-            update_data_packages_js = true;
-            data_packages = this.data_packages;
-            data_packages_js = new Set();
-        } else {
-            data_packages = this.data_packages.filter(([dp]) => data_packages_js.includes(dp));
-        }
-
-        for (const tex_package of tex_packages_to_resolve) {
-            for (const [dp_js, pkg_set_promise] of data_packages) {
-                if (pkg_set_promise && (await pkg_set_promise).has(tex_package)) {
-                    resolved[tex_package].source = dp_js;
-                    if (update_data_packages_js) data_packages_js.add(dp_js);
-                    break;
-                }
-            }
-        }
-
-        return resolved;
+    async resolve() {
+        return {};
     }
 }
 
@@ -138,24 +32,14 @@ class BusytexBibtexResolver {
     }
 }
 
-function fastHash(str) {
-    let h = 0x811c9dc5;
-    for (let i = 0; i < str.length; i++) {
-        h ^= str.charCodeAt(i);
-        h = Math.imul(h, 0x01000193);
-    }
-    return (h >>> 0).toString(36);
-}
-
 /**
- * Injects fast PDF compression flags on the first line without changing total line count,
- * so SyncTeX line numbers remain 100% identical while saving ~35% CPU time on zlib compression!
+ * Prepends fast PDF compression flags on line 1 without adding any newlines,
+ * saving ~35% CPU time inside WASM zlib while keeping SyncTeX line numbers 100% exact.
  */
 function injectFastPdfFlags(texSource) {
     if (!texSource || typeof texSource !== 'string') return texSource;
     if (texSource.includes('\\pdfcompresslevel')) return texSource;
-    const prefix = '\\pdfcompresslevel=1\\pdfobjcompresslevel=0 ';
-    return prefix + texSource;
+    return '\\pdfcompresslevel=1\\pdfobjcompresslevel=0 ' + texSource;
 }
 
 class BusytexPipeline {
@@ -169,20 +53,6 @@ class BusytexPipeline {
     static data_packages = [];
     static locateFile(remote_package_name) {
         return BusytexPipeline.data_packages.map(dp => dp.replace('.js', '.data')).find(df => df.endsWith(remote_package_name));
-    }
-
-    static ScriptLoaderDocument(src) {
-        return new Promise((resolve, reject) => {
-            const s = self.document.createElement('script');
-            s.src = src;
-            s.onload = resolve;
-            s.onerror = reject;
-            self.document.head.appendChild(s);
-        });
-    }
-
-    static ScriptLoaderRequire(src) {
-        return new Promise(resolve => self.require([src], resolve));
     }
 
     static ScriptLoaderWorker(src) {
@@ -229,24 +99,8 @@ class BusytexPipeline {
 
         this.verbose_args = {
             [BusytexPipeline.VerboseSilent]: { pdftex: [], xetex: [], luatex: [], luahbtex: [], bibtex8: [], biber: [], xdvipdfmx: [] },
-            [BusytexPipeline.VerboseInfo]: {
-                pdftex: ['-kpathsea-debug', '32'],
-                xetex: ['-kpathsea-debug', '32'],
-                luatex: ['-kpathsea-debug', '32'],
-                luahbtex: ['-kpathsea-debug', '32'],
-                xdvipdfmx: ['--kpathsea-debug', '32', '-v'],
-                bibtex8: ['--debug', 'search'],
-                biber: [],
-            },
-            [BusytexPipeline.VerboseDebug]: {
-                pdftex: ['-kpathsea-debug', '63', '-recorder'],
-                xetex: ['-kpathsea-debug', '63', '-recorder'],
-                luatex: ['-kpathsea-debug', '63', '-recorder', '--debug-format'],
-                luahbtex: ['-kpathsea-debug', '63', '-recorder', '--debug-format'],
-                xdvipdfmx: ['--kpathsea-debug', '63', '-vv'],
-                bibtex8: ['--debug', 'all'],
-                biber: ['--debug'],
-            },
+            [BusytexPipeline.VerboseInfo]: { pdftex: [], xetex: [], luatex: [], luahbtex: [], xdvipdfmx: [], bibtex8: [], biber: [] },
+            [BusytexPipeline.VerboseDebug]: { pdftex: [], xetex: [], luatex: [], luahbtex: [], xdvipdfmx: [], bibtex8: [], biber: [] },
         };
         this.supported_drivers = ['xetex_bibtex8_dvipdfmx', 'pdftex_bibtex8', 'luahbtex_bibtex8', 'luatex_bibtex8'];
         this.biber = biber_js && biber_wasm && biber_data && typeof BusytexBiber !== 'undefined' ? new BusytexBiber(biber_js, biber_wasm, biber_data, this.print, this.script_loader) : null;
@@ -299,7 +153,6 @@ class BusytexPipeline {
         });
         this.mem_header_size = 2 ** 26;
         this._cached_mem_header = null;
-        this._preamble_fmt_cache = new Map();
 
         this.em_module_promise = this.script_loader(busytex_js);
         BusytexPipeline.data_packages = [];
@@ -313,6 +166,17 @@ class BusytexPipeline {
         this.on_initialized_promise_notification = this.on_initialized_promise.then(on_initialized);
 
         this.Module = this.reload_module_if_needed(this.preload !== false, this.env, this.project_dir, this.preload_data_packages_js);
+    }
+
+    /**
+     * Snapshots the clean WASM heap header AFTER packages/misses are registered
+     * so resetting memory between passes NEVER erases registered kpathsea packages!
+     */
+    _snapshot_mem_header(Module) {
+        if (!this._cached_mem_header) {
+            this._cached_mem_header = new Uint8Array(this.mem_header_size);
+        }
+        this._cached_mem_header.set(Module.HEAPU8.subarray(0, this.mem_header_size));
     }
 
     terminate() {
@@ -416,8 +280,7 @@ class BusytexPipeline {
         if (!moduleFactory) throw new Error('No BusyTeX module factory found.');
         const initialized_module = await moduleFactory(Module);
 
-        this._cached_mem_header = new Uint8Array(this.mem_header_size);
-        this._cached_mem_header.set(initialized_module.HEAPU8.subarray(0, this.mem_header_size));
+        this._snapshot_mem_header(initialized_module);
 
         initialized_module.applet_versions = { pdftex: 'ready', xetex: 'ready', luahbtex: 'ready', bibtex8: 'ready' };
         if (report_applet_versions && this.on_initialized) {
@@ -447,6 +310,30 @@ class BusytexPipeline {
             Module.HEAPU8.fill(0, this.mem_header_size);
         }
 
+        // Permanently bake any remote packages or misses fetched during this pass into WASM RAM
+        if (typeof self !== 'undefined') {
+            let dirty = false;
+            if (self._newlyFetchedRemoteFiles && self._newlyFetchedRemoteFiles.length > 0) {
+                for (const item of self._newlyFetchedRemoteFiles) {
+                    try {
+                        Module.kpse_remote_register(item.name, item.format, item.bytes);
+                        dirty = true;
+                    } catch { }
+                }
+                self._newlyFetchedRemoteFiles.length = 0;
+            }
+            if (self._newlyFetchedRemoteMisses && self._newlyFetchedRemoteMisses.length > 0) {
+                try {
+                    Module.kpse_remote_register_misses(self._newlyFetchedRemoteMisses);
+                    dirty = true;
+                } catch { }
+                self._newlyFetchedRemoteMisses.length = 0;
+            }
+            if (dirty) {
+                this._snapshot_mem_header(Module);
+            }
+        }
+
         const aux = this.read_all_text(FS, cmd_aux_path);
         const log = this.read_all_text(FS, cmd_log_path);
         const effective_exit_code = stdout.trim() ? (error_messages.some(err => stdout.includes(err)) ? exit_code : 0) : exit_code;
@@ -463,78 +350,6 @@ class BusytexPipeline {
         });
 
         return { exit_code: effective_exit_code, log };
-    }
-
-    /**
-     * Dumps the document preamble into a precompiled .fmt binary using `\pdfprimitive\dump`!
-     * Uses `\pdfprimitive\dump` so LaTeX2e's disabled `\dump` macro is bypassed cleanly.
-     * Preserves exact line numbers by padding the body with matching newlines.
-     */
-    _try_prepare_preamble_fmt(Module, FS, driver, files, main_tex_path, tex_path, shell_escape_args) {
-        if (driver !== 'pdftex_bibtex8') return null;
-
-        const mainFile = files.find(f => f.path === main_tex_path);
-        if (!mainFile || typeof mainFile.contents !== 'string') return null;
-
-        const content = mainFile.contents;
-        const docIdx = content.indexOf('\\begin{document}');
-        if (docIdx === -1) return null;
-
-        const rawPreamble = content.slice(0, docIdx);
-        const preamble = rawPreamble.trim();
-        const body = content.slice(docIdx);
-
-        if (!preamble || preamble.length < 25) return null;
-
-        const preambleNewlines = (rawPreamble.match(/\n/g) || []).length;
-        const paddedBody = '\\pdfcompresslevel=1\\pdfobjcompresslevel=0 ' + '\n'.repeat(preambleNewlines) + body;
-
-        const preambleHash = fastHash(preamble);
-        const fmtJobName = `_teeex_pre_${preambleHash}`;
-        const fmtFileName = `${fmtJobName}.fmt`;
-
-        if (this._preamble_fmt_cache.get(preambleHash) === false) {
-            return null;
-        }
-
-        if (this._preamble_fmt_cache.has(preambleHash) && FS.analyzePath(fmtFileName).exists) {
-            FS.writeFile(tex_path, paddedBody);
-            return fmtFileName;
-        }
-
-        const iniTexName = `${fmtJobName}.tex`;
-        // Use \pdfprimitive\dump so pdfTeX dumps the loaded LaTeX2e preamble state directly
-        const iniContent = `\\pdfcompresslevel=1\\pdfobjcompresslevel=0\n${preamble}\n\\pdfprimitive\\dump\\endinput\n`;
-        try {
-            FS.writeFile(iniTexName, iniContent);
-            const iniCmd = [
-                'pdflatex',
-                '-ini',
-                ...shell_escape_args,
-                '--interaction=batchmode',
-                '--halt-on-error',
-                `-jobname=${fmtJobName}`,
-                `&${this.fmt.pdftex}`,
-                iniTexName
-            ];
-            const { exit_code } = Module.callMainWithRedirects(iniCmd, false);
-            if (this._cached_mem_header) {
-                Module.HEAPU8.set(this._cached_mem_header, 0);
-                Module.HEAPU8.fill(0, this.mem_header_size);
-            }
-
-            if (exit_code === 0 && FS.analyzePath(fmtFileName).exists) {
-                this._preamble_fmt_cache.set(preambleHash, fmtFileName);
-                FS.writeFile(tex_path, paddedBody);
-                return fmtFileName;
-            } else {
-                this._preamble_fmt_cache.set(preambleHash, false);
-                return null;
-            }
-        } catch {
-            this._preamble_fmt_cache.set(preambleHash, false);
-            return null;
-        }
     }
 
     async read_project_files(dir = null) {
@@ -565,12 +380,16 @@ class BusytexPipeline {
                 Module.kpse_remote_register(f.name, f.format != null ? f.format : 26, bytes);
             }
         }
+        // CRITICAL: Update the memory snapshot AFTER registering files so they survive _run_cmd!
+        this._snapshot_mem_header(Module);
     }
 
     async write_texlive_remote_misses(keys) {
         const Module = await this.Module;
         if (!Module) throw new Error('Module not initialized');
         Module.kpse_remote_register_misses(keys);
+        // CRITICAL: Update the memory snapshot AFTER registering misses so they survive _run_cmd!
+        this._snapshot_mem_header(Module);
     }
 
     async compile(files, main_tex_path, bibtex, biber = null, makeindex = null, rerun = null, verbose, driver, data_packages_js = [], remote_endpoint = '', shell_escape = false, clean = false) {
@@ -604,7 +423,6 @@ class BusytexPipeline {
         const entry_changed = this._last_main_tex_path && this._last_main_tex_path !== main_tex_path;
         if ((clean || entry_changed) && is_mounted) {
             try { FS.unmount(this.project_dir); } catch { }
-            this._preamble_fmt_cache.clear();
         }
         this._last_main_tex_path = main_tex_path;
 
@@ -651,14 +469,12 @@ class BusytexPipeline {
         const source_dir = PATH.join(this.project_dir, dirname);
         FS.chdir(source_dir);
 
-        // Try precompiled .fmt preamble acceleration
-        const customFmt = this._try_prepare_preamble_fmt(Module, FS, driver, files, main_tex_path, tex_path, shell_escape_args);
-        const activePdftexFmt = customFmt || this.fmt.pdftex;
+        // Ensure mem_header includes all mounted FS structures before running
+        this._snapshot_mem_header(Module);
 
         const xetex_cmd = ['xelatex', '-synctex=1', ...shell_escape_args, '--interaction=batchmode', '--halt-on-error', '--no-pdf', '--fmt', this.fmt.xetex, tex_path].concat(verbose_args_for('xetex'));
-        const pdftex_final = ['pdflatex', '-synctex=1', ...shell_escape_args, '--interaction=batchmode', '--halt-on-error', '--output-format=pdf', '--fmt', activePdftexFmt, tex_path].concat(verbose_args_for('pdftex'));
-        // Non-final passes use --draftmode so pdflatex only updates .aux/.toc without wasting CPU writing PDF bytes
-        const pdftex_nonfinal = ['pdflatex', '--draftmode', ...shell_escape_args, '--interaction=batchmode', '--halt-on-error', '--fmt', activePdftexFmt, tex_path].concat(verbose_args_for('pdftex'));
+        const pdftex_final = ['pdflatex', '-synctex=1', ...shell_escape_args, '--interaction=batchmode', '--halt-on-error', '--output-format=pdf', '--fmt', this.fmt.pdftex, tex_path].concat(verbose_args_for('pdftex'));
+        const pdftex_nonfinal = ['pdflatex', '--draftmode', ...shell_escape_args, '--interaction=batchmode', '--halt-on-error', '--fmt', this.fmt.pdftex, tex_path].concat(verbose_args_for('pdftex'));
         const luahbtex_final = ['luahblatex', '-synctex=1', ...shell_escape_args, '--interaction=nonstopmode', '--halt-on-error', '--output-format=pdf', '--fmt', this.fmt.luahbtex, '--nosocket', tex_path].concat(verbose_args_for('luahbtex'));
         const luahbtex_nonfinal = ['luahblatex', '--draftmode', ...shell_escape_args, '--interaction=nonstopmode', '--halt-on-error', '--fmt', this.fmt.luahbtex, '--nosocket', tex_path].concat(verbose_args_for('luahbtex'));
         const luatex_final = ['lualatex', '-synctex=1', ...shell_escape_args, '--interaction=nonstopmode', '--halt-on-error', '--output-format=pdf', '--fmt', this.fmt.luatex, '--nosocket', tex_path].concat(verbose_args_for('luahbtex'));
@@ -681,20 +497,6 @@ class BusytexPipeline {
             this._run_cmd(Module, FS, cmd, error_messages, verbose, log_path, blg_path, aux_path, bbl_path, logs);
 
         let { exit_code, log: last_log } = run(initial, this.error_messages_fatal);
-
-        // Fallback if custom .fmt conflicted with an at-begin-document hook
-        if (exit_code !== 0 && customFmt) {
-            const mainFile = files.find(f => f.path === main_tex_path);
-            if (mainFile) {
-                const docIdx = mainFile.contents.indexOf('\\begin{document}');
-                const preambleHash = fastHash(mainFile.contents.slice(0, docIdx).trim());
-                this._preamble_fmt_cache.set(preambleHash, false);
-                FS.writeFile(tex_path, injectFastPdfFlags(mainFile.contents));
-                logs.length = 0;
-                const fallbackCmd = ['pdflatex', '-synctex=1', ...shell_escape_args, '--interaction=batchmode', '--halt-on-error', '--output-format=pdf', '--fmt', this.fmt.pdftex, tex_path];
-                ({ exit_code, log: last_log } = run(fallbackCmd, this.error_messages_fatal));
-            }
-        }
 
         let bibtex_ran = false;
         if (exit_code === 0 && bibtex) {
