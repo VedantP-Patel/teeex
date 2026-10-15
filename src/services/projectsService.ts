@@ -1,10 +1,28 @@
 import type { Project } from '../types/latex';
 import { STARTER_TEMPLATES } from './templates';
-import { getSupabaseClient } from './supabaseClient';
+import { getAuthUid, getSupabaseClient } from './supabaseClient';
 import { getStoredSession } from './authService';
 
 const PROJECTS_STORAGE_KEY = 'teeex_saved_projects';
 const ACTIVE_PROJECT_ID_KEY = 'teeex_active_project_id';
+
+/**
+ * Project ids are primary keys in a shared table, so they must not be
+ * guessable: `proj-${Date.now().toString(36)}` let anyone pre-insert a row
+ * under an id a victim would later generate, whose upsert then fails on the
+ * unique constraint. Two projects created in the same millisecond also
+ * collided. Ids created before this change remain guessable.
+ */
+function newProjectId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `proj-${crypto.randomUUID()}`;
+  }
+  const entropy = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(entropy);
+  }
+  return `proj-${Array.from(entropy, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+}
 
 const INITIAL_PROJECTS: Project[] = [
   {
@@ -34,7 +52,7 @@ const INITIAL_PROJECTS: Project[] = [
 
 function normalizeProject(p: any): Project {
   return {
-    id: p?.id || `proj-${Math.random().toString(36).slice(2, 7)}`,
+    id: p?.id || newProjectId(),
     title: p?.title || 'Untitled Project',
     ownerId: p?.ownerId || 'usr-anonymous',
     ownerEmail: p?.ownerEmail || 'anonymous@teeex.io',
@@ -161,7 +179,7 @@ export function createProject(
   templateId?: string
 ): Project {
   const chosenTemplate = STARTER_TEMPLATES.find(t => t.id === templateId) || STARTER_TEMPLATES[0];
-  const newId = `proj-${Date.now().toString(36)}`;
+  const newId = newProjectId();
 
   const newProject: Project = {
     id: newId,
@@ -203,7 +221,7 @@ export function duplicateProject(projectId: string): Project | null {
   const target = projects.find(p => p.id === projectId);
   if (!target) return null;
 
-  const cloneId = `proj-${Date.now().toString(36)}`;
+  const cloneId = newProjectId();
   const cloned: Project = {
     ...JSON.parse(JSON.stringify(target)),
     id: cloneId,
@@ -281,11 +299,20 @@ export function updateProject(
 // SUPABASE DATABASE CLOUD SYNC HELPERS
 // ==============================================================================
 
-export function projectToRow(p: Project) {
+/**
+ * `owner_uid` is the only column that carries authorisation: every RLS policy on
+ * `projects` is written against `owner_uid = auth.uid()`. `owner_id` is a
+ * client-derived string kept for backwards compatibility and trusted for
+ * nothing. A row inserted without `owner_uid` is rejected by the insert policy,
+ * which is the correct outcome for a signed-out client — it should not be
+ * writing to the cloud at all.
+ */
+export function projectToRow(p: Project, ownerUid?: string | null) {
   return {
     id: p.id,
     title: p.title,
     owner_id: p.ownerId,
+    owner_uid: ownerUid ?? null,
     owner_email: p.ownerEmail,
     role: p.role,
     files: p.files,
@@ -319,8 +346,11 @@ export async function pushProjectToCloud(project: Project): Promise<{ success: b
   const supabase = getSupabaseClient();
   if (!supabase) return { success: false, error: 'Supabase client not connected' };
 
+  const ownerUid = await getAuthUid();
+  if (!ownerUid) return { success: false, error: 'Not signed in' };
+
   try {
-    const row = projectToRow(project);
+    const row = projectToRow(project, ownerUid);
     let { error } = await supabase.from('projects').upsert(row, { onConflict: 'id' });
     if (error && (error.code === 'PGRST204' || error.message?.includes('folders'))) {
       // Schema compatibility: retry without 'folders' column if missing on remote table
@@ -367,12 +397,11 @@ export async function syncAllProjectsWithCloud(localProjects: Project[]): Promis
   const supabase = getSupabaseClient();
   if (!supabase) return { success: false, syncedCount: 0, error: 'Supabase client not connected' };
 
-  if ((supabase as any)?.supabaseUrl?.includes('demo-teeex-latex')) {
-    return { success: true, syncedCount: localProjects.length };
-  }
+  const ownerUid = await getAuthUid();
+  if (!ownerUid) return { success: false, syncedCount: 0, error: 'Not signed in' };
 
   try {
-    const rows = localProjects.map(projectToRow);
+    const rows = localProjects.map((p) => projectToRow(p, ownerUid));
     let { error } = await supabase.from('projects').upsert(rows, { onConflict: 'id' });
     if (error && (error.code === 'PGRST204' || error.message?.includes('folders'))) {
       const rowsWithoutFolders = rows.map(({ folders, ...rest }) => rest);

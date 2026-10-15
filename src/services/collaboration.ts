@@ -1,5 +1,14 @@
 import type { Collaborator } from '../types/latex';
 
+/**
+ * Presence and document sync across tabs of the same browser.
+ *
+ * This is a `BroadcastChannel`, which is same-origin and same-browser: it does
+ * NOT reach another person's machine. Nothing here is cross-user collaboration,
+ * and the UI must not describe it as such. Real multi-user editing needs a CRDT
+ * and a network transport, which is separate work.
+ */
+
 export interface RoomSyncMessage {
   type: 'FILE_UPDATE' | 'CURSOR_MOVE' | 'PEER_JOIN' | 'PEER_LEAVE';
   roomId: string;
@@ -109,29 +118,3 @@ export class CollaborationHub {
     this.listeners = [];
   }
 }
-
-/**
- * Default Simulated Co-Authors for Rich Multiplayer Demo Experience
- */
-export const DEFAULT_PEERS: Collaborator[] = [
-  {
-    id: 'peer-elena',
-    name: 'Dr. Elena Rostova',
-    color: '#10B981', // Emerald
-    avatar: 'ER',
-    cursorLine: 18,
-    cursorCol: 14,
-    activeFile: 'main.tex',
-    status: 'typing',
-  },
-  {
-    id: 'peer-marcus',
-    name: 'Marcus Chen',
-    color: '#F59E0B', // Amber
-    avatar: 'MC',
-    cursorLine: 29,
-    cursorCol: 2,
-    activeFile: 'main.tex',
-    status: 'active',
-  }
-];

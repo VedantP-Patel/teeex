@@ -8,89 +8,66 @@ export interface CloudProject {
   updatedAt: string;
 }
 
-const DEFAULT_SUPABASE_URL = 'https://quwiahdywsdnrqeucwwi.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1d2lhaGR5d3NkbnJxZXVjd3dpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE1Mjc1NjgsImV4cCI6MjEwNzEwMzU2OH0.4TeIrKs8jj1AZr4CTm26uVFI9VYHM-7sbSH3zhjvLNs';
-
-let supabaseInstance: SupabaseClient | null = null;
-
-export function getSupabaseClient(): SupabaseClient | null {
-  if (supabaseInstance) return supabaseInstance;
-
-  const envUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || DEFAULT_SUPABASE_URL;
-  const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || DEFAULT_SUPABASE_ANON_KEY;
-
-  const savedUrl = localStorage.getItem('teeex_supabase_url') || envUrl;
-  const savedKey = localStorage.getItem('teeex_supabase_anon_key') || envKey;
-
-  if (savedUrl && savedKey && !savedUrl.includes('your-project-id')) {
-    try {
-      supabaseInstance = createClient(savedUrl, savedKey);
-      return supabaseInstance;
-    } catch (e) {
-      console.warn('Failed to initialize Supabase client:', e);
-    }
-  }
-
-  return null;
+/**
+ * Credentials come from build-time environment only.
+ *
+ * There used to be a hardcoded project URL and anon key here as a fallback "so
+ * the live site is always connected", and a localStorage override that let any
+ * visitor repoint the client at an arbitrary project through a UI gated by a
+ * passcode list shipped in the same bundle. An anon key is publishable, so
+ * shipping one is not itself the defect — but it is only safe behind correct
+ * row-level security, and the schema granted `using (true)` on every table. A
+ * baked-in default also means a misconfigured deployment silently writes user
+ * documents into someone else's database instead of failing loudly.
+ *
+ * Both are gone. No credentials, no cloud: the app runs local-first and says so.
+ */
+function readEnv(name: 'VITE_SUPABASE_URL' | 'VITE_SUPABASE_ANON_KEY'): string {
+  const value = import.meta.env[name];
+  return typeof value === 'string' ? value.trim() : '';
 }
 
-export function configureSupabase(url: string, anonKey: string): boolean {
-  try {
-    supabaseInstance = createClient(url, anonKey);
-    localStorage.setItem('teeex_supabase_url', url);
-    localStorage.setItem('teeex_supabase_anon_key', anonKey);
-    return true;
-  } catch (e) {
-    console.error('Invalid Supabase configuration:', e);
-    return false;
+let supabaseInstance: SupabaseClient | null = null;
+let resolved = false;
+
+export function getSupabaseClient(): SupabaseClient | null {
+  if (resolved) return supabaseInstance;
+  resolved = true;
+
+  const url = readEnv('VITE_SUPABASE_URL');
+  const anonKey = readEnv('VITE_SUPABASE_ANON_KEY');
+
+  // A placeholder copied out of .env.example is a misconfiguration, not a
+  // credential; treat it as absent rather than letting createClient fail later.
+  if (!url || !anonKey || url.includes('your-project-id') || anonKey.includes('your-anon-public-key')) {
+    return null;
   }
+
+  try {
+    supabaseInstance = createClient(url, anonKey, {
+      auth: { persistSession: true, autoRefreshToken: true },
+    });
+  } catch (cause) {
+    console.warn('Supabase client could not be created; running local-only.', cause);
+    supabaseInstance = null;
+  }
+
+  return supabaseInstance;
 }
 
 export function isSupabaseConnected(): boolean {
   return getSupabaseClient() !== null;
 }
 
-export function disconnectSupabase(): void {
-  supabaseInstance = null;
-  localStorage.removeItem('teeex_supabase_url');
-  localStorage.removeItem('teeex_supabase_anon_key');
-}
-
-export async function testSupabaseConnection(url?: string, anonKey?: string): Promise<{ success: boolean; message: string }> {
-  let client = getSupabaseClient();
-  if (url?.includes('demo-teeex-latex') || (client as any)?.supabaseUrl?.includes('demo-teeex-latex')) {
-    return { success: true, message: 'Demo Sandbox verified! Local simulated storage active.' };
-  }
-
-  if (url && anonKey) {
-    try {
-      client = createClient(url, anonKey);
-    } catch (e: unknown) {
-      const err = e as { message?: string };
-      return { success: false, message: err?.message || 'Invalid URL or Key format' };
-    }
-  }
-
-  if (!client) {
-    return { success: false, message: 'No Supabase credentials configured' };
-  }
-
+/** The authenticated user's id, or null when signed out or running local-only. */
+export async function getAuthUid(): Promise<string | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
   try {
-    const { error } = await client.from('projects').select('id').limit(1);
-    if (error) {
-      // Postgres error 42P01 = table does not exist yet
-      if (error.code === '42P01') {
-        return {
-          success: true,
-          message: 'Connected to Supabase! (Note: Please run the SQL schema in Tab 2 to initialize tables)',
-        };
-      }
-      return { success: false, message: error.message };
-    }
-    return { success: true, message: 'Connection verified! PostgreSQL is online and responsive.' };
-  } catch (err: unknown) {
-    const e = err as { message?: string };
-    return { success: false, message: e?.message || 'Network error connecting to Supabase' };
+    const { data, error } = await supabase.auth.getSession();
+    if (error) return null;
+    return data.session?.user?.id ?? null;
+  } catch {
+    return null;
   }
 }
-

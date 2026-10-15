@@ -74,6 +74,23 @@ const DB_VERSION = 1;
 const STORE_PACKAGES = 'packages';
 const STORE_MISSES = 'misses';
 
+/**
+ * Bounds on dependency resolution. Depth 4 covers the chains real documents
+ * produce (class -> package -> driver .def -> font .cfg); the file cap stops a
+ * pathological preamble from issuing hundreds of requests before the first
+ * pass even starts. A file missed by the prefetch is not an error — kpathsea
+ * still resolves it at compile time, just more slowly.
+ */
+const MAX_DEPENDENCY_DEPTH = 4;
+const MAX_PRELOADED_FILES = 160;
+
+/**
+ * Long enough that a cold CDN edge is not mistaken for a missing file. The
+ * previous 2 s, combined with treating any failure as a permanent miss, turned
+ * a slow response into a package that could never load again this session.
+ */
+const PACKAGE_FETCH_TIMEOUT_MS = 10_000;
+
 const packageMemoryCache = new Map<string, Uint8Array>();
 const failedFetchCache = new Set<string>();
 let loadPromise: Promise<LoadedPackage[]> | null = null;
@@ -224,123 +241,83 @@ export function getCachedPackageContent(name: string): Uint8Array | undefined {
   return packageMemoryCache.get(name);
 }
 
-export async function preloadDocumentPackages(
-  texContent: string,
-  remoteEndpointUrl?: string,
-): Promise<LoadedPackage[]> {
-  if (!texContent || typeof texContent !== 'string') return [];
+/**
+ * Extracts the files a TeX source references, so a package's own dependencies
+ * can be fetched before the engine asks for them.
+ *
+ * `\usepackage{a,b}` in the document is only the first level: `microtype.sty`
+ * pulls `microtype-pdftex.def`, a class pulls the packages it builds on, and so
+ * on. Resolving only the first level left every deeper file to kpathsea, which
+ * requests them one at a time over *synchronous* XHR from inside the WASM
+ * worker — serial, blocking, and the reason the compiler used to rewrite
+ * documents to avoid `microtype` and `lmodern` altogether.
+ */
+function extractRequirements(text: string): Array<{ name: string; format: number }> {
+  const out: Array<{ name: string; format: number }> = [];
 
-  const targetFiles: Array<{ name: string; format: number }> = [];
-
-  // Match \documentclass[...]{class_name}
-  const classMatches = texContent.matchAll(/\\documentclass(?:\[[^\]]*\])?\{([^}]+)\}/g);
-  for (const match of classMatches) {
-    const raw = match[1]?.trim();
-    if (raw) {
-      const clsName = raw.endsWith('.cls') ? raw : `${raw}.cls`;
-      targetFiles.push({ name: clsName, format: 26 });
-    }
-  }
-
-  // Match \usepackage[...]{pkg1, pkg2, ...} and \RequirePackage[...]{pkg1, pkg2, ...}
-  const pkgMatches = texContent.matchAll(/\\(?:usepackage|RequirePackage)(?:\[[^\]]*\])?\{([^}]+)\}/g);
-  for (const match of pkgMatches) {
-    const raw = match[1]?.trim();
-    if (raw) {
-      const names = raw.split(',').map((s) => s.trim()).filter(Boolean);
-      for (const n of names) {
-        const styName = n.endsWith('.sty') ? n : `${n}.sty`;
-        targetFiles.push({ name: styName, format: 26 });
-      }
-    }
-  }
-
-  // Filter out packages already in texlive-basic.data or known 404 misses
-  const uniqueTargets = new Map<string, { name: string; format: number }>();
-  for (const tf of targetFiles) {
-    if (TEXLIVE_BASIC_PACKAGES.has(tf.name.toLowerCase())) continue;
-    if (failedFetchCache.has(tf.name)) continue;
-    if (!uniqueTargets.has(tf.name)) {
-      uniqueTargets.set(tf.name, tf);
-    }
-  }
-
-  const targets = Array.from(uniqueTargets.values());
-  if (targets.length === 0) return [];
-
-  const resolvedPackages: LoadedPackage[] = [];
-  const neededFiles: Array<{ name: string; format: number }> = [];
-
-  for (const target of targets) {
-    const memBuf = packageMemoryCache.get(target.name);
-    if (memBuf) {
-      resolvedPackages.push({
-        name: target.name,
-        format: target.format,
-        content: memBuf,
-        contents: memBuf,
+  const add = (raw: string | undefined, defaultExt: string) => {
+    if (!raw) return;
+    for (const piece of raw.split(',')) {
+      const name = piece.trim();
+      if (!name || name.length > 64) continue;
+      // Anything with a control sequence or brace is a macro, not a filename.
+      if (/[\\{}$#%\s]/.test(name)) continue;
+      out.push({
+        name: /\.[a-z0-9]+$/i.test(name) ? name : `${name}${defaultExt}`,
+        format: 26,
       });
-    } else {
-      neededFiles.push(target);
     }
+  };
+
+  for (const m of text.matchAll(
+    /\\(?:usepackage|RequirePackage(?:WithOptions)?)\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/g,
+  )) {
+    add(m[1], '.sty');
   }
 
-  if (neededFiles.length === 0) return resolvedPackages;
-
-  const db = await openPackagesDb();
-  if (db) {
-    try {
-      const tx = db.transaction(STORE_PACKAGES, 'readonly');
-      const store = tx.objectStore(STORE_PACKAGES);
-      await Promise.all(
-        neededFiles.map((target) => {
-          return new Promise<void>((resolve) => {
-            const req = store.get(`${target.format}/${target.name}`);
-            req.onsuccess = () => {
-              if (req.result && req.result.content) {
-                const buf =
-                  req.result.content instanceof Uint8Array
-                    ? req.result.content
-                    : new Uint8Array(req.result.content);
-                packageMemoryCache.set(target.name, buf);
-                resolvedPackages.push({
-                  name: target.name,
-                  format: target.format,
-                  content: buf,
-                  contents: buf,
-                });
-              }
-              resolve();
-            };
-            req.onerror = () => resolve();
-          });
-        }),
-      );
-    } catch {
-      // Ignore IDB errors
-    }
+  for (const m of text.matchAll(
+    /\\(?:documentclass|LoadClass(?:WithOptions)?)\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/g,
+  )) {
+    add(m[1], '.cls');
   }
 
-  const toFetch = neededFiles.filter(
-    (target) => !packageMemoryCache.has(target.name) && !failedFetchCache.has(target.name)
-  );
-  if (toFetch.length === 0) return resolvedPackages;
+  // `\input`/`\InputIfFileExists` carry .def and .cfg files, which is how font
+  // and driver support reaches packages like microtype and hyperref.
+  for (const m of text.matchAll(/\\(?:input|InputIfFileExists)\s*\{([^}]+)\}/g)) {
+    add(m[1], '.tex');
+  }
 
-  const endpoint =
-    remoteEndpointUrl ||
-    (typeof window !== 'undefined' && window.location?.origin
-      ? `${window.location.origin}/api/texlive`
-      : 'https://texlive2026.texlyre.org');
+  return out;
+}
+
+/** Fetches one batch of files in parallel, returning those that resolved. */
+async function resolveBatch(
+  targets: Array<{ name: string; format: number }>,
+  endpoint: string,
+): Promise<LoadedPackage[]> {
+  const resolved: LoadedPackage[] = [];
 
   await Promise.all(
-    toFetch.map(async (target) => {
+    targets.map(async (target) => {
+      const cached = packageMemoryCache.get(target.name);
+      if (cached) {
+        resolved.push({
+          name: target.name,
+          format: target.format,
+          content: cached,
+          contents: cached,
+        });
+        return;
+      }
+
       try {
         const isBundled = BUNDLED_PACKAGE_NAMES.has(target.name);
         const url = isBundled
           ? `/packages/${encodeURIComponent(target.name)}`
           : `${endpoint}/${target.format}/${encodeURIComponent(target.name)}`;
 
-        const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+        const res = await fetch(url, { signal: AbortSignal.timeout(PACKAGE_FETCH_TIMEOUT_MS) });
+
         if (res.ok) {
           const buf = new Uint8Array(await res.arrayBuffer());
           const loaded: LoadedPackage = {
@@ -351,15 +328,107 @@ export async function preloadDocumentPackages(
           };
           packageMemoryCache.set(target.name, buf);
           saveToIndexedDb(loaded);
-          resolvedPackages.push(loaded);
-        } else if (res.status === 404) {
-          failedFetchCache.add(target.name);
+          resolved.push(loaded);
+          return;
         }
+
+        // Only a definitive 404 is remembered. A timeout or a 5xx used to be
+        // recorded the same way, so one slow response permanently poisoned the
+        // package for the rest of the session and every later compile failed
+        // with "File not found" for a package that exists.
+        if (res.status === 404) failedFetchCache.add(target.name);
       } catch {
-        failedFetchCache.add(target.name);
+        // Network error or timeout: leave it retryable.
       }
     }),
   );
 
-  return resolvedPackages;
+  return resolved;
+}
+
+export async function preloadDocumentPackages(
+  texContent: string,
+  remoteEndpointUrl?: string,
+): Promise<LoadedPackage[]> {
+  if (!texContent || typeof texContent !== 'string') return [];
+
+  const endpoint =
+    remoteEndpointUrl ||
+    (typeof window !== 'undefined' && window.location?.origin
+      ? `${window.location.origin}/api/texlive`
+      : 'https://texlive2026.texlyre.org');
+
+  const resolvedByName = new Map<string, LoadedPackage>();
+  const seen = new Set<string>();
+
+  /** True for files the engine already has locally, or known not to exist. */
+  const skip = (name: string): boolean =>
+    seen.has(name) ||
+    TEXLIVE_BASIC_PACKAGES.has(name.toLowerCase()) ||
+    failedFetchCache.has(name);
+
+  let frontier = extractRequirements(texContent).filter((t) => {
+    if (skip(t.name)) return false;
+    seen.add(t.name);
+    return true;
+  });
+
+  const decoder = new TextDecoder('utf-8', { fatal: false });
+  const db = await openPackagesDb();
+
+  for (let depth = 0; depth < MAX_DEPENDENCY_DEPTH && frontier.length > 0; depth++) {
+    if (resolvedByName.size >= MAX_PRELOADED_FILES) break;
+
+    // Check IndexedDB for the whole level before touching the network.
+    if (db) {
+      await Promise.all(
+        frontier
+          .filter((t) => !packageMemoryCache.has(t.name))
+          .map(
+            (target) =>
+              new Promise<void>((resolve) => {
+                try {
+                  const req = db
+                    .transaction(STORE_PACKAGES, 'readonly')
+                    .objectStore(STORE_PACKAGES)
+                    .get(`${target.format}/${target.name}`);
+                  req.onsuccess = () => {
+                    const stored = req.result?.content;
+                    if (stored) {
+                      const buf =
+                        stored instanceof Uint8Array ? stored : new Uint8Array(stored);
+                      packageMemoryCache.set(target.name, buf);
+                    }
+                    resolve();
+                  };
+                  req.onerror = () => resolve();
+                } catch {
+                  resolve();
+                }
+              }),
+          ),
+      );
+    }
+
+    const batch = await resolveBatch(frontier, endpoint);
+
+    const next = new Map<string, { name: string; format: number }>();
+    for (const file of batch) {
+      resolvedByName.set(file.name, file);
+
+      // Only text files can declare further dependencies; .tfm and friends are
+      // binary and decoding them would be wasted work.
+      if (!/\.(sty|cls|def|cfg|tex|clo|fd)$/i.test(file.name)) continue;
+
+      for (const req of extractRequirements(decoder.decode(file.content))) {
+        if (skip(req.name) || next.has(req.name)) continue;
+        seen.add(req.name);
+        next.set(req.name, req);
+      }
+    }
+
+    frontier = Array.from(next.values());
+  }
+
+  return Array.from(resolvedByName.values());
 }

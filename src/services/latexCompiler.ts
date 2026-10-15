@@ -62,6 +62,14 @@ export interface CompileOutcome {
 const ENGINE_BASE_PATH = '/core/busytex';
 const DEFAULT_REMOTE_ENDPOINT = 'https://texlive2026.texlyre.org';
 
+/**
+ * Upper bound on passes per compile (one initial + reruns). LaTeX resolves most
+ * cross-reference work in two passes; a third covers a table of contents that
+ * shifts pagination. Beyond that a document is either unstable or pathological,
+ * and spending more passes costs seconds without converging.
+ */
+const MAX_COMPILE_PASSES = 3;
+
 function remoteEndpoint(): string | undefined {
   const configured = import.meta.env.VITE_TEXLIVE_REMOTE_ENDPOINT;
   if (configured === 'off') return undefined;
@@ -78,40 +86,6 @@ function hashString(str: string): string {
     hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
   }
   return (hash >>> 0).toString(36);
-}
-
-/**
- * Rewrites slow network-heavy preamble packages into preloaded 0ms equivalents
- * while keeping the exact same number of lines so SyncTeX line numbers match 100%.
- * - Bypasses `lmodern` (saves 55+ sequential remote .tfm/.pfb/.fd XHR stalls)
- * - Bypasses `microtype` (saves 4x CPU overhead in listings and removes 140 warnings)
- * - Maps `xurl` -> `url` (already preloaded in texlive-basic.data)
- * - Maps `[T1]{fontenc}` -> `[OT1]{fontenc}` when `lmodern` was used so preloaded CM fonts work with 0 network calls
- */
-function optimizeTexForFastWasm(texContent: string): string {
-  const docIdx = texContent.indexOf('\\begin{document}');
-  if (docIdx === -1) return texContent;
-
-  const preamble = texContent
-    .slice(0, docIdx)
-    .replace(
-      /\\usepackage\s*(?:\[[^\]]*\])?\s*\{lmodern\}/g,
-      '% \\usepackage{lmodern} (fast preloaded CM fonts)'
-    )
-    .replace(
-      /\\usepackage\s*[T1]\s*\{fontenc\}/g,
-      '\\usepackage[OT1]{fontenc}'
-    )
-    .replace(
-      /\\usepackage\s*(?:\[[^\]]*\])?\s*\{microtype\}/g,
-      '% \\usepackage{microtype} (fast WASM mode)'
-    )
-    .replace(
-      /\\usepackage\s*(?:\[[^\]]*\])?\s*\{xurl\}/g,
-      '\\usepackage{url}'
-    );
-
-  return preamble + texContent.slice(docIdx);
 }
 
 /**
@@ -172,7 +146,6 @@ export class TexEngineService {
   private lastPreambleSig = new Map<EngineId, string>();
   private mountedPackagesByEngine = new Map<EngineId, Set<string>>();
   private registeredMissesByEngine = new Map<EngineId, Set<string>>();
-  private settledEntries = new Set<string>();
 
   subscribe(listener: (status: EngineStatus) => void): () => void {
     this.listeners.add(listener);
@@ -408,11 +381,28 @@ export class TexEngineService {
 
     this.setStatus({ phase: 'compiling', engine });
 
-    const optimizedContent = optimizeTexForFastWasm(entry.content);
+    /**
+     * The document is compiled exactly as written.
+     *
+     * This used to run the source through `optimizeTexForFastWasm()`, which
+     * commented out `\usepackage{lmodern}` and `{microtype}` and rewrote `xurl`
+     * to `url` before handing it to the engine. It was fast — `microtype` pulls
+     * a lot of files, and each one arrived as a separate synchronous XHR from
+     * inside the WASM worker — but it meant the PDF used different fonts and
+     * different line breaking from the document the user wrote, with nothing in
+     * the UI saying so. A preview that is not the document is not a preview.
+     *
+     * The latency it was hiding is addressed where it actually lives: step 2
+     * resolves the preamble's full dependency closure in parallel and mounts it
+     * before the engine starts, so those files are already in MEMFS.
+     */
+    const source = entry.content;
 
-    // 1. Pre-register any missing image files (.jpg, .png, etc.) as instant misses
+    // 1. Pre-register any missing image files (.jpg, .png, etc.) as instant misses.
+    //    This does not alter the document — it tells kpathsea up front that a
+    //    file it will ask for is absent, instead of paying a 404 round-trip.
     try {
-      const missingImgs = extractMissingImageKeys(optimizedContent, input.files);
+      const missingImgs = extractMissingImageKeys(source, input.files);
       const missesSet = this.registeredMissesByEngine.get(engine) ?? new Set<string>();
       const newMisses = missingImgs.filter((k) => !missesSet.has(k));
       if (newMisses.length > 0) {
@@ -424,11 +414,10 @@ export class TexEngineService {
       // Non-fatal
     }
 
-    // 2. Preload required .sty/.cls packages in parallel before launching WASM
+    // 2. Preload the preamble's package dependency closure in parallel before
+    //    launching WASM.
     try {
-      const { sig: preambleSig, preambleText } = extractPreambleSig(
-        input.files.map((f) => (f.name === entry.name ? { ...f, content: optimizedContent } : f)),
-      );
+      const { sig: preambleSig, preambleText } = extractPreambleSig(input.files);
       if (this.lastPreambleSig.get(engine) !== preambleSig) {
         const preloaded = await preloadDocumentPackages(preambleText, remoteEndpoint());
         const mountedSet = this.mountedPackagesByEngine.get(engine) ?? new Set<string>();
@@ -447,9 +436,6 @@ export class TexEngineService {
       // Non-fatal
     }
 
-    const cacheKey = `${engine}:${entry.name}`;
-    const isFirstCompileOfEntry = !this.settledEntries.has(cacheKey);
-
     try {
       const tool =
         engine === 'xelatex'
@@ -460,45 +446,66 @@ export class TexEngineService {
 
       const engineFiles = toEngineFiles(input.files, entry.name);
 
-      // Single fast pass! (On edits, warm .aux/.toc/.lot files are already in MEMFS,
-      // so 1 pass produces the complete document with TOC & page numbers in ~2s!)
       let result = await tool.compile({
-        input: optimizedContent,
+        input: source,
         mainTexPath: entry.name,
         additionalFiles: engineFiles,
-        bibtex: input.bibtex ?? needsBibtex(input.files, optimizedContent),
-        makeindex: input.makeindex ?? needsMakeindex(optimizedContent),
+        bibtex: input.bibtex ?? needsBibtex(input.files, source),
+        makeindex: input.makeindex ?? needsMakeindex(source),
         rerun: false,
         remoteEndpoint: remoteEndpoint(),
       });
 
       let log = result.log || '';
       let parsed = parseTexLog(log, { root: entry.name });
+      let passes = 1;
 
-      // Only run a second pass on the very first compile if TOC/labels are empty ("??")
-      if (
-        isFirstCompileOfEntry &&
-        !this.queued &&
+      /**
+       * Re-run while the log says cross-references are unresolved.
+       *
+       * Warm `.aux`/`.toc` files survive in MEMFS between compiles, so a single
+       * pass is usually enough on an edit — but only because the *previous*
+       * compile left them there. The old code recorded an entry as "settled"
+       * before its follow-up pass had even run and then ignored
+       * `rerunRequired` for every later compile, so adding a `\label` left
+       * `\ref` showing `??` until something else happened to trigger a second
+       * pass. Honouring the log every time costs a pass only when TeX says one
+       * is needed.
+       *
+       * Capped, because a document can ask for a rerun forever (an unstable
+       * `\pageref`, or a package that rewrites its own aux file each pass).
+       * When the cap is hit, `rerunRequired` stays true in the outcome so the
+       * UI can say the references may be a pass behind rather than implying
+       * the output is final.
+       */
+      while (
         parsed.rerunRequired &&
-        Boolean(result.pdf && result.pdf.byteLength > 0)
+        passes < MAX_COMPILE_PASSES &&
+        // A newer edit is waiting: stop burning passes on output nobody will see.
+        !this.queued &&
+        result.pdf &&
+        result.pdf.byteLength > 0
       ) {
-        this.settledEntries.add(cacheKey);
         const followUp = await tool.compile({
-          input: optimizedContent,
+          input: source,
           mainTexPath: entry.name,
           additionalFiles: engineFiles,
+          // Bibliography and index tools ran on the first pass; re-running them
+          // here would redo their work without new input.
           bibtex: false,
           makeindex: false,
           rerun: false,
           remoteEndpoint: remoteEndpoint(),
         });
-        if (followUp.pdf && followUp.pdf.byteLength > 0) {
-          result = followUp;
-          log = result.log || '';
-          parsed = parseTexLog(log, { root: entry.name });
-        }
-      } else if (result.pdf && result.pdf.byteLength > 0) {
-        this.settledEntries.add(cacheKey);
+        passes++;
+
+        // Keep the last pass that produced a PDF: a later pass that fails is
+        // not a reason to show nothing.
+        if (!followUp.pdf || followUp.pdf.byteLength === 0) break;
+
+        result = followUp;
+        log = result.log || '';
+        parsed = parseTexLog(log, { root: entry.name });
       }
 
       const pdf = result.pdf && result.pdf.byteLength > 0 ? result.pdf : null;
@@ -536,7 +543,6 @@ export class TexEngineService {
     this.lastPreambleSig.clear();
     this.mountedPackagesByEngine.clear();
     this.registeredMissesByEngine.clear();
-    this.settledEntries.clear();
     this.setStatus({ phase: 'idle', progress: 0 });
   }
 }

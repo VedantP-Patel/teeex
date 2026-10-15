@@ -12,25 +12,17 @@ import {
 } from 'lucide-react';
 import type { UserProfile } from '../../types/latex';
 import {
+  getAuthMode,
   loginWithEmail,
   signUpWithEmail,
   requestPasswordReset,
-  DEMO_ACCOUNTS,
-  saveSession,
 } from '../../services/authService';
-import {
-  isPlatformDeveloper,
-  unlockPlatformDeveloper,
-  isDemoModeEnabled,
-  setDemoModeEnabled,
-} from '../../services/developerService';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   currentUser: UserProfile | null;
   onAuthSuccess: (user: UserProfile) => void;
-  onDeveloperStatusChanged?: () => void;
 }
 
 type AuthTab = 'signin' | 'signup' | 'forgot';
@@ -40,7 +32,6 @@ export const AuthModal: React.FC<Props> = ({
   onClose,
   currentUser: _currentUser,
   onAuthSuccess,
-  onDeveloperStatusChanged,
 }) => {
   const [activeTab, setActiveTab] = useState<AuthTab>('signin');
   const [email, setEmail] = useState('');
@@ -52,28 +43,7 @@ export const AuthModal: React.FC<Props> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Developer Clearance & Demo visibility
-  const [isDev, setIsDev] = useState(() => isPlatformDeveloper());
-  const [demoVisible, setDemoVisible] = useState(() => isDemoModeEnabled());
-  const [showDevPrompt, setShowDevPrompt] = useState(false);
-  const [devPasscode, setDevPasscode] = useState('');
-  const [devError, setDevError] = useState<string | null>(null);
-
-  const handleDevUnlock = (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = unlockPlatformDeveloper(devPasscode);
-    if (res.success) {
-      setIsDev(true);
-      setDemoVisible(true);
-      setDemoModeEnabled(true);
-      setShowDevPrompt(false);
-      setDevPasscode('');
-      setDevError(null);
-      onDeveloperStatusChanged?.();
-    } else {
-      setDevError(res.error || 'Invalid passcode');
-    }
-  };
+  const isCloud = getAuthMode() === 'cloud';
 
   if (!isOpen) return null;
 
@@ -158,21 +128,6 @@ export const AuthModal: React.FC<Props> = ({
     }
   };
 
-  const handleQuickDemoLogin = async (demo: typeof DEMO_ACCOUNTS[0]) => {
-    setIsLoading(true);
-    setErrorMessage(null);
-    const demoUser: UserProfile = {
-      ...demo.profile,
-      authProvider: 'demo',
-    };
-    saveSession(demoUser, rememberMe);
-    setTimeout(() => {
-      onAuthSuccess(demoUser);
-      setIsLoading(false);
-      onClose();
-    }, 250);
-  };
-
   return (
     <div style={backdropStyle} onClick={_currentUser ? onClose : undefined}>
       <div style={modalStyle} onClick={e => e.stopPropagation()}>
@@ -184,12 +139,15 @@ export const AuthModal: React.FC<Props> = ({
             </div>
             <div>
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-                {activeTab === 'signin' && 'Sign In to Teeex Studio'}
-                {activeTab === 'signup' && 'Create Academic Account'}
-                {activeTab === 'forgot' && 'Reset Account Password'}
+                {!isCloud && 'Local workspace'}
+                {isCloud && activeTab === 'signin' && 'Sign in to Teeex'}
+                {isCloud && activeTab === 'signup' && 'Create an account'}
+                {isCloud && activeTab === 'forgot' && 'Reset your password'}
               </h2>
               <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>
-                Secure access &amp; multi-project sync
+                {isCloud
+                  ? 'Sync your projects across devices'
+                  : 'Documents are stored in this browser'}
               </p>
             </div>
           </div>
@@ -201,7 +159,7 @@ export const AuthModal: React.FC<Props> = ({
         </div>
 
         {/* Tab Switcher */}
-        {activeTab !== 'forgot' && (
+        {isCloud && activeTab !== 'forgot' && (
           <div style={tabContainerStyle}>
             <button
               onClick={() => { setActiveTab('signin'); setErrorMessage(null); setSuccessMessage(null); }}
@@ -245,8 +203,23 @@ export const AuthModal: React.FC<Props> = ({
             </div>
           )}
 
+          {!isCloud && (
+            <p
+              style={{
+                fontSize: 12.5,
+                color: 'var(--text-secondary)',
+                lineHeight: 1.6,
+                margin: 0,
+              }}
+            >
+              This deployment has no cloud account service configured, so there are no accounts to
+              sign in to. Your projects, checkpoints and compiled PDFs live in this browser. Use{' '}
+              <strong>Export as ZIP</strong> to take a copy with you.
+            </p>
+          )}
+
           {/* SIGN IN FORM */}
-          {activeTab === 'signin' && (
+          {isCloud && activeTab === 'signin' && (
             <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
                 <label style={labelStyle}>EMAIL ADDRESS</label>
@@ -321,7 +294,7 @@ export const AuthModal: React.FC<Props> = ({
           )}
 
           {/* SIGN UP FORM */}
-          {activeTab === 'signup' && (
+          {isCloud && activeTab === 'signup' && (
             <form onSubmit={handleSignUp} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
                 <label style={labelStyle}>FULL NAME / ACADEMIC TITLE</label>
@@ -400,7 +373,7 @@ export const AuthModal: React.FC<Props> = ({
           )}
 
           {/* FORGOT PASSWORD FORM */}
-          {activeTab === 'forgot' && (
+          {isCloud && activeTab === 'forgot' && (
             <form onSubmit={handleForgot} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                 Enter the email address registered with your account. We will send you instructions and a secure magic link to reset your password.
@@ -447,116 +420,6 @@ export const AuthModal: React.FC<Props> = ({
                 </button>
               </div>
             </form>
-          )}
-
-          {/* Developer Test Switcher (Strictly for Platform Developer / Website Owner) */}
-          {isDev && demoVisible && (
-            <div style={demoBoxStyle}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>
-                  DEVELOPER TEST ACCOUNTS
-                </span>
-                <span className="badge badge-cyan" style={{ fontSize: 10 }}>Dev Mode</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {DEMO_ACCOUNTS.map(demo => (
-                  <button
-                    key={demo.profile.id}
-                    type="button"
-                    onClick={() => handleQuickDemoLogin(demo)}
-                    style={demoBtnStyle}
-                    title={`Switch active user to ${demo.profile.fullName} (${demo.role})`}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ ...avatarMiniStyle, backgroundColor: demo.profile.avatarColor }}>
-                        {demo.profile.fullName.substring(0, 2).toUpperCase()}
-                      </div>
-                      <div style={{ textAlign: 'left' }}>
-                        <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-primary)' }}>
-                          {demo.profile.fullName}
-                        </div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                          {demo.profile.email}
-                        </div>
-                      </div>
-                    </div>
-                    <span className={`badge ${demo.role === 'owner' ? 'badge-cyan' : demo.role === 'editor' ? 'badge-emerald' : ''}`} style={{ fontSize: 10 }}>
-                      {demo.role.toUpperCase()}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Discreet Developer Clearance Access at bottom */}
-          {!isDev && !showDevPrompt && (
-            <div style={{ marginTop: 14, textAlign: 'center' }}>
-              <button
-                type="button"
-                onClick={() => setShowDevPrompt(true)}
-                className="btn-ghost"
-                style={{ fontSize: 10.5, color: 'var(--text-muted)', opacity: 0.6, padding: '3px 8px' }}
-                title="Website Developer Access"
-              >
-                Website Developer Clearance
-              </button>
-            </div>
-          )}
-
-          {!isDev && showDevPrompt && (
-            <form onSubmit={handleDevUnlock} style={{ marginTop: 12, padding: '10px 12px', borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                ENTER WEBSITE DEVELOPER PASSCODE
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input
-                  type="password"
-                  placeholder="Developer passcode"
-                  value={devPasscode}
-                  onChange={e => {
-                    setDevPasscode(e.target.value);
-                    setDevError(null);
-                  }}
-                  style={{
-                    flex: 1,
-                    height: 32,
-                    padding: '0 8px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid var(--border-subtle)',
-                    backgroundColor: 'var(--bg-surface-0)',
-                    color: 'var(--text-primary)',
-                    fontSize: 11.5,
-                  }}
-                  autoFocus
-                />
-                <button type="submit" className="btn-primary" style={{ height: 32, padding: '0 10px', fontSize: 11 }}>
-                  Unlock
-                </button>
-                <button type="button" onClick={() => setShowDevPrompt(false)} className="btn-secondary" style={{ height: 32, padding: '0 8px', fontSize: 11 }}>
-                  Cancel
-                </button>
-              </div>
-              {devError && (
-                <div style={{ fontSize: 10, color: '#f43f5e' }}>{devError}</div>
-              )}
-            </form>
-          )}
-
-          {isDev && !demoVisible && (
-            <div style={{ marginTop: 12, textAlign: 'center' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setDemoVisible(true);
-                  setDemoModeEnabled(true);
-                }}
-                className="btn-ghost"
-                style={{ fontSize: 10.5, color: 'var(--accent-cyan)' }}
-              >
-                + Show Developer Test Accounts
-              </button>
-            </div>
           )}
         </div>
       </div>
@@ -687,36 +550,4 @@ const successBannerStyle: React.CSSProperties = {
   gap: 8,
   fontSize: 12,
   color: '#10b981',
-};
-
-const demoBoxStyle: React.CSSProperties = {
-  backgroundColor: 'var(--bg-surface-0)',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 'var(--radius-md)',
-  padding: 12,
-};
-
-const demoBtnStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  padding: '6px 10px',
-  backgroundColor: 'var(--bg-surface-1)',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 'var(--radius-sm)',
-  cursor: 'pointer',
-  transition: 'all 0.15s ease',
-  width: '100%',
-};
-
-const avatarMiniStyle: React.CSSProperties = {
-  width: 22,
-  height: 22,
-  borderRadius: '50%',
-  color: '#ffffff',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontWeight: 700,
-  fontSize: 9.5,
 };

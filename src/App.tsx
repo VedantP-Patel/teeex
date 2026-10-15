@@ -21,25 +21,15 @@ const TableBuilderModal = lazy(() => import('./components/modals/TableBuilderMod
 const ShareModal = lazy(() => import('./components/modals/ShareModal').then(m => ({ default: m.ShareModal })));
 const TemplateModal = lazy(() => import('./components/modals/TemplateModal').then(m => ({ default: m.TemplateModal })));
 const ImageUploadModal = lazy(() => import('./components/modals/ImageUploadModal').then(m => ({ default: m.ImageUploadModal })));
-const SupabaseModal = lazy(() => import('./components/modals/SupabaseModal').then(m => ({ default: m.SupabaseModal })));
 const VersionHistoryModal = lazy(() => import('./components/modals/VersionHistoryModal').then(m => ({ default: m.VersionHistoryModal })));
 const WordCountModal = lazy(() => import('./components/modals/WordCountModal').then(m => ({ default: m.WordCountModal })));
 const AuthModal = lazy(() => import('./components/modals/AuthModal').then(m => ({ default: m.AuthModal })));
 const ProjectsDashboardModal = lazy(() => import('./components/modals/ProjectsDashboardModal').then(m => ({ default: m.ProjectsDashboardModal })));
-const DeveloperUnlockModal = lazy(() => import('./components/modals/DeveloperUnlockModal').then(m => ({ default: m.DeveloperUnlockModal })));
 const CommandPaletteModal = lazy(() => import('./components/modals/CommandPaletteModal').then(m => ({ default: m.CommandPaletteModal })));
 const AuditLogModal = lazy(() => import('./components/modals/AuditLogModal').then(m => ({ default: m.AuditLogModal })));
 const EncryptionModal = lazy(() => import('./components/modals/EncryptionModal').then(m => ({ default: m.EncryptionModal })));
-const AdminUsersModal = lazy(() => import('./components/modals/AdminUsersModal').then(m => ({ default: m.AdminUsersModal })));
 
 import { formatLatexCode } from './services/latexFormatter';
-import {
-  isPlatformDeveloper,
-  lockPlatformDeveloper,
-  isDemoModeEnabled,
-  setDemoModeEnabled,
-  areSimulatedPeersEnabled,
-} from './services/developerService';
 import { logAuditAction } from './services/auditService';
 import { saveProjectOffline } from './services/offlineStorageService';
 import { encryptText, decryptText } from './services/encryptionService';
@@ -69,7 +59,6 @@ import { STARTER_TEMPLATES } from './services/templates';
 import { exportProjectAsZip } from './services/zipExporter';
 import {
   CollaborationHub,
-  DEFAULT_PEERS
 } from './services/collaboration';
 import { isSupabaseConnected } from './services/supabaseClient';
 import { getStoredSession, signOutUser, verifyActiveSupabaseSession } from './services/authService';
@@ -153,7 +142,6 @@ export function App() {
     return getActiveProjectId(loadProjects(sessionUser?.email, sessionUser?.fullName));
   });
   const [isProjectsHubOpen, setIsProjectsHubOpen] = useState(false);
-  const [isAdminUsersOpen, setIsAdminUsersOpen] = useState(false);
 
   const activeProject = useMemo(() => {
     return projects.find(p => p.id === activeProjectId) || projects[0];
@@ -299,7 +287,9 @@ export function App() {
   });
 
   const [comments, setComments] = useState<ReviewComment[]>([]);
-  const [isCloudConnected, setIsCloudConnected] = useState(() => isSupabaseConnected());
+  // Cloud availability is fixed at build time now that credentials come from
+  // env alone — there is no in-app "connect to Supabase" flow to change it.
+  const isCloudConnected = isSupabaseConnected();
 
   const [hub] = useState<CollaborationHub>(() => new CollaborationHub(roomId));
   const [selfUser, setSelfUser] = useState<Collaborator>(() => {
@@ -324,9 +314,14 @@ export function App() {
   const [activeCursorLine, setActiveCursorLine] = useState<number>(1);
   const cursorThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [peers, setPeers] = useState<Collaborator[]>(() => {
-    return areSimulatedPeersEnabled(activeProjectId) ? DEFAULT_PEERS : [];
-  });
+  /**
+   * Peer presence. `CollaborationHub` is BroadcastChannel-based, so this only
+   * ever shows other tabs of this browser — there is no cross-user transport
+   * yet. It used to be seeded from `DEFAULT_PEERS`, two invented co-authors
+   * ("Dr. Elena Rostova", "Marcus Chen") that appeared with cursor positions in
+   * a document they had never opened.
+   */
+  const [peers, setPeers] = useState<Collaborator[]>([]);
 
   // Keep checkpoints in sync whenever activeProjectId changes, and pull from Supabase Cloud
   useEffect(() => {
@@ -370,27 +365,6 @@ export function App() {
     return () => clearInterval(interval);
   }, [currentUser?.fullName, selfUser.name]);
 
-  const [isPlatformDev, setIsPlatformDev] = useState<boolean>(() => isPlatformDeveloper());
-  const [isDevDemoActive, setIsDevDemoActive] = useState<boolean>(() => isDemoModeEnabled());
-  const [isDevUnlockOpen, setIsDevUnlockOpen] = useState<boolean>(false);
-
-  const handleDeveloperStatusChanged = useCallback(() => {
-    setIsPlatformDev(isPlatformDeveloper());
-    setIsDevDemoActive(isDemoModeEnabled());
-  }, []);
-
-  const handleToggleDevDemoMode = useCallback(() => {
-    const next = !isDemoModeEnabled();
-    setDemoModeEnabled(next);
-    setIsDevDemoActive(next);
-  }, []);
-
-  const handleLockPlatformDev = useCallback(() => {
-    lockPlatformDeveloper();
-    setIsPlatformDev(false);
-    setIsDevDemoActive(false);
-  }, []);
-
   // Active File reference
   const activeFile = useMemo(() => {
     return files.find(f => f.id === activeFileId) || files[0];
@@ -431,7 +405,6 @@ export function App() {
   const [symbolsInitialTab, setSymbolsInitialTab] = useState<'symbols' | 'snippets' | 'macros'>('symbols');
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
-  const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isWordCountOpen, setIsWordCountOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
@@ -1140,7 +1113,7 @@ export function App() {
     setActiveFileId(firstId);
     setOpenFileIds([firstId]);
     setProjectTitle(proj.title);
-    setPeers(areSimulatedPeersEnabled(projId) ? DEFAULT_PEERS : []);
+    setPeers([]);
     setTimeout(() => triggerCompile(), 60);
   }, [flushCurrentProjectSave, triggerCompile]);
 
@@ -1275,7 +1248,7 @@ export function App() {
             setActiveFileId(firstId);
             setOpenFileIds([firstId]);
             setProjectTitle(nextProj.title);
-            setPeers(areSimulatedPeersEnabled(nextProj.id) ? DEFAULT_PEERS : []);
+            setPeers([]);
             setTimeout(() => triggerCompile(), 80);
           }
         }
@@ -1294,7 +1267,7 @@ export function App() {
         setActiveFileId(firstId);
         setOpenFileIds([firstId]);
         setProjectTitle(nextProj.title);
-        setPeers(areSimulatedPeersEnabled(nextProj.id) ? DEFAULT_PEERS : []);
+        setPeers([]);
         setTimeout(() => triggerCompile(), 80);
       }
     }
@@ -1414,20 +1387,15 @@ export function App() {
           <Loader2 size={24} color="#38bdf8" style={{ animation: 'spin 1s linear infinite' }} />
         </div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>Teeex Studio</div>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Verifying cryptographically signed session...</div>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>Teeex</div>
+          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Restoring your session…</div>
         </div>
       </div>
     );
   }
 
   if (!currentUser) {
-    return (
-      <AuthPortal
-        onAuthSuccess={handleAuthSuccess}
-        onDeveloperStatusChanged={handleDeveloperStatusChanged}
-      />
-    );
+    return <AuthPortal onAuthSuccess={handleAuthSuccess} />;
   }
 
   return (
@@ -1524,7 +1492,6 @@ export function App() {
         }}
         onOpenTemplates={() => setIsTemplatesOpen(true)}
         onOpenImageUpload={() => setIsImageUploadOpen(true)}
-        onOpenSupabase={() => setIsSupabaseOpen(true)}
         isCloudConnected={isCloudConnected}
         onExportPdf={handleExportPdf}
         onExportZip={handleExportZip}
@@ -1534,14 +1501,8 @@ export function App() {
         onOpenProjectsHub={() => setIsProjectsHubOpen(true)}
         currentUser={currentUser}
         onOpenAuth={() => setIsAuthOpen(true)}
-        onOpenAdminUsers={() => setIsAdminUsersOpen(true)}
         onSignOut={handleSignOut}
         currentRole={currentRole}
-        isPlatformDev={isPlatformDev}
-        onOpenDeveloperUnlock={() => setIsDevUnlockOpen(true)}
-        onLockPlatformDev={handleLockPlatformDev}
-        isDevDemoActive={isDevDemoActive}
-        onToggleDevDemoMode={handleToggleDevDemoMode}
         isEncrypted={!!activeProject?.isEncrypted}
         isOffline={isOffline}
       />
@@ -1687,22 +1648,6 @@ export function App() {
           />
         )}
 
-        {isSupabaseOpen && (
-          <SupabaseModal
-            isOpen={isSupabaseOpen}
-            onClose={() => {
-              setIsSupabaseOpen(false);
-              setIsCloudConnected(isSupabaseConnected());
-            }}
-            onSyncWithCloud={() => setIsCloudConnected(true)}
-            projects={projects}
-            onProjectsUpdated={setProjects}
-            currentRole={currentRole}
-            currentUser={currentUser}
-            onDeveloperStatusChanged={handleDeveloperStatusChanged}
-          />
-        )}
-
         {isSymbolsOpen && (
           <SymbolPaletteModal
             isOpen={isSymbolsOpen}
@@ -1777,16 +1722,6 @@ export function App() {
             onClose={() => setIsAuthOpen(false)}
             currentUser={currentUser}
             onAuthSuccess={handleAuthSuccess}
-            onDeveloperStatusChanged={handleDeveloperStatusChanged}
-          />
-        )}
-
-        {isDevUnlockOpen && (
-          <DeveloperUnlockModal
-            isOpen={isDevUnlockOpen}
-            onClose={() => setIsDevUnlockOpen(false)}
-            onDeveloperStatusChanged={handleDeveloperStatusChanged}
-            onOpenVault={() => setIsSupabaseOpen(true)}
           />
         )}
 
@@ -1822,14 +1757,6 @@ export function App() {
             onClose={() => setIsAuditModalOpen(false)}
             projectId={activeProjectId}
             projectTitle={projectTitle}
-          />
-        )}
-
-        {isAdminUsersOpen && (
-          <AdminUsersModal
-            isOpen={isAdminUsersOpen}
-            onClose={() => setIsAdminUsersOpen(false)}
-            currentUser={currentUser}
           />
         )}
 

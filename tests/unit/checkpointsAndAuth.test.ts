@@ -11,8 +11,8 @@ import {
   getStoredSession,
   saveSession,
   clearSession,
-  isLocalOrDemoUser,
-  DEMO_ACCOUNTS,
+  isLocalProfile,
+  useLocalWorkspace,
 } from '../../src/services/authService';
 import type { ProjectFile, UserProfile } from '../../src/types/latex';
 
@@ -77,7 +77,7 @@ describe('Checkpoints & Version History Service', () => {
   });
 });
 
-describe('Remember Me & Authentication Persistence', () => {
+describe('Session persistence', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
@@ -85,28 +85,32 @@ describe('Remember Me & Authentication Persistence', () => {
 
   it('persists session in localStorage when rememberMe is true', () => {
     const user: UserProfile = {
-      id: 'usr-admin',
-      email: 'admin@teeex.io',
-      fullName: 'System Admin',
-      isAdmin: true,
-      isApproved: true,
-      authProvider: 'demo',
+      id: 'local-abc',
+      email: 'local-abc@local.invalid',
+      fullName: 'Local Author',
+      authProvider: 'local',
     };
 
     saveSession(user, true);
 
     const stored = getStoredSession();
     expect(stored.user).not.toBeNull();
-    expect(stored.user?.email).toBe('admin@teeex.io');
+    expect(stored.user?.email).toBe('local-abc@local.invalid');
     expect(stored.rememberMe).toBe(true);
     expect(localStorage.getItem('teeex_remember_me')).toBe('true');
   });
 
-  it('allows non-teeex.io admins when properly signed (e.g. real Supabase admin)', () => {
+  /**
+   * The stored session used to carry isAdmin/isApproved behind a checksum whose
+   * salt ships in the same bundle, so anyone could mint an admin session from
+   * devtools. Privileges are now resolved from the server per session and are
+   * never persisted — so even a perfectly-signed record cannot grant them.
+   */
+  it('never restores privileges from storage, even when asked to', () => {
     const user: UserProfile = {
       id: '1788ae39-7e82-41c3-aaa5-af6d9b5a6184',
-      email: 'vedantpatelpvd@gmail.com',
-      fullName: 'Vedant Patel',
+      email: 'someone@example.com',
+      fullName: 'Someone',
       isAdmin: true,
       isApproved: true,
       authProvider: 'supabase',
@@ -114,19 +118,40 @@ describe('Remember Me & Authentication Persistence', () => {
 
     saveSession(user, true);
 
+    const raw = localStorage.getItem('teeex_auth_user') ?? '';
+    expect(raw).not.toContain('isAdmin');
+    expect(raw).not.toContain('isApproved');
+
     const stored = getStoredSession();
-    expect(stored.user).not.toBeNull();
-    expect(stored.user?.email).toBe('vedantpatelpvd@gmail.com');
-    expect(stored.user?.isAdmin).toBe(true);
+    expect(stored.user?.email).toBe('someone@example.com');
+    expect(stored.user?.isAdmin).toBe(false);
+    // A cloud identity is unapproved until the server says otherwise.
+    expect(stored.user?.isApproved).toBe(false);
+  });
+
+  it('rejects a session record whose contents were edited', () => {
+    saveSession(
+      {
+        id: 'local-xyz',
+        email: 'local-xyz@local.invalid',
+        fullName: 'Local Author',
+        authProvider: 'local',
+      },
+      true,
+    );
+
+    const wrapper = JSON.parse(localStorage.getItem('teeex_auth_user')!);
+    wrapper.user.id = 'someone-elses-id';
+    localStorage.setItem('teeex_auth_user', JSON.stringify(wrapper));
+
+    expect(getStoredSession().user).toBeNull();
   });
 
   it('persists session in sessionStorage when rememberMe is false', () => {
     const user: UserProfile = {
-      id: 'usr-guest-1',
-      email: 'temp@test.com',
+      id: 'local-guest',
+      email: 'local-guest@local.invalid',
       fullName: 'Temp User',
-      isAdmin: false,
-      isApproved: true,
       authProvider: 'local',
     };
 
@@ -139,8 +164,7 @@ describe('Remember Me & Authentication Persistence', () => {
   });
 
   it('clears session properly upon sign out', () => {
-    const user = DEMO_ACCOUNTS[0].profile;
-    saveSession(user, true);
+    useLocalWorkspace('Local Author', true);
     expect(getStoredSession().user).not.toBeNull();
 
     clearSession();
@@ -148,16 +172,25 @@ describe('Remember Me & Authentication Persistence', () => {
     expect(localStorage.getItem('teeex_signed_out')).toBe('true');
   });
 
-  it('correctly identifies local and demo users', () => {
-    const demo = DEMO_ACCOUNTS[0].profile;
-    expect(isLocalOrDemoUser(demo)).toBe(true);
+  it('creates a local workspace with no privileges and a stable id', () => {
+    const first = useLocalWorkspace('Local Author');
+    expect(first.user.authProvider).toBe('local');
+    expect(first.user.isAdmin).toBe(false);
+    expect(isLocalProfile(first.user)).toBe(true);
 
+    // The id is per-browser, so reopening the workspace keeps project ownership.
+    const second = useLocalWorkspace('Renamed Author');
+    expect(second.user.id).toBe(first.user.id);
+    expect(second.user.fullName).toBe('Renamed Author');
+  });
+
+  it('treats a cloud identity as not local', () => {
     const supabaseUser: UserProfile = {
       id: '99999999-1111-2222-3333-444444444444',
       email: 'cloud@user.com',
       fullName: 'Cloud User',
       authProvider: 'supabase',
     };
-    expect(isLocalOrDemoUser(supabaseUser)).toBe(false);
+    expect(isLocalProfile(supabaseUser)).toBe(false);
   });
 });

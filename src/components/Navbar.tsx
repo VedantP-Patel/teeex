@@ -45,7 +45,6 @@ interface Props {
   onOpenSymbols: () => void;
   onOpenTemplates: () => void;
   onOpenImageUpload: () => void;
-  onOpenSupabase: () => void;
   isCloudConnected: boolean;
   onExportPdf: () => void;
   onExportZip: () => void;
@@ -58,14 +57,7 @@ interface Props {
   currentUser: UserProfile | null;
   onOpenAuth: () => void;
   onSignOut: () => void;
-  onOpenAdminUsers?: () => void;
   currentRole: ProjectRole;
-  // Platform Developer & Website Owner props
-  isPlatformDev: boolean;
-  onOpenDeveloperUnlock: () => void;
-  onLockPlatformDev: () => void;
-  isDevDemoActive: boolean;
-  onToggleDevDemoMode: () => void;
   isEncrypted?: boolean;
   isOffline?: boolean;
 }
@@ -85,7 +77,6 @@ export const Navbar: React.FC<Props> = ({
   onOpenSymbols,
   onOpenTemplates,
   onOpenImageUpload,
-  onOpenSupabase,
   isCloudConnected,
   onExportPdf,
   onExportZip,
@@ -96,13 +87,7 @@ export const Navbar: React.FC<Props> = ({
   currentUser,
   onOpenAuth,
   onSignOut,
-  onOpenAdminUsers,
   currentRole,
-  isPlatformDev,
-  onOpenDeveloperUnlock,
-  onLockPlatformDev,
-  isDevDemoActive,
-  onToggleDevDemoMode,
   isEncrypted: _isEncrypted,
   isOffline,
 }) => {
@@ -548,62 +533,6 @@ export const Navbar: React.FC<Props> = ({
                   <User size={12} color="var(--text-secondary)" />
                   <span>Switch Account</span>
                 </button>
-
-                {(currentUser?.isAdmin || isPlatformDev) && onOpenAdminUsers && (
-                  <button
-                    onClick={() => { setIsUserDropdownOpen(false); onOpenAdminUsers(); }}
-                    style={dropdownItemStyle}
-                  >
-                    <Shield size={12} color="#f43f5e" />
-                    <span>Manage Users</span>
-                  </button>
-                )}
-
-                {/* Website Developer section */}
-                {isPlatformDev ? (
-                  <>
-                    <div style={{ height: 1, backgroundColor: 'var(--border-subtle)', margin: '4px 0' }} />
-                    <div style={{ padding: '3px 12px', fontSize: 9, fontWeight: 700, color: 'var(--accent-cyan)', letterSpacing: '0.05em' }}>
-                      WEBSITE OWNER / DEVELOPER
-                    </div>
-                    <button
-                      onClick={() => { setIsUserDropdownOpen(false); onOpenSupabase(); }}
-                      style={dropdownItemStyle}
-                    >
-                      <Shield size={12} color="#38bdf8" />
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                        <span>Cloud Database Vault</span>
-                        <span className="badge badge-cyan" style={{ fontSize: 8.5, padding: '1px 4px' }}>Dev</span>
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => { onToggleDevDemoMode(); }}
-                      style={dropdownItemStyle}
-                    >
-                      <Code size={12} color={isDevDemoActive ? '#10b981' : 'var(--text-muted)'} />
-                      <span>Test Accounts: {isDevDemoActive ? 'Visible' : 'Hidden'}</span>
-                    </button>
-                    <button
-                      onClick={() => { setIsUserDropdownOpen(false); onLockPlatformDev(); }}
-                      style={{ ...dropdownItemStyle, color: 'var(--text-muted)' }}
-                    >
-                      <Lock size={12} />
-                      <span>Lock Developer Mode</span>
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ height: 1, backgroundColor: 'var(--border-subtle)', margin: '4px 0' }} />
-                    <button
-                      onClick={() => { setIsUserDropdownOpen(false); onOpenDeveloperUnlock(); }}
-                      style={{ ...dropdownItemStyle, fontSize: 10.5, color: 'var(--text-muted)' }}
-                      title="Website Developer Access"
-                    >
-                      <Lock size={11} />
-                      <span>Developer Access</span>
-                    </button>
-                  </>
-                )}
 
                 <div style={{ height: 1, backgroundColor: 'var(--border-subtle)', margin: '4px 0' }} />
 

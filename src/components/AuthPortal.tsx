@@ -11,36 +11,25 @@ import {
   Eye,
   EyeOff,
   Sparkles,
-  Layers,
   FileCode2,
   LockKeyhole
 } from 'lucide-react';
 import type { UserProfile } from '../types/latex';
 import {
+  getAuthMode,
   loginWithEmail,
   signUpWithEmail,
   requestPasswordReset,
-  DEMO_ACCOUNTS,
-  saveSession,
+  useLocalWorkspace,
 } from '../services/authService';
-import {
-  isPlatformDeveloper,
-  unlockPlatformDeveloper,
-  isDemoModeEnabled,
-  setDemoModeEnabled
-} from '../services/developerService';
 
 interface Props {
   onAuthSuccess: (user: UserProfile) => void;
-  onDeveloperStatusChanged?: () => void;
 }
 
 type AuthTab = 'signin' | 'signup' | 'forgot';
 
-export const AuthPortal: React.FC<Props> = ({
-  onAuthSuccess,
-  onDeveloperStatusChanged,
-}) => {
+export const AuthPortal: React.FC<Props> = ({ onAuthSuccess }) => {
   const [activeTab, setActiveTab] = useState<AuthTab>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -52,28 +41,19 @@ export const AuthPortal: React.FC<Props> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Developer clearance controls
-  const [isDev, setIsDev] = useState(() => isPlatformDeveloper());
-  const [demoVisible, setDemoVisible] = useState(() => isDemoModeEnabled());
-  const [showDevPrompt, setShowDevPrompt] = useState(false);
-  const [devPasscode, setDevPasscode] = useState('');
-  const [devError, setDevError] = useState<string | null>(null);
-
-  const handleDevUnlock = (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = unlockPlatformDeveloper(devPasscode);
-    if (res.success) {
-      setIsDev(true);
-      setDemoVisible(true);
-      setDemoModeEnabled(true);
-      setShowDevPrompt(false);
-      setDevPasscode('');
-      setDevError(null);
-      onDeveloperStatusChanged?.();
-    } else {
-      setDevError(res.error || 'Invalid developer passcode');
-    }
-  };
+  /**
+   * With no cloud account service configured there is nothing to authenticate
+   * against, so this screen does not show a sign-in form it cannot honour. It
+   * offers a named local workspace instead and says where the documents live.
+   *
+   * What used to be here: a "Website Developer Clearance" passcode box checked
+   * against a list of five strings in the client bundle, which unlocked a panel
+   * exposing the Supabase project URL and key; and a "Developer Test Suite" of
+   * one-click logins including an admin account whose password was `admin` and
+   * three accounts with no password at all.
+   */
+  const isCloud = getAuthMode() === 'cloud';
+  const [localName, setLocalName] = useState('');
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,18 +134,10 @@ export const AuthPortal: React.FC<Props> = ({
     }
   };
 
-  const handleQuickDemoLogin = (demo: typeof DEMO_ACCOUNTS[0]) => {
-    setIsLoading(true);
-    setErrorMessage(null);
-    const demoUser: UserProfile = {
-      ...demo.profile,
-      authProvider: 'demo',
-    };
-    saveSession(demoUser, rememberMe);
-    setTimeout(() => {
-      onAuthSuccess(demoUser);
-      setIsLoading(false);
-    }, 200);
+  const handleUseLocalWorkspace = (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = useLocalWorkspace(localName, rememberMe);
+    onAuthSuccess(res.user);
   };
 
   return (
@@ -183,23 +155,27 @@ export const AuthPortal: React.FC<Props> = ({
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-              <h1 style={titleStyle}>Teeex Studio</h1>
-              <span style={versionBadgeStyle}>v2.4 SECURE</span>
+              <h1 style={titleStyle}>Teeex</h1>
             </div>
             <p style={subtitleStyle}>
-              Real-Time Collaborative LaTeX Platform
+              {isCloud
+                ? 'Sign in to sync your documents'
+                : 'Local workspace — your documents stay in this browser'}
             </p>
           </div>
         </div>
 
-        {/* Security Assurance Banner */}
         <div style={securityBannerStyle}>
           <Shield size={13} color="#10b981" />
-          <span>Encrypted Session Gate • Strict Auth Barrier Active</span>
+          <span>
+            {isCloud
+              ? 'Documents are readable only by you and the co-authors you add'
+              : 'No account service configured — nothing is uploaded'}
+          </span>
         </div>
 
         {/* Tab Switcher */}
-        {activeTab !== 'forgot' && (
+        {isCloud && activeTab !== 'forgot' && (
           <div style={tabContainerStyle}>
             <button
               type="button"
@@ -247,8 +223,57 @@ export const AuthPortal: React.FC<Props> = ({
 
         {/* Body Content */}
         <div style={bodyStyle}>
+          {/* LOCAL WORKSPACE (no cloud account service configured) */}
+          {!isCloud && (
+            <form
+              onSubmit={handleUseLocalWorkspace}
+              style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+            >
+              <p
+                style={{
+                  fontSize: 12.5,
+                  color: 'var(--text-secondary, #cbd5e1)',
+                  lineHeight: 1.6,
+                  margin: 0,
+                }}
+              >
+                This deployment has no cloud account service configured, so there is nothing to sign
+                in to. Name your workspace and start writing — projects, version history and
+                compiled PDFs are stored in this browser and never leave it.
+              </p>
+
+              <div>
+                <label style={labelStyle} htmlFor="local-name">
+                  YOUR NAME
+                </label>
+                <div style={inputWrapperStyle}>
+                  <User size={15} color="var(--text-muted, #94a3b8)" style={{ marginLeft: 12 }} />
+                  <input
+                    type="text"
+                    name="name"
+                    id="local-name"
+                    autoComplete="name"
+                    autoFocus
+                    value={localName}
+                    onChange={(e) => setLocalName(e.target.value)}
+                    placeholder="Used on your documents and checkpoints"
+                    className="auth-input"
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+
+              <button type="submit" style={submitBtnStyle}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <FileCode2 size={15} />
+                  <span>Open local workspace</span>
+                </div>
+              </button>
+            </form>
+          )}
+
           {/* SIGN IN FORM */}
-          {activeTab === 'signin' && (
+          {isCloud && activeTab === 'signin' && (
             <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
                 <label style={labelStyle}>EMAIL ADDRESS</label>
@@ -343,7 +368,7 @@ export const AuthPortal: React.FC<Props> = ({
           )}
 
           {/* SIGN UP FORM */}
-          {activeTab === 'signup' && (
+          {isCloud && activeTab === 'signup' && (
             <form onSubmit={handleSignUp} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
                 <label style={labelStyle}>FULL NAME / ACADEMIC TITLE</label>
@@ -441,7 +466,7 @@ export const AuthPortal: React.FC<Props> = ({
           )}
 
           {/* FORGOT PASSWORD FORM */}
-          {activeTab === 'forgot' && (
+          {isCloud && activeTab === 'forgot' && (
             <form onSubmit={handleForgot} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <p style={{ fontSize: 12.5, color: 'var(--text-secondary, #cbd5e1)', lineHeight: 1.6, margin: 0 }}>
                 Enter your registered email address below. We will send you secure instructions to reset your account password.
@@ -492,91 +517,6 @@ export const AuthPortal: React.FC<Props> = ({
             </form>
           )}
 
-          {/* Developer Test Switcher (Strictly for Verified Platform Developer) */}
-          {isDev && demoVisible && (
-            <div style={demoBoxStyle}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Layers size={13} color="#38bdf8" />
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted, #94a3b8)', letterSpacing: '0.04em' }}>
-                    DEVELOPER TEST SUITE
-                  </span>
-                </div>
-                <span style={devBadgeStyle}>Dev Clearance Active</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {DEMO_ACCOUNTS.map(demo => (
-                  <button
-                    key={demo.profile.id}
-                    type="button"
-                    onClick={() => handleQuickDemoLogin(demo)}
-                    style={demoBtnStyle}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ ...avatarMiniStyle, backgroundColor: demo.profile.avatarColor }}>
-                        {demo.profile.fullName.substring(0, 2).toUpperCase()}
-                      </div>
-                      <div style={{ textAlign: 'left' }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary, #f8fafc)' }}>
-                          {demo.profile.fullName}
-                        </div>
-                        <div style={{ fontSize: 10.5, color: 'var(--text-muted, #94a3b8)' }}>
-                          {demo.profile.email}
-                        </div>
-                      </div>
-                    </div>
-                    <span style={roleBadgeStyle(demo.role)}>
-                      {demo.role.toUpperCase()}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Discreet Developer Passcode Trigger */}
-          {!isDev && !showDevPrompt && (
-            <div style={{ marginTop: 8, textAlign: 'center' }}>
-              <button
-                type="button"
-                onClick={() => setShowDevPrompt(true)}
-                style={devLinkStyle}
-                title="Website Developer Clearance"
-              >
-                Website Developer Clearance
-              </button>
-            </div>
-          )}
-
-          {!isDev && showDevPrompt && (
-            <form onSubmit={handleDevUnlock} style={devFormStyle}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted, #94a3b8)', letterSpacing: '0.04em' }}>
-                ENTER WEBSITE DEVELOPER PASSCODE
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  type="password"
-                  placeholder="Enter authorized passcode"
-                  value={devPasscode}
-                  onChange={e => {
-                    setDevPasscode(e.target.value);
-                    setDevError(null);
-                  }}
-                  style={devInputStyle}
-                  autoFocus
-                />
-                <button type="submit" style={devUnlockBtnStyle}>
-                  Verify
-                </button>
-                <button type="button" onClick={() => setShowDevPrompt(false)} style={devCancelBtnStyle}>
-                  Cancel
-                </button>
-              </div>
-              {devError && (
-                <div style={{ fontSize: 11, color: '#f43f5e' }}>{devError}</div>
-              )}
-            </form>
-          )}
         </div>
       </div>
     </div>
@@ -666,17 +606,6 @@ const titleStyle: React.CSSProperties = {
   letterSpacing: '-0.02em',
   color: '#f8fafc',
   margin: 0,
-};
-
-const versionBadgeStyle: React.CSSProperties = {
-  fontSize: 10,
-  fontWeight: 700,
-  padding: '2px 7px',
-  borderRadius: '9999px',
-  backgroundColor: 'rgba(56, 189, 248, 0.15)',
-  color: '#38bdf8',
-  border: '1px solid rgba(56, 189, 248, 0.3)',
-  letterSpacing: '0.04em',
 };
 
 const subtitleStyle: React.CSSProperties = {
@@ -837,112 +766,4 @@ const successBannerStyle: React.CSSProperties = {
   fontSize: 12,
   color: '#34d399',
   marginTop: 14,
-};
-
-const demoBoxStyle: React.CSSProperties = {
-  backgroundColor: 'rgba(2, 6, 23, 0.6)',
-  border: '1px solid rgba(56, 189, 248, 0.2)',
-  borderRadius: '10px',
-  padding: 14,
-  marginTop: 4,
-};
-
-const demoBtnStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  padding: '8px 12px',
-  backgroundColor: 'rgba(255, 255, 255, 0.03)',
-  border: '1px solid rgba(255, 255, 255, 0.07)',
-  borderRadius: '8px',
-  cursor: 'pointer',
-  transition: 'background-color 0.15s ease',
-  width: '100%',
-};
-
-const avatarMiniStyle: React.CSSProperties = {
-  width: 26,
-  height: 26,
-  borderRadius: '50%',
-  color: '#ffffff',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontWeight: 700,
-  fontSize: 10,
-};
-
-const devBadgeStyle: React.CSSProperties = {
-  fontSize: 10,
-  fontWeight: 700,
-  padding: '2px 6px',
-  borderRadius: '4px',
-  backgroundColor: 'rgba(56, 189, 248, 0.15)',
-  color: '#38bdf8',
-};
-
-const roleBadgeStyle = (role: string): React.CSSProperties => ({
-  fontSize: 10,
-  fontWeight: 700,
-  padding: '2px 6px',
-  borderRadius: '4px',
-  backgroundColor: role === 'owner' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-  color: role === 'owner' ? '#38bdf8' : '#34d399',
-  border: `1px solid ${role === 'owner' ? 'rgba(56, 189, 248, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
-});
-
-const devLinkStyle: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  fontSize: 11,
-  color: '#64748b',
-  cursor: 'pointer',
-  opacity: 0.7,
-  padding: '4px 8px',
-};
-
-const devFormStyle: React.CSSProperties = {
-  marginTop: 8,
-  padding: '12px 14px',
-  borderRadius: '8px',
-  backgroundColor: 'rgba(255, 255, 255, 0.02)',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-};
-
-const devInputStyle: React.CSSProperties = {
-  flex: 1,
-  height: 34,
-  padding: '0 10px',
-  borderRadius: '6px',
-  border: '1px solid rgba(255, 255, 255, 0.12)',
-  backgroundColor: 'rgba(2, 6, 23, 0.8)',
-  color: '#f8fafc',
-  fontSize: 12,
-  outline: 'none',
-};
-
-const devUnlockBtnStyle: React.CSSProperties = {
-  height: 34,
-  padding: '0 12px',
-  borderRadius: '6px',
-  border: 'none',
-  backgroundColor: '#0284c7',
-  color: '#ffffff',
-  fontSize: 11.5,
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-const devCancelBtnStyle: React.CSSProperties = {
-  height: 34,
-  padding: '0 10px',
-  borderRadius: '6px',
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  backgroundColor: 'transparent',
-  color: '#94a3b8',
-  fontSize: 11.5,
-  cursor: 'pointer',
 };
