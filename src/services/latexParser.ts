@@ -1517,7 +1517,29 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
   // Titlepage
   bodyText = bodyText.replace(/\\begin\{(?:titlepage|title)\}([\s\S]*?)\\end\{(?:titlepage|title)\}/g, (_: string, content: string) => {
     const tpLine = findSourceLine('titlepage', rawLines, '\\begin{titlepage');
-    let parsedTp = content
+
+    // Render any tabular blocks BEFORE the \\ -> <br/> pass below would mangle their row separators.
+    // The rendered HTML is stashed behind a token so the formatting passes below can't alter it;
+    // the token is restored at the end of the pipeline with the other stashed blocks.
+    let tpContent = content;
+    let tpStdIdx = 0;
+    while (true) {
+      const stdRegex = /\\begin\{(tabular|tablular)\*?\}/g;
+      stdRegex.lastIndex = tpStdIdx;
+      const tpMatch = stdRegex.exec(tpContent);
+      if (!tpMatch) break;
+      const parsedStd = parseStandardTabularBlock(tpContent, tpMatch.index, tpMatch[1]);
+      if (parsedStd) {
+        const rendered = stashToken(parseTabularEnvironment(parsedStd.content, parsedStd.colSpec, rawLines, tpLine));
+        const replacement = `\n\n${rendered}\n\n`;
+        tpContent = tpContent.substring(0, tpMatch.index) + replacement + tpContent.substring(tpMatch.index + parsedStd.fullMatchLength);
+        tpStdIdx = tpMatch.index + replacement.length;
+      } else {
+        tpStdIdx = tpMatch.index + tpMatch[0].length;
+      }
+    }
+
+    let parsedTp = tpContent
       .replace(/\\centering\b/g, '')
       .replace(/\\raggedright\b/g, '')
       .replace(/\\raggedleft\b/g, '')
@@ -1558,7 +1580,7 @@ export function renderLatexToHtml(code: string, files?: ProjectFile[]): string {
       .map((p: string) => p.trim())
       .filter((p: string) => p.length > 0)
       .map((p: string) => {
-        if (/^<div|^<h|^<br/.test(p)) return p;
+        if (/^<div|^<h|^<br|^%%TEEEX_STASH_TOKEN_\d+%%$/.test(p)) return p;
         return `<div style="margin: 6px 0; font-size: 13px; color: var(--paper-text);">${p}</div>`;
       })
       .join('\n');

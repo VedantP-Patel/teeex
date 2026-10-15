@@ -100,6 +100,36 @@ function extractPreambleSig(files: ProjectFile[]): { sig: string; preambleText: 
   return { sig: hashString(preambleText), preambleText };
 }
 
+/**
+ * Applies the fast-compile rewrites to preamble text only.
+ * Single-line substitutions, so line numbers are preserved.
+ */
+function applyWasmPreambleFixes(preamble: string): string {
+  return (
+    preamble
+      // microtype -> draft mode (avoids font-expansion stalls)
+      .replace(
+        /\\usepackage\s*(?:\[[^\]]*\])?\s*\{microtype\}/g,
+        '\\usepackage[draft]{microtype}',
+      )
+      // lmodern -> commented out (avoids many remote font fetches)
+      .replace(
+        /\\usepackage\s*(?:\[[^\]]*\])?\s*\{lmodern\}/g,
+        '% \\usepackage{lmodern} (using preloaded CM fonts for fast WASM)',
+      )
+  );
+}
+
+/**
+ * Optimizes a full .tex file for fast browser WASM compilation.
+ * Only the part before \begin{document} is rewritten.
+ */
+function optimizePreambleForWasm(texContent: string): string {
+  const docIdx = texContent.indexOf('\\begin{document}');
+  if (docIdx === -1) return texContent;
+  return applyWasmPreambleFixes(texContent.slice(0, docIdx)) + texContent.slice(docIdx);
+}
+
 interface QueuedRequest {
   input: CompileInput;
   requestId: number;
@@ -363,7 +393,11 @@ export class TexEngineService {
     try {
       const { sig: preambleSig, preambleText } = extractPreambleSig(input.files);
       if (this.lastPreambleSig.get(engine) !== preambleSig) {
-        const preloaded = await preloadDocumentPackages(preambleText, remoteEndpoint());
+        // Scan the optimized preamble so lmodern is not fetched remotely.
+        const preloaded = await preloadDocumentPackages(
+          applyWasmPreambleFixes(preambleText),
+          remoteEndpoint(),
+        );
         const mountedSet = this.mountedPackagesByEngine.get(engine) ?? new Set<string>();
         const unmounted = preloaded.filter((pkg) => !mountedSet.has(pkg.name));
 
@@ -396,9 +430,10 @@ export class TexEngineService {
             : new PdfLatex(runner, false);
 
       const engineFiles = toEngineFiles(input.files, entry.name);
+      const optimizedEntryContent = optimizePreambleForWasm(entry.content);
 
       let result = await tool.compile({
-        input: entry.content,
+        input: optimizedEntryContent,
         mainTexPath: entry.name,
         additionalFiles: engineFiles,
         bibtex: input.bibtex ?? needsBibtex(input.files, entry.content),
@@ -419,7 +454,7 @@ export class TexEngineService {
 
       if (needsFollowUp) {
         const followUp = await tool.compile({
-          input: entry.content,
+          input: optimizedEntryContent,
           mainTexPath: entry.name,
           additionalFiles: engineFiles,
           bibtex: false,

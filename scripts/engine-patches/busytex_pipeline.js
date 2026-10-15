@@ -472,8 +472,14 @@ class BusytexPipeline {
         const docIdx = content.indexOf('\\begin{document}');
         if (docIdx === -1) return null;
 
-        const preamble = content.slice(0, docIdx).trim();
+        const rawPreamble = content.slice(0, docIdx);
+        const preamble = rawPreamble.trim();
         const body = content.slice(docIdx);
+
+        // Pad with the exact number of newlines that preceded \begin{document} so it stays on its
+        // original line; keeps SyncTeX records and error line numbers aligned with the editor.
+        const lineOffset = (rawPreamble.match(/\n/g) || []).length;
+        const paddedBody = '\n'.repeat(lineOffset) + body;
 
         // Skip custom .fmt if preamble uses packages incompatible with \dump (e.g. tikz externalize or hyperref AtBeginDocument hooks that fail in ini mode)
         if (!preamble || preamble.length < 20) return null;
@@ -488,13 +494,13 @@ class BusytexPipeline {
 
         if (this._preamble_fmt_cache.has(preambleHash) && FS.analyzePath(fmtFileName).exists) {
             // Fast path: .fmt already exists in MEMFS! Write body-only tex file and use custom fmt
-            FS.writeFile(tex_path, body);
+            FS.writeFile(tex_path, paddedBody);
             return fmtFileName;
         }
 
         // Attempt one-time -ini dump of preamble
         const iniTexName = `${fmtJobName}.tex`;
-        const iniContent = `${preamble}\n\\dump\n`;
+        const iniContent = `${rawPreamble}\n\\dump\n`;
         try {
             FS.writeFile(iniTexName, iniContent);
             const iniCmd = [
@@ -515,7 +521,7 @@ class BusytexPipeline {
 
             if (exit_code === 0 && FS.analyzePath(fmtFileName).exists) {
                 this._preamble_fmt_cache.set(preambleHash, fmtFileName);
-                FS.writeFile(tex_path, body);
+                FS.writeFile(tex_path, paddedBody);
                 return fmtFileName;
             } else {
                 this._preamble_fmt_cache.set(preambleHash, false);

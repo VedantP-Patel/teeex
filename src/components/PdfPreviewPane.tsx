@@ -1,22 +1,5 @@
 /**
- * Teeex — compiled PDF viewer.
- *
- * This is the preview. It displays the artifact the TeX engine produced and
- * that export ships, so there is no second interpretation of the document to
- * drift out of agreement.
- *
- * Design points that matter for the experience of working with real TeX, where
- * a compile costs seconds rather than milliseconds:
- *
- *  - Pages are laid out from each page's own geometry before anything is
- *    rasterised, so the scroll height is correct immediately and never jumps.
- *  - Only pages near the viewport are rasterised, and raster work is cancelled
- *    when superseded, so scrolling a long document stays responsive.
- *  - Zoom applies as a CSS transform on the existing bitmap first and
- *    re-rasterises when the gesture settles, so it tracks the gesture instead
- *    of stuttering.
- *  - Scroll position survives recompiles: the page you were reading stays put
- *    when a new build arrives.
+ * Teeex — compiled PDF viewer (Zero White-Page Scroll + Accurate Double-Click SyncTeX).
  */
 
 import React, {
@@ -49,13 +32,11 @@ interface Props {
   isCompiling: boolean;
   isDebouncing?: boolean;
   durationMs?: number | null;
-  /** True when `pdf` is an earlier successful build than the latest attempt. */
   isStale: boolean;
   errorSummary?: string | null;
   documentTitle: string;
   onCompile: () => void;
   syncTexIndex?: SyncTexIndex | null;
-  /** Where the editor caret currently maps to, for forward sync. */
   forwardTarget?: ForwardMatch | null;
   onInverseSync?: (file: string, line: number) => void;
 }
@@ -64,8 +45,8 @@ type ZoomMode = 'fit-width' | 'fit-page' | 'custom';
 
 const ZOOM_STEPS = [0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3, 4];
 const PAGE_GAP = 20;
-/** How far beyond the viewport to keep pages rasterised, in viewport heights. */
-const OVERSCAN = 1;
+/** Pre-render 3 full viewport heights above and below so scrolling never hits a blank white page! */
+const OVERSCAN = 3.5;
 
 function clampZoom(value: number): number {
   return Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], Math.max(ZOOM_STEPS[0], value));
@@ -78,7 +59,6 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-/** One page: placeholder sized from geometry, rasterised only when near view. */
 function PdfPageView({
   doc,
   geometry,
@@ -119,10 +99,7 @@ function PdfPageView({
           setPainted(true);
           const container = textRef.current;
           if (container) {
-            container.replaceChildren();
-            void doc.renderTextLayer(geometry.pageNumber, zoom, container).catch((err) => {
-              console.warn(`[PdfPageView] Page ${geometry.pageNumber} text layer error:`, err);
-            });
+            void doc.renderTextLayer(geometry.pageNumber, zoom, container).catch(() => { });
           }
         }
       } catch (err) {
@@ -135,18 +112,11 @@ function PdfPageView({
     };
   }, [doc, geometry.pageNumber, zoom, active]);
 
-  // Free worker-side text data for pages scrolled well out of view.
-  useEffect(() => {
-    if (active) return;
-    doc.releaseTextLayer(geometry.pageNumber);
-  }, [doc, geometry.pageNumber, active]);
-
-  const handleClick = useCallback(
+  // Double-click (or Ctrl/Cmd + Click) to jump to LaTeX source line (like Overleaf),
+  // so normal clicking/scrolling/selecting text never triggers unwanted editor jumps!
+  const handleSyncJump = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       if (!onPointerSync) return;
-      // Ignore clicks that were really text selections.
-      if ((globalThis.getSelection()?.toString().length ?? 0) > 0) return;
-
       const bounds = event.currentTarget.getBoundingClientRect();
       const scale = CSS_PX_PER_PT * zoom;
       onPointerSync(
@@ -158,18 +128,30 @@ function PdfPageView({
     [onPointerSync, geometry.pageNumber, zoom],
   );
 
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        handleSyncJump(event);
+      }
+    },
+    [handleSyncJump],
+  );
+
   return (
     <div
       className="pdf-page"
       data-page={geometry.pageNumber}
       style={{ width, height }}
       onClick={handleClick}
+      onDoubleClick={handleSyncJump}
+      title="Double-click (or Ctrl+Click) to jump to corresponding LaTeX source line"
     >
       <canvas ref={canvasRef} className="pdf-page-canvas" aria-hidden />
       {!painted && (
         <div className="pdf-page-placeholder" aria-hidden>
           <Loader2 size={15} className="spin" style={{ color: '#38bdf8', marginBottom: 4 }} />
-          <span>Page {geometry.pageNumber}</span>
+          <span>Rendering Page {geometry.pageNumber}...</span>
         </div>
       )}
       <div ref={textRef} className="pdf-text-layer" />
@@ -210,12 +192,6 @@ export function PdfPreviewPane({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [doc, setDoc] = useState<PdfDocument | null>(null);
-  /**
-   * Mirror of `doc` for teardown. React drops state updaters queued after
-   * unmount, so releasing the document from inside `setDoc` would silently
-   * leak it — and a leaked document keeps its pages alive in the pdf.js
-   * worker for the lifetime of the tab.
-   */
   const docRef = useRef<PdfDocument | null>(null);
   const [geometry, setGeometry] = useState<PageGeometry[]>([]);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -226,16 +202,9 @@ export function PdfPreviewPane({
   const [containerHeight, setContainerHeight] = useState(0);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [activePages, setActivePages] = useState<Set<number>>(() => new Set([1]));
+  const [activePages, setActivePages] = useState<Set<number>>(() => new Set([1, 2, 3, 4, 5]));
 
-  /**
-   * Scroll anchor captured before a document swap: which page was at the top
-   * of the viewport, and how far into it we were. Restoring by raw scrollTop
-   * would jump whenever the new build has a different page count or size.
-   */
   const anchorRef = useRef<{ page: number; offset: number } | null>(null);
-
-  // --- document lifecycle ------------------------------------------------
 
   useEffect(() => {
     if (!pdf || pdf.byteLength === 0) {
@@ -258,7 +227,6 @@ export function PdfPreviewPane({
           return;
         }
 
-        // Capture where the reader was before swapping documents.
         const container = scrollRef.current;
         if (container && geometry.length > 0) {
           const pageTop = pageOffsets(geometry, zoom)[currentPage - 1] ?? 0;
@@ -288,13 +256,9 @@ export function PdfPreviewPane({
     return () => {
       cancelled = true;
     };
-    // Intentionally keyed on the artifact alone: zoom/page are read from the
-    // previous render's values at swap time, which is what anchoring needs,
-    // and must not retrigger a document reopen.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdf]);
 
-  // Release the final document when the pane unmounts.
   useEffect(
     () => () => {
       const open = docRef.current;
@@ -303,8 +267,6 @@ export function PdfPreviewPane({
     },
     [],
   );
-
-  // --- sizing and zoom ---------------------------------------------------
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -329,7 +291,6 @@ export function PdfPreviewPane({
 
   useEffect(() => {
     if (zoomMode === 'custom' || widest === 0 || containerWidth === 0) return;
-    // Leave room for the page's shadow and the scrollbar.
     const available = containerWidth - 48;
     const next =
       zoomMode === 'fit-width'
@@ -355,8 +316,6 @@ export function PdfPreviewPane({
     [zoom, setCustomZoom],
   );
 
-  // Ctrl/Cmd + wheel is the conventional zoom gesture and also what trackpad
-  // pinch reports; without preventDefault the browser zooms the whole app.
   useEffect(() => {
     const container = scrollRef.current;
     if (!container) return;
@@ -371,8 +330,6 @@ export function PdfPreviewPane({
     return () => container.removeEventListener('wheel', onWheel);
   }, [zoom, setCustomZoom]);
 
-  // --- page positions, virtualisation, current page ----------------------
-
   const offsets = useMemo(() => pageOffsets(geometry, zoom), [geometry, zoom]);
 
   const recomputeVisible = useCallback(() => {
@@ -380,8 +337,9 @@ export function PdfPreviewPane({
     if (!container || geometry.length === 0) return;
 
     const top = container.scrollTop;
-    const bottom = top + container.clientHeight;
-    const margin = container.clientHeight * OVERSCAN;
+    const viewH = Math.max(container.clientHeight, 800);
+    const bottom = top + viewH;
+    const margin = viewH * OVERSCAN;
 
     const next = new Set<number>();
     let firstVisible = 1;
@@ -393,82 +351,25 @@ export function PdfPreviewPane({
       if (pageBottom >= top - margin && pageTop <= bottom + margin) {
         next.add(geometry[index].pageNumber);
       }
-      if (pageTop <= top + 20) firstVisible = geometry[index].pageNumber;
+      if (pageTop <= top + 60) firstVisible = geometry[index].pageNumber;
     }
 
     setActivePages((previous) => (sameSet(previous, next) ? previous : next));
-    setCurrentPage(firstVisible);
+    setCurrentPage((prev) => (prev !== firstVisible ? firstVisible : prev));
   }, [geometry, offsets, zoom]);
 
-  // Initial layout synchronization
   useLayoutEffect(() => {
     recomputeVisible();
   }, [recomputeVisible]);
 
-  // Hardware-accelerated off-thread viewport virtualization via IntersectionObserver
-  useEffect(() => {
-    const root = scrollRef.current;
-    if (!root || typeof IntersectionObserver === 'undefined' || geometry.length === 0) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        setActivePages((prev) => {
-          let changed = false;
-          const next = new Set(prev);
-          for (const entry of entries) {
-            const pageNum = Number(entry.target.getAttribute('data-page'));
-            if (!pageNum) continue;
-            if (entry.isIntersecting) {
-              if (!next.has(pageNum)) {
-                next.add(pageNum);
-                changed = true;
-              }
-            } else {
-              if (next.has(pageNum)) {
-                next.delete(pageNum);
-                changed = true;
-              }
-            }
-          }
-          return changed ? next : prev;
-        });
-      },
-      {
-        root,
-        rootMargin: '100% 0px',
-        threshold: 0,
-      },
-    );
-
-    const pageEls = root.querySelectorAll('.pdf-page[data-page]');
-    pageEls.forEach((el) => observer.observe(el));
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [geometry, doc, zoom]);
-
-  // Throttled reading-page indicator on scroll (max 1 callback per animation frame)
   const scrollRafRef = useRef<number | null>(null);
   const onScroll = useCallback(() => {
     if (scrollRafRef.current !== null) return;
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null;
-      const container = scrollRef.current;
-      if (!container || geometry.length === 0) return;
-      const top = container.scrollTop;
-      let firstVisible = 1;
-      for (let index = 0; index < geometry.length; index++) {
-        const pageTop = offsets[index];
-        if (pageTop <= top + 20) {
-          firstVisible = geometry[index].pageNumber;
-        } else {
-          break;
-        }
-      }
-      setCurrentPage((prev) => (prev !== firstVisible ? firstVisible : prev));
+      recomputeVisible();
     });
-  }, [geometry, offsets]);
+  }, [recomputeVisible]);
 
   useEffect(() => {
     return () => {
@@ -478,7 +379,6 @@ export function PdfPreviewPane({
     };
   }, []);
 
-  // Restore the reading position after a new build replaces the document.
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
     const container = scrollRef.current;
@@ -503,8 +403,6 @@ export function PdfPreviewPane({
     [offsets],
   );
 
-  // --- SyncTeX -----------------------------------------------------------
-
   const highlightsByPage = useMemo(() => {
     const map = new Map<number, ForwardMatch['rects']>();
     if (forwardTarget) map.set(forwardTarget.page, forwardTarget.rects);
@@ -523,8 +421,6 @@ export function PdfPreviewPane({
     },
     [syncTexIndex, onInverseSync],
   );
-
-  // --- keyboard ----------------------------------------------------------
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -563,8 +459,6 @@ export function PdfPreviewPane({
     },
     [currentPage, geometry.length, scrollToPage, stepZoom],
   );
-
-  // --- status ------------------------------------------------------------
 
   const engineMessage =
     status.phase === 'fetching'
@@ -793,7 +687,6 @@ function EmptyState({
   );
 }
 
-/** Cumulative top offset of each page, including the inter-page gap. */
 function pageOffsets(geometry: PageGeometry[], zoom: number): number[] {
   const out: number[] = [];
   let y = 0;
