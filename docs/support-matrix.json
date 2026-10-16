@@ -177,14 +177,31 @@
       "stages": {
         "worker": "verified",
         "raster": "verified",
-        "windowing": "verified"
+        "windowing": "verified",
+        "lazyGeometry": "verified"
       },
       "tests": [
-        "tests/e2e/pdf-fidelity.spec.ts"
+        "tests/e2e/pdf-fidelity.spec.ts",
+        "tests/unit/pdfViewerWindowing.test.ts",
+        "tests/e2e/pdf-viewer-stage3.spec.ts"
       ],
-      "limitations": [
-        "geometry() still materialises page proxies up front (scheduled for lazy geometry in Stage 3)."
+      "limitations": [],
+      "overall": "verified"
+    },
+    {
+      "id": "preview.annotations",
+      "capability": "Clickable PDF annotation and link layer",
+      "spec": "PDF.js 6.4 Link annotations with viewport coordinate transform, internal TOC/ref/cite navigation, strict protocol whitelisting (http, https, mailto)",
+      "stages": {
+        "extraction": "verified",
+        "navigation": "verified",
+        "sanitization": "verified"
+      },
+      "tests": [
+        "tests/unit/pdfAnnotationLayer.test.ts",
+        "tests/e2e/pdf-viewer-stage3.spec.ts"
       ],
+      "limitations": [],
       "overall": "verified"
     },
     {
@@ -208,7 +225,6 @@
   ],
   "notCovered": [
     "In-environment pixelmatch differential between offscreen PDF raster and visible preview canvas.",
-    "Clickable PDF annotation/link layer (Stage 3).",
     "Cross-browser and cross-platform validation."
   ]
 }

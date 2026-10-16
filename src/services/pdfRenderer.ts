@@ -53,6 +53,42 @@ export interface PageGeometry {
   rotation: number;
 }
 
+export interface PdfLinkAnnotation {
+  id: string;
+  rect: [number, number, number, number]; // [left, top, width, height] in CSS pixels
+  url?: string;
+  dest?: string | any[];
+  title?: string;
+}
+
+export function isSafeUrl(rawUrl: string): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  const trimmed = rawUrl.trim();
+  if (trimmed.length === 0) return false;
+
+  if (trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) {
+    return !trimmed.startsWith('//');
+  }
+
+  // Guard against scheme evasion with whitespace (e.g. "javascript :alert(1)")
+  const noWhitespace = trimmed.replace(/[\s\x00-\x1f]+/g, '');
+  if (/^[a-zA-Z0-9+.-]+:/.test(noWhitespace)) {
+    const colonIndex = noWhitespace.indexOf(':');
+    const scheme = noWhitespace.slice(0, colonIndex + 1).toLowerCase();
+    return ['http:', 'https:', 'mailto:'].includes(scheme);
+  }
+
+  try {
+    const parsed = new URL(trimmed, 'https://safe-base.internal');
+    if (parsed.origin !== 'https://safe-base.internal') {
+      return ['http:', 'https:', 'mailto:'].includes(parsed.protocol);
+    }
+    return !trimmed.includes(':');
+  } catch {
+    return false;
+  }
+}
+
 export interface RenderPageOptions {
   canvas: HTMLCanvasElement;
   pageNumber: number;
@@ -116,6 +152,11 @@ export class PdfDocument {
     this.onGeometryUpdate = cb;
   }
 
+  /**
+   * Lazy geometry initialization (O(1) memory and time).
+   * Reads Page 1 to establish default dimensions for all N pages without
+   * eagerly instantiating proxies for remaining pages.
+   */
   async geometry(): Promise<PageGeometry[]> {
     if (this.geometryCache) return this.geometryCache;
 
@@ -141,39 +182,44 @@ export class PdfDocument {
     }));
 
     this.geometryCache = initial;
-
-    void (async () => {
-      try {
-        const remaining = await Promise.all(
-          Array.from({ length: this.numPages - 1 }, (_, i) => this.page(i + 2)),
-        );
-        let updated = false;
-        for (let i = 0; i < remaining.length; i++) {
-          if (this.destroyed) return;
-          const vp = remaining[i].getViewport({ scale: CSS_PX_PER_PT });
-          if (
-            vp.width !== defaultGeo.width ||
-            vp.height !== defaultGeo.height ||
-            vp.rotation !== defaultGeo.rotation
-          ) {
-            initial[i + 1] = {
-              pageNumber: i + 2,
-              width: vp.width,
-              height: vp.height,
-              rotation: vp.rotation,
-            };
-            updated = true;
-          }
-        }
-        if (updated && this.onGeometryUpdate && !this.destroyed) {
-          this.onGeometryUpdate([...initial]);
-        }
-      } catch {
-        // Non-fatal
-      }
-    })();
-
     return initial;
+  }
+
+  /**
+   * Lazily resolves and updates geometry for a specific page when it enters the viewport.
+   * If the page has non-default dimensions (e.g. landscape), updates the cache and triggers onGeometryUpdate.
+   */
+  async ensurePageGeometry(pageNumber: number): Promise<PageGeometry> {
+    const geometries = await this.geometry();
+    if (pageNumber < 1 || pageNumber > this.numPages || this.destroyed) {
+      return geometries[Math.max(0, pageNumber - 1)] || geometries[0];
+    }
+    if (pageNumber === 1) return geometries[0];
+
+    const current = geometries[pageNumber - 1];
+    try {
+      const page = await this.page(pageNumber);
+      if (this.destroyed) return current;
+      const vp = page.getViewport({ scale: CSS_PX_PER_PT });
+      if (
+        vp.width !== current.width ||
+        vp.height !== current.height ||
+        vp.rotation !== current.rotation
+      ) {
+        geometries[pageNumber - 1] = {
+          pageNumber,
+          width: vp.width,
+          height: vp.height,
+          rotation: vp.rotation,
+        };
+        if (this.onGeometryUpdate && !this.destroyed) {
+          this.onGeometryUpdate([...geometries]);
+        }
+      }
+    } catch {
+      // Non-fatal, retain default
+    }
+    return geometries[pageNumber - 1];
   }
 
   /**
@@ -306,6 +352,78 @@ export class PdfDocument {
   async annotations(pageNumber: number) {
     const page = await this.page(pageNumber);
     return page.getAnnotations({ intent: 'display' });
+  }
+
+  async resolveDestination(
+    dest: string | unknown[],
+  ): Promise<{ pageNumber: number; yPt?: number } | null> {
+    if (this.destroyed) return null;
+    try {
+      const explicit =
+        typeof dest === 'string'
+          ? ((await this.doc.getDestination(dest)) as unknown[])
+          : dest;
+      if (!explicit || !Array.isArray(explicit)) return null;
+      const pageRef = explicit[0];
+      let pageIndex: number | null = null;
+      if (typeof pageRef === 'object' && pageRef !== null) {
+        pageIndex = await this.doc.getPageIndex(pageRef as never);
+      } else if (typeof pageRef === 'number') {
+        pageIndex = pageRef;
+      }
+      if (pageIndex === null || pageIndex < 0) return null;
+      return {
+        pageNumber: pageIndex + 1,
+        yPt: typeof explicit[3] === 'number' ? (explicit[3] as number) : undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async getPageLinkAnnotations(
+    pageNumber: number,
+    zoom: number,
+  ): Promise<PdfLinkAnnotation[]> {
+    if (this.destroyed) return [];
+    try {
+      const page = await this.page(pageNumber);
+      if (this.destroyed) return [];
+      const rawAnnotations = await page.getAnnotations({ intent: 'display' });
+      const viewport = page.getViewport({ scale: CSS_PX_PER_PT * zoom });
+      const links: PdfLinkAnnotation[] = [];
+
+      for (const annot of rawAnnotations) {
+        if (annot.subtype !== 'Link' || !annot.rect) continue;
+        const p1 = viewport.convertToViewportPoint(annot.rect[0], annot.rect[1]);
+        const p2 = viewport.convertToViewportPoint(annot.rect[2], annot.rect[3]);
+        const left = Math.min(p1[0], p2[0]);
+        const top = Math.min(p1[1], p2[1]);
+        const width = Math.max(2, Math.abs(p2[0] - p1[0]));
+        const height = Math.max(2, Math.abs(p2[1] - p1[1]));
+
+        links.push({
+          id: String(annot.id || `${annot.rect.join('-')}`),
+          rect: [left, top, width, height],
+          url: typeof annot.url === 'string' ? annot.url : undefined,
+          dest: annot.dest,
+          title: typeof annot.title === 'string' ? annot.title : undefined,
+        });
+      }
+      return links;
+    } catch {
+      return [];
+    }
+  }
+
+  cleanupPage(pageNumber: number): void {
+    const page = this.pages.get(pageNumber);
+    if (!page) return;
+    try {
+      page.cleanup();
+    } catch {
+      // Non-fatal
+    }
   }
 
   async destroy(): Promise<void> {

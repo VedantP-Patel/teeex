@@ -326,14 +326,29 @@
   text-overflow: ellipsis;
 }
 
-.pdf-status-busy {
+.pdf-status-busy,
+.pdf-status-compiling {
   color: var(--accent-cyan);
   background: var(--accent-cyan-glow);
 }
 
-.pdf-status-warn {
+.pdf-status-current {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.28);
+}
+
+.pdf-status-warn,
+.pdf-status-stale {
   color: var(--accent-amber);
   background: var(--accent-amber-glow);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.pdf-status-failed {
+  color: #f43f5e;
+  background: rgba(244, 63, 94, 0.14);
+  border: 1px solid rgba(244, 63, 94, 0.3);
 }
 
 /* --- Scroll surface ----------------------------------------------------- */
@@ -357,6 +372,7 @@
   outline-offset: -2px;
 }
 
+.pdf-pages-container,
 .pdf-pages {
   display: flex;
   flex-direction: column;
@@ -365,6 +381,14 @@
      edge, which centering alone would do once a page is wider than the pane. */
   min-width: fit-content;
   margin: 0 auto;
+}
+
+.pdf-page-wrapper {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  justify-content: center;
 }
 
 /* --- Page --------------------------------------------------------------- */
@@ -446,6 +470,37 @@
   z-index: 0;
   cursor: default;
   user-select: none;
+}
+
+/* --- Annotation & Link layer -------------------------------------------- */
+
+.pdf-annotation-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.pdf-link-annotation {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+  outline: none;
+}
+
+.pdf-link-annotation:hover,
+.pdf-link-annotation:focus-visible {
+  background: color-mix(in oklab, var(--accent-cyan) 18%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-cyan) 45%, transparent);
+}
+
+.pdf-link-annotation.is-unsafe {
+  cursor: not-allowed;
+  pointer-events: none;
+  opacity: 0.5;
 }
 
 /* --- SyncTeX highlight --------------------------------------------------- */

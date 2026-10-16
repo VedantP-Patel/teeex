@@ -22,10 +22,22 @@ import {
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
-import { CSS_PX_PER_PT, PdfDocument, type PageGeometry } from '../services/pdfRenderer';
+import {
+  CSS_PX_PER_PT,
+  PdfDocument,
+  isSafeUrl,
+  type PageGeometry,
+  type PdfLinkAnnotation,
+} from '../services/pdfRenderer';
 import { downloadPdf } from '../services/pdfExporter';
 import { inverseSync, type ForwardMatch, type SyncTexIndex } from '../services/synctex';
 import type { EngineId, EngineStatus } from '../services/latexCompiler';
+
+export type PreviewState =
+  | { type: 'current'; durationMs: number | null }
+  | { type: 'compiling'; elapsedSec: number }
+  | { type: 'stale'; reason: 'typing' | 'compile_error'; errorSummary?: string | null }
+  | { type: 'failed'; error: string };
 
 interface Props {
   pdf: Uint8Array | null;
@@ -73,6 +85,7 @@ function PdfPageView({
   active,
   highlights,
   onPointerSync,
+  onInternalNavigate,
 }: {
   doc: PdfDocument;
   geometry: PageGeometry;
@@ -81,13 +94,38 @@ function PdfPageView({
   active: boolean;
   highlights: { x: number; y: number; width: number; height: number }[];
   onPointerSync?: (pageNumber: number, xPt: number, yPt: number) => void;
+  onInternalNavigate?: (dest: string | unknown[]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const [painted, setPainted] = useState(false);
+  const [links, setLinks] = useState<PdfLinkAnnotation[]>([]);
 
   const width = geometry.width * displayZoom;
   const height = geometry.height * displayZoom;
+
+  useEffect(() => {
+    if (active) {
+      void doc.ensurePageGeometry(geometry.pageNumber);
+    }
+  }, [doc, geometry.pageNumber, active]);
+
+  useEffect(() => {
+    if (!active) {
+      setLinks([]);
+      return;
+    }
+    let cancelled = false;
+    doc
+      .getPageLinkAnnotations(geometry.pageNumber, displayZoom)
+      .then((annots) => {
+        if (!cancelled) setLinks(annots);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, geometry.pageNumber, displayZoom, active]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -102,11 +140,7 @@ function PdfPageView({
       if (textContainer) {
         textContainer.replaceChildren();
       }
-      const maybeRelease = (doc as unknown as { releaseTextLayer?: (p: number) => void })
-        .releaseTextLayer;
-      if (typeof maybeRelease === 'function') {
-        maybeRelease.call(doc, geometry.pageNumber);
-      }
+      doc.releaseTextLayer?.(geometry.pageNumber);
       setPainted(false);
       return;
     }
@@ -125,7 +159,7 @@ function PdfPageView({
           setPainted(true);
           const container = textRef.current;
           if (container) {
-            void doc.renderTextLayer(geometry.pageNumber, rasterZoom, container).catch(() => { });
+            void doc.renderTextLayer(geometry.pageNumber, rasterZoom, container).catch(() => {});
           }
         }
       } catch (err) {
@@ -186,6 +220,49 @@ function PdfPageView({
         </div>
       )}
       <div ref={textRef} className="pdf-text-layer" />
+      {links.length > 0 && (
+        <div
+          className="pdf-annotation-layer"
+          aria-label={`Page ${geometry.pageNumber} links`}
+        >
+          {links.map((link) => {
+            const [left, top, width, height] = link.rect;
+            if (link.url) {
+              const safe = isSafeUrl(link.url);
+              return (
+                <a
+                  key={link.id}
+                  className={`pdf-link-annotation${safe ? '' : ' is-unsafe'}`}
+                  href={safe ? link.url : undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={link.title || link.url}
+                  aria-label={link.title || link.url}
+                  style={{ left, top, width, height }}
+                  onClick={safe ? undefined : (e) => e.preventDefault()}
+                />
+              );
+            }
+            if (link.dest) {
+              return (
+                <a
+                  key={link.id}
+                  className="pdf-link-annotation pdf-link-internal"
+                  href={`#dest-${link.id}`}
+                  title={link.title || 'Jump to cross-reference'}
+                  aria-label={link.title || 'Jump to cross-reference'}
+                  style={{ left, top, width, height }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (link.dest) onInternalNavigate?.(link.dest);
+                  }}
+                />
+              );
+            }
+            return null;
+          })}
+        </div>
+      )}
       {highlights.length > 0 && (
         <div className="pdf-highlight-layer" aria-hidden>
           {highlights.map((rect, index) => (
@@ -445,16 +522,37 @@ export function PdfPreviewPane({
   }, [offsets, recomputeVisible]);
 
   const scrollToPage = useCallback(
-    (pageNumber: number) => {
+    (pageNumber: number, yPt?: number) => {
       const container = scrollRef.current;
-      if (!container) return;
+      if (!container || offsets.length === 0) return;
       const index = Math.min(Math.max(pageNumber, 1), offsets.length) - 1;
+      const baseTop = offsets[index] ?? 0;
+      let targetTop = baseTop;
+
+      if (typeof yPt === 'number' && geometry[index]) {
+        // PDF point space (origin at bottom-left) to CSS pixel space (origin at top-left)
+        const pageHeightPt = geometry[index].height / CSS_PX_PER_PT;
+        const offsetFromPageTop = Math.max(0, (pageHeightPt - yPt) * CSS_PX_PER_PT * zoom);
+        targetTop = baseTop + offsetFromPageTop;
+      }
+
       container.scrollTo({
-        top: offsets[index] ?? 0,
+        top: Math.max(0, targetTop),
         behavior: prefersReducedMotion() ? 'auto' : 'smooth',
       });
     },
-    [offsets],
+    [offsets, geometry, zoom],
+  );
+
+  const handleInternalNavigate = useCallback(
+    async (dest: string | unknown[]) => {
+      if (!doc) return;
+      const target = await doc.resolveDestination(dest);
+      if (target) {
+        scrollToPage(target.pageNumber, target.yPt);
+      }
+    },
+    [doc, scrollToPage],
   );
 
   const highlightsByPage = useMemo(() => {
@@ -514,16 +612,41 @@ export function PdfPreviewPane({
     [currentPage, geometry.length, scrollToPage, stepZoom],
   );
 
-  const engineLabel = ENGINE_LABELS[status.engine] ?? status.engine;
-
-  const engineMessage =
-    status.phase === 'fetching'
-      ? `Downloading TeX engine · ${Math.round(status.progress)}%`
-      : status.phase === 'failed'
-        ? status.error
-        : null;
-
   const hasDocument = Boolean(doc) && geometry.length > 0;
+
+  const previewState: PreviewState = useMemo(() => {
+    if (status.phase === 'failed') {
+      return { type: 'failed', error: status.error || 'The TeX engine could not start' };
+    }
+    if (isCompiling) {
+      return { type: 'compiling', elapsedSec: elapsedCompileSec };
+    }
+    if (!hasDocument) {
+      return { type: 'failed', error: errorSummary || 'No PDF generated yet' };
+    }
+    if (isStale) {
+      return { type: 'stale', reason: 'compile_error', errorSummary };
+    }
+    if (isDebouncing) {
+      return { type: 'stale', reason: 'typing' };
+    }
+    return { type: 'current', durationMs: durationMs ?? null };
+  }, [
+    status,
+    isCompiling,
+    elapsedCompileSec,
+    hasDocument,
+    isStale,
+    isDebouncing,
+    errorSummary,
+    durationMs,
+  ]);
+
+  const totalHeight = useMemo(() => {
+    if (geometry.length === 0) return 0;
+    const lastIdx = geometry.length - 1;
+    return (offsets[lastIdx] ?? 0) + geometry[lastIdx].height * zoom;
+  }, [geometry, offsets, zoom]);
 
   const handleDownload = useCallback(() => {
     if (!pdf) return;
@@ -535,7 +658,7 @@ export function PdfPreviewPane({
   }, [pdf, documentTitle]);
 
   return (
-    <div className="pdf-pane">
+    <div className="pdf-pane" data-preview-state={previewState.type}>
       <div className="pdf-toolbar">
         <div className="pdf-toolbar-group">
           <button
@@ -561,38 +684,57 @@ export function PdfPreviewPane({
           </button>
         </div>
 
-        <div className="pdf-toolbar-status">
-          {isCompiling && (
-            <span className="pdf-status pdf-status-busy">
-              <Loader2 size={12} className="spin" />
-              <span>Typesetting · {elapsedCompileSec.toFixed(1)}s</span>
-            </span>
-          )}
-          {!isCompiling && isDebouncing && (
-            <span className="pdf-status pdf-status-queued">
-              <span className="pulse-dot" />
-              Live Sync Queued
-            </span>
-          )}
-          {!isCompiling && engineMessage && status.phase === 'fetching' && (
-            <span className="pdf-status pdf-status-busy">
-              <Loader2 size={12} className="spin" />
-              {engineMessage}
-            </span>
-          )}
-          {!isCompiling && isStale && (
-            <span className="pdf-status pdf-status-warn" title={errorSummary ?? undefined}>
-              <AlertTriangle size={12} />
-              Showing last successful build
-            </span>
-          )}
-          {!isCompiling && !isDebouncing && !isStale && durationMs !== null && durationMs !== undefined && (
+        <div className="pdf-toolbar-status" role="status" aria-live="polite">
+          {previewState.type === 'compiling' && (
             <span
-              className="pdf-status-duration"
-              title={`Compiled with ${engineLabel} in ${durationMs}ms`}
+              className="pdf-status pdf-status-compiling"
+              title="Typesetting document with pdfLaTeX"
             >
-              <Sparkles size={11} style={{ color: '#38bdf8', marginRight: 4 }} />
-              {durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`}
+              <Loader2 size={12} className="spin" />
+              <span>Typesetting · {previewState.elapsedSec.toFixed(1)}s</span>
+            </span>
+          )}
+
+          {previewState.type === 'current' && (
+            <span
+              className="pdf-status pdf-status-current"
+              title={`Document up to date · compiled with ${ENGINE_LABELS[status.engine] ?? status.engine} in ${previewState.durationMs ?? 0}ms`}
+            >
+              <Sparkles size={11} style={{ marginRight: 4 }} />
+              Up to date
+              {previewState.durationMs !== null
+                ? ` · ${previewState.durationMs < 1000 ? `${previewState.durationMs}ms` : `${(previewState.durationMs / 1000).toFixed(1)}s`}`
+                : ''}
+            </span>
+          )}
+
+          {previewState.type === 'stale' && previewState.reason === 'typing' && (
+            <span
+              className="pdf-status pdf-status-stale"
+              title="Live sync queued — pausing for typing"
+            >
+              <span className="pulse-dot" />
+              Changes pending · Live compile queued
+            </span>
+          )}
+
+          {previewState.type === 'stale' && previewState.reason === 'compile_error' && (
+            <span
+              className="pdf-status pdf-status-stale"
+              title={
+                previewState.errorSummary ||
+                'Last compile failed — showing previous successful build'
+              }
+            >
+              <AlertTriangle size={12} />
+              Showing last build · changes pending
+            </span>
+          )}
+
+          {previewState.type === 'failed' && (
+            <span className="pdf-status pdf-status-failed" title={previewState.error}>
+              <AlertTriangle size={12} />
+              Build failed
             </span>
           )}
         </div>
@@ -705,19 +847,44 @@ export function PdfPreviewPane({
         )}
 
         {hasDocument && doc && (
-          <div className="pdf-pages" style={{ gap: PAGE_GAP }}>
-            {geometry.map((page) => (
-              <PdfPageView
-                key={page.pageNumber}
-                doc={doc}
-                geometry={page}
-                displayZoom={zoom}
-                rasterZoom={rasterZoom}
-                active={activePages.has(page.pageNumber)}
-                highlights={highlightsByPage.get(page.pageNumber) ?? []}
-                onPointerSync={syncTexIndex ? handlePointerSync : undefined}
-              />
-            ))}
+          <div
+            className="pdf-pages-container"
+            style={{
+              position: 'relative',
+              width: '100%',
+              minWidth: widest * zoom,
+              height: totalHeight,
+            }}
+          >
+            {geometry.map((page, index) => {
+              // True virtualization: only mount active pages in the window
+              if (!activePages.has(page.pageNumber)) return null;
+
+              const pageTop = offsets[index] ?? 0;
+              return (
+                <div
+                  key={page.pageNumber}
+                  className="pdf-page-wrapper"
+                  style={{
+                    position: 'absolute',
+                    top: pageTop,
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                  }}
+                >
+                  <PdfPageView
+                    doc={doc}
+                    geometry={page}
+                    displayZoom={zoom}
+                    rasterZoom={rasterZoom}
+                    active={true}
+                    highlights={highlightsByPage.get(page.pageNumber) ?? []}
+                    onPointerSync={syncTexIndex ? handlePointerSync : undefined}
+                    onInternalNavigate={handleInternalNavigate}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
