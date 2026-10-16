@@ -109,6 +109,14 @@ set search_path = public, pg_temp
 as $$
 begin
   new.owner_uid := old.owner_uid;
+
+  if auth.uid() is not null
+     and old.owner_uid is distinct from auth.uid() then
+    new.members     := old.members;
+    new.owner_email := old.owner_email;
+    new.owner_id    := old.owner_id;
+  end if;
+
   return new;
 end;
 $$;

@@ -1,22 +1,4 @@
-import { test, expect } from '@playwright/test';
-
-/**
- * Performance baselines.
- *
- * This is a measurement harness, not a pass/fail correctness test — it records
- * what the pipeline actually costs on this machine and writes the numbers to
- * docs/benchmarks.json so claims about speed can cite data instead of
- * impression. The only hard assertions are sanity floors (something compiled;
- * the heap did not run away), because a benchmark that fails the suite on a
- * slow CI box would just get deleted.
- *
- * Sample sizes are deliberately small (a few reps per size) to stay within a
- * practical runtime; p95 over 5 samples is a weak estimate and is labelled as
- * such in the output. The point is an honest first baseline, not a definitive
- * profile.
- *
- * Run explicitly:  npx playwright test tests/e2e/benchmark.spec.ts
- */
+import { test, expect, type Page } from '@playwright/test';
 
 const DOCS = {
   small: String.raw`\documentclass[10pt]{article}
@@ -62,7 +44,36 @@ function summarise(samples: number[]) {
   };
 }
 
-test('measure compile latency, first-paint, outline latency and heap stability', async ({
+async function setCodeMirrorContent(page: Page, source: string): Promise<void> {
+  const editor = page.locator('.cm-content').first();
+  await expect(editor).toBeVisible({ timeout: 30_000 });
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await editor.evaluate((el, text) => {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', text);
+    const pasteEvent = new ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: dt,
+    });
+    el.dispatchEvent(pasteEvent);
+
+    if (!pasteEvent.defaultPrevented) {
+      const anyEl = el as unknown as {
+        cmView?: { view?: { state: { doc: { length: number } }; dispatch: (tr: unknown) => void } };
+      };
+      const rootEl = el.closest('.cm-editor') as unknown as typeof anyEl | null;
+      const view = anyEl.cmView?.view ?? rootEl?.cmView?.view;
+      view?.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: text },
+        userEvent: 'input.paste',
+      });
+    }
+  }, source);
+}
+
+test('measure compile latency, first-paint, structure outline latency and heap stability', async ({
   page,
 }) => {
   test.setTimeout(600_000);
@@ -91,31 +102,23 @@ test('measure compile latency, first-paint, outline latency and heap stability',
   };
 
   // --- cold start: page load through first painted page -----------------
-  const editor = page.locator('textarea.editor-code-textarea').first();
   const preview = page.getByRole('document', { name: 'Compiled document preview' });
   const canvas = preview.locator('canvas').first();
 
   const t0 = Date.now();
   await page.goto('/');
-  await expect(editor).toBeVisible({ timeout: 30_000 });
-  await editor.fill(DOCS.small);
+  await setCodeMirrorContent(page, DOCS.small);
   await expect(canvas).toBeVisible({ timeout: 180_000 });
   results.coldStartToFirstPaintMs = Date.now() - t0;
 
   // --- compile latency by size (warm engine) ---------------------------
-  // Measured from the moment the "Typesetting" status appears to the moment it
-  // clears, i.e. pure compile + render, excluding the edit debounce. Driven by
-  // the app's own isCompiling state, so it does not depend on guessing when a
-  // canvas repainted.
   const busy = page.locator('.pdf-status-busy');
   const REPS = 4;
   const latency: Record<string, ReturnType<typeof summarise>> = {};
 
   const measureCompile = async (source: string, rep: number): Promise<number> => {
     const marked = source.replace('\\begin{document}', `\\begin{document}\n% rep ${rep}`);
-    await editor.fill(marked);
-    // Compile starts after the debounce; wait for the busy pill, then time
-    // until it clears.
+    await setCodeMirrorContent(page, marked);
     await expect(busy).toBeVisible({ timeout: 30_000 });
     const start = Date.now();
     await expect(busy).toBeHidden({ timeout: 180_000 });
@@ -131,44 +134,36 @@ test('measure compile latency, first-paint, outline latency and heap stability',
   }
   results.compileLatencyMs = latency;
 
-  // --- outline latency: keystroke → draft outline paint -----------------
-  // Switch to the Outline surface and measure how fast it reflects an edit.
-  // This path is synchronous HTML, so it should be an order of magnitude below
-  // a compile.
-  const outlineTab = page.getByRole('tab', { name: 'Outline' });
-  if (await outlineTab.count()) {
-    await outlineTab.click();
+  // --- structure outline latency: edit -> React StructurePanel update ---
+  const structureTab = page.getByRole('tab', { name: /Structure|Outline/i });
+  if (await structureTab.count()) {
+    await structureTab.click();
     const outlineSamples: number[] = [];
     for (let rep = 0; rep < 5; rep++) {
       const token = `MARKER_${rep}_${Date.now()}`;
       const start = Date.now();
-      await editor.fill(DOCS.small.replace('short paragraph', token));
-      await expect(page.locator('.outline-body')).toContainText(token, { timeout: 30_000 });
+      await setCodeMirrorContent(page, DOCS.small.replace('\\section{Small}', `\\section{${token}}`));
+      await expect(page.locator('.structure-panel')).toContainText(token, { timeout: 30_000 });
       outlineSamples.push(Date.now() - start);
     }
     results.outlineLatencyMs = summarise(outlineSamples);
     await page.getByRole('tab', { name: 'PDF' }).click();
   }
 
-  // --- heap stability across repeated compiles (leak check for C14) -----
-  // The old viewer leaked a pdf.js document per compile. Compile the medium
-  // doc several times and compare the JS heap before and after; a steadily
-  // climbing heap would indicate documents are not being released.
+  // --- heap stability across repeated compiles -------------------------
   const heapReading = () =>
     page.evaluate(() => {
       const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
       return mem ? mem.usedJSHeapSize : 0;
     });
 
-  // Settle, read, churn, read again.
-  await editor.fill(DOCS.medium);
+  await setCodeMirrorContent(page, DOCS.medium);
   await expect(canvas).toBeVisible({ timeout: 180_000 });
   await page.waitForTimeout(500);
-  if (globalThis.gc) globalThis.gc();
   const heapBefore = await heapReading();
 
   for (let i = 0; i < 6; i++) {
-    await editor.fill(DOCS.medium.replace('\\begin{document}', `\\begin{document}\n% churn ${i}`));
+    await setCodeMirrorContent(page, DOCS.medium.replace('\\begin{document}', `\\begin{document}\n% churn ${i}`));
     await expect(busy).toBeVisible({ timeout: 30_000 });
     await expect(busy).toBeHidden({ timeout: 180_000 });
   }
@@ -184,15 +179,11 @@ test('measure compile latency, first-paint, outline latency and heap stability',
     note: 'performance.memory is coarse and GC-dependent; a large positive delta is a leak signal, not proof.',
   };
 
-  // --- persist ----------------------------------------------------------
   const fs = await import('node:fs/promises');
   await fs.writeFile('docs/benchmarks.json', `${JSON.stringify(results, null, 2)}\n`);
-  console.log('Benchmarks:\n', JSON.stringify(results, null, 2));
 
-  // --- sanity floors (not performance thresholds) ----------------------
   expect(results.coldStartToFirstPaintMs as number).toBeGreaterThan(0);
   expect(latency.small.median).toBeGreaterThan(0);
-  // If the heap doubled across six medium compiles, a document is leaking.
   if (results.heap && (results.heap as { available: boolean }).available) {
     const heap = results.heap as { beforeMB: number; deltaMB: number };
     expect(heap.deltaMB).toBeLessThan(Math.max(50, heap.beforeMB));

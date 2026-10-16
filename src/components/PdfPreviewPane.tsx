@@ -1,12 +1,5 @@
 /**
- * Teeex — Ultra-Smooth 60fps Compiled PDF Viewer.
- *
- * Features:
- *  - Instant 60fps CSS-transform zoom during wheel/pinch gestures, followed by
- *    debounced high-DPI vector rasterisation when the gesture settles.
- *  - Zero-flicker double-buffered canvas retention across builds.
- *  - Live 100ms elapsed timer pill during compilation so the UI feels alive.
- *  - Animated SyncTeX laser pulse on forward jump.
+ * Teeex — Compiled PDF Viewer.
  */
 
 import React, {
@@ -32,7 +25,7 @@ import {
 import { CSS_PX_PER_PT, PdfDocument, type PageGeometry } from '../services/pdfRenderer';
 import { downloadPdf } from '../services/pdfExporter';
 import { inverseSync, type ForwardMatch, type SyncTexIndex } from '../services/synctex';
-import type { EngineStatus } from '../services/latexCompiler';
+import type { EngineId, EngineStatus } from '../services/latexCompiler';
 
 interface Props {
   pdf: Uint8Array | null;
@@ -53,7 +46,13 @@ type ZoomMode = 'fit-width' | 'fit-page' | 'custom';
 
 const ZOOM_STEPS = [0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3, 4];
 const PAGE_GAP = 20;
-const OVERSCAN = 3.5;
+const OVERSCAN = 1.5;
+
+const ENGINE_LABELS: Record<EngineId, string> = {
+  pdflatex: 'pdfLaTeX',
+  xelatex: 'XeLaTeX',
+  lualatex: 'LuaLaTeX',
+};
 
 function clampZoom(value: number): number {
   return Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], Math.max(ZOOM_STEPS[0], value));
@@ -77,9 +76,7 @@ function PdfPageView({
 }: {
   doc: PdfDocument;
   geometry: PageGeometry;
-  /** Instant visual zoom (updates at 60fps during wheel/pinch). */
   displayZoom: number;
-  /** Debounced raster zoom (triggers crisp PDF.js re-render when gesture settles). */
   rasterZoom: number;
   active: boolean;
   highlights: { x: number; y: number; width: number; height: number }[];
@@ -93,10 +90,28 @@ function PdfPageView({
   const height = geometry.height * displayZoom;
 
   useEffect(() => {
-    if (!active) return;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const textContainer = textRef.current;
 
+    if (!active) {
+      // Release high-DPI bitmap backing store and text layer DOM nodes when outside window
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+      if (textContainer) {
+        textContainer.replaceChildren();
+      }
+      const maybeRelease = (doc as unknown as { releaseTextLayer?: (p: number) => void })
+        .releaseTextLayer;
+      if (typeof maybeRelease === 'function') {
+        maybeRelease.call(doc, geometry.pageNumber);
+      }
+      setPainted(false);
+      return;
+    }
+
+    if (!canvas) return;
     let cancelled = false;
 
     void (async () => {
@@ -156,12 +171,14 @@ function PdfPageView({
       onDoubleClick={handleSyncJump}
       title="Double-click (or Ctrl+Click) to jump to corresponding LaTeX source line"
     >
-      <canvas
-        ref={canvasRef}
-        className="pdf-page-canvas"
-        style={{ width: '100%', height: '100%' }}
-        aria-hidden
-      />
+      {active && (
+        <canvas
+          ref={canvasRef}
+          className="pdf-page-canvas"
+          style={{ width: '100%', height: '100%' }}
+          aria-hidden
+        />
+      )}
       {!painted && (
         <div className="pdf-page-placeholder pdf-shimmer" aria-hidden>
           <Loader2 size={16} className="spin" style={{ color: '#38bdf8', marginBottom: 6 }} />
@@ -217,12 +234,11 @@ export function PdfPreviewPane({
   const [containerHeight, setContainerHeight] = useState(0);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [activePages, setActivePages] = useState<Set<number>>(() => new Set([1, 2, 3, 4, 5]));
+  const [activePages, setActivePages] = useState<Set<number>>(() => new Set([1, 2, 3]));
   const [elapsedCompileSec, setElapsedCompileSec] = useState(0);
 
   const anchorRef = useRef<{ page: number; offset: number } | null>(null);
 
-  // Live elapsed timer during compilation so the UI feels responsive and alive
   useEffect(() => {
     if (!isCompiling) {
       setElapsedCompileSec(0);
@@ -235,7 +251,6 @@ export function PdfPreviewPane({
     return () => clearInterval(interval);
   }, [isCompiling]);
 
-  // Debounce high-DPI rasterZoom by 150ms so smooth wheel/pinch zooming runs at 60fps
   useEffect(() => {
     const timer = setTimeout(() => {
       setRasterZoom(zoom);
@@ -499,6 +514,8 @@ export function PdfPreviewPane({
     [currentPage, geometry.length, scrollToPage, stepZoom],
   );
 
+  const engineLabel = ENGINE_LABELS[status.engine] ?? status.engine;
+
   const engineMessage =
     status.phase === 'fetching'
       ? `Downloading TeX engine · ${Math.round(status.progress)}%`
@@ -572,7 +589,7 @@ export function PdfPreviewPane({
           {!isCompiling && !isDebouncing && !isStale && durationMs !== null && durationMs !== undefined && (
             <span
               className="pdf-status-duration"
-              title={`Compiled with pdfLaTeX in ${durationMs}ms`}
+              title={`Compiled with ${engineLabel} in ${durationMs}ms`}
             >
               <Sparkles size={11} style={{ color: '#38bdf8', marginRight: 4 }} />
               {durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`}

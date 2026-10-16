@@ -101,11 +101,11 @@ export function loadProjects(userEmail?: string, userName?: string): Project[] {
   const targetName = userName || sessionUser?.fullName || (targetEmail ? targetEmail.split('@')[0] : 'Author');
 
   if (targetEmail) {
-    const filtered = allProjects.filter(p => 
-      (p.ownerEmail || '').toLowerCase() === targetEmail || 
+    const filtered = allProjects.filter(p =>
+      (p.ownerEmail || '').toLowerCase() === targetEmail ||
       p.members?.some(m => (m.email || '').toLowerCase() === targetEmail)
     );
-    
+
     // If user has no projects, create a default one for them
     if (filtered.length === 0) {
       const defaultProj = createProject(
@@ -141,13 +141,13 @@ export function loadProjects(userEmail?: string, userName?: string): Project[] {
 
       if (anyChanged) {
         saveProjects(updatedAll);
-        return updatedAll.filter(p => 
-          (p.ownerEmail || '').toLowerCase() === targetEmail || 
+        return updatedAll.filter(p =>
+          (p.ownerEmail || '').toLowerCase() === targetEmail ||
           p.members?.some(m => (m.email || '').toLowerCase() === targetEmail)
         );
       }
     }
-    
+
     return filtered;
   }
 
@@ -211,7 +211,7 @@ export function createProject(
   setActiveProjectId(newId);
 
   // Background sync if connected
-  pushProjectToCloud(newProject).catch(() => {});
+  pushProjectToCloud(newProject).catch(() => { });
 
   return newProject;
 }
@@ -236,7 +236,7 @@ export function duplicateProject(projectId: string): Project | null {
   saveProjects(updated);
 
   // Background sync if connected
-  pushProjectToCloud(cloned).catch(() => {});
+  pushProjectToCloud(cloned).catch(() => { });
 
   return cloned;
 }
@@ -249,7 +249,7 @@ export function toggleArchiveProject(projectId: string): Project[] {
   saveProjects(updated);
 
   const target = updated.find(p => p.id === projectId);
-  if (target) pushProjectToCloud(target).catch(() => {});
+  if (target) pushProjectToCloud(target).catch(() => { });
 
   return updated;
 }
@@ -265,7 +265,7 @@ export function deleteProject(projectId: string): Project[] {
     (async () => {
       try {
         await supabase.from('projects').delete().eq('id', projectId);
-      } catch {}
+      } catch { }
     })();
   }
 
@@ -282,7 +282,7 @@ export function updateProject(
       return {
         ...p,
         ...patch,
-        updatedAt: 'Just now',
+        updatedAt: new Date().toISOString(),
       };
     }
     return p;
@@ -290,7 +290,7 @@ export function updateProject(
   saveProjects(updated);
 
   const target = updated.find(p => p.id === projectId);
-  if (target) pushProjectToCloud(target).catch(() => {});
+  if (target) pushProjectToCloud(target).catch(() => { });
 
   return updated;
 }
@@ -450,9 +450,15 @@ export async function syncProjectsWithCloudBiDirectional(
     if (!existing) {
       projectMap.set(cp.id, cp);
     } else {
-      // Reconcile by comparing dates
-      const localTime = new Date(existing.createdAt || 0).getTime();
-      const cloudTime = new Date(cp.createdAt || 0).getTime();
+      // Reconcile by comparing updatedAt timestamps (falling back to createdAt if updatedAt is non-ISO)
+      const parseTime = (ts?: string, fallback?: string) => {
+        const t = ts ? Date.parse(ts) : NaN;
+        if (!Number.isNaN(t)) return t;
+        const f = fallback ? Date.parse(fallback) : NaN;
+        return Number.isNaN(f) ? 0 : f;
+      };
+      const localTime = parseTime(existing.updatedAt, existing.createdAt);
+      const cloudTime = parseTime(cp.updatedAt, cp.createdAt);
       // Keep cloud if newer or equal
       if (cloudTime >= localTime) {
         projectMap.set(cp.id, {
@@ -469,7 +475,7 @@ export async function syncProjectsWithCloudBiDirectional(
   const cloudIds = new Set(cloudRes.projects.map(p => p.id));
   for (const lp of localRaw) {
     if (!cloudIds.has(lp.id) && lp.id !== 'proj-starter') {
-      pushProjectToCloud(lp).catch(() => {});
+      pushProjectToCloud(lp).catch(() => { });
       newlyPushed++;
     }
   }
@@ -484,5 +490,3 @@ export async function syncProjectsWithCloudBiDirectional(
     syncedCount: cloudRes.projects.length + newlyPushed,
   };
 }
-
-

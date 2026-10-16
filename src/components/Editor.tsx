@@ -14,7 +14,6 @@ import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile,
 import type { BibEntry } from '../services/bibtexParser';
 import { extractLatexLabels } from '../services/latexParser';
 import type { SyntaxTheme } from '../services/syntaxHighlighter';
-import { VisualEditor } from './VisualEditor';
 import { EditorMinimap } from './EditorMinimap';
 import { EditorToolbar } from './EditorToolbar';
 import { useLatexExtensions } from '../hooks/useLatexExtensions';
@@ -84,9 +83,6 @@ export const Editor: React.FC<Props> = ({
   onFormatDocument,
   onOpenImageUpload,
 }) => {
-  const [editorMode, setEditorMode] = useState<'code' | 'visual'>(() => {
-    return (localStorage.getItem('teeex_editor_mode') as 'code' | 'visual') || 'code';
-  });
   const [suggestionMode, setSuggestionMode] = useState(false);
   const [isReviewPanelOpen, setIsReviewPanelOpen] = useState(false);
   const [activeChangeId, setActiveChangeId] = useState<string | null>(null);
@@ -324,8 +320,6 @@ export const Editor: React.FC<Props> = ({
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={onToggleSidebar}
         isImageFile={isImageFile}
-        editorMode={editorMode}
-        setEditorMode={setEditorMode}
         fileName={fileName}
         lineCount={lineCount}
         peers={peers}
@@ -519,20 +513,6 @@ export const Editor: React.FC<Props> = ({
             </div>
           </div>
         </div>
-      ) : editorMode === 'visual' ? (
-        <VisualEditor
-          code={code}
-          fileName={fileName}
-          onChange={onChange}
-          files={files}
-          bibEntries={bibEntries}
-          role={role}
-          peers={peers}
-          onSwitchToCode={() => {
-            setEditorMode('code');
-            localStorage.setItem('teeex_editor_mode', 'code');
-          }}
-        />
       ) : (
         <div style={editorBodyStyle}>
           <div

@@ -190,7 +190,7 @@ const LOCAL_PROFILE_KEY = 'teeex_local_profile';
  * authentication: there is no server, so there is nothing to prove. The id is
  * random and stable per browser so project ownership strings stay consistent.
  */
-export function useLocalWorkspace(
+export function startLocalWorkspace(
   displayName: string,
   rememberMe = true,
 ): { success: true; user: UserProfile } {

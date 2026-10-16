@@ -123,7 +123,7 @@ export function App() {
         if (res.success && res.projects && res.projects.length > 0) {
           setProjects(res.projects);
         }
-      }).catch(() => {});
+      }).catch(() => { });
     } else {
       setIsAuthChecking(false);
     }
@@ -199,7 +199,7 @@ export function App() {
         folders: currFolders,
         title: currTitle,
         updatedAt: new Date().toISOString(),
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }, []);
 
@@ -333,7 +333,7 @@ export function App() {
         if (res.success && res.checkpoints && res.checkpoints.length > 0) {
           setCheckpoints(res.checkpoints);
         }
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }, [activeProjectId, currentUser?.fullName]);
 
@@ -497,7 +497,7 @@ export function App() {
     if (notice) setToast(notice);
   }, []);
 
-  // Debounce live parser to 220ms so fast typing doesn't flood worker postMessage
+  // Debounce live parser to 220ms
   const liveCompileResult = useLatexParser({
     content: activeFile.content,
     files,
@@ -506,7 +506,7 @@ export function App() {
   });
 
   const parsedDoc = liveCompileResult.parsedDoc;
-  const renderedHtml = liveCompileResult.renderedHtml;
+  const labels = liveCompileResult.labels;
 
   const diagnostics = useMemo(() => {
     const parserDiags = liveCompileResult.diagnostics;
@@ -836,7 +836,7 @@ export function App() {
     deleteCheckpoint(activeProjectIdRef.current, cpId).then(updated => {
       setCheckpoints(updated);
       setToast('Checkpoint deleted');
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   const handleSyncCheckpointsCloud = useCallback(() => {
@@ -1252,7 +1252,7 @@ export function App() {
             setTimeout(() => triggerCompile(), 80);
           }
         }
-      }).catch(() => {});
+      }).catch(() => { });
     } else {
       const loadedProjects = loadProjects(user.email, user.fullName);
       setProjects(loadedProjects);
@@ -1602,8 +1602,8 @@ export function App() {
             backgroundColor: 'var(--bg-app)',
           }}>
             <PreviewPane
-              renderedHtml={renderedHtml}
               parsedDoc={parsedDoc}
+              labels={labels}
               documentTitle={projectTitle || parsedDoc.title || 'document'}
               pdf={texEngineView.pdf}
               status={texEngineView.status}
@@ -1611,6 +1611,7 @@ export function App() {
               isDebouncing={texEngineView.isDebouncing}
               durationMs={texEngineView.durationMs}
               isStale={texEngineView.isStale}
+              rerunRequired={Boolean(texEngineView.outcome?.rerunRequired)}
               errorSummary={engineErrorSummary}
               onCompile={triggerCompile}
               syncTexIndex={syncTexIndex}

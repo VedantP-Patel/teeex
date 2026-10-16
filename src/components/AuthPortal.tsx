@@ -20,7 +20,7 @@ import {
   loginWithEmail,
   signUpWithEmail,
   requestPasswordReset,
-  useLocalWorkspace,
+  startLocalWorkspace,
 } from '../services/authService';
 
 interface Props {
@@ -136,7 +136,7 @@ export const AuthPortal: React.FC<Props> = ({ onAuthSuccess }) => {
 
   const handleUseLocalWorkspace = (e: React.FormEvent) => {
     e.preventDefault();
-    const res = useLocalWorkspace(localName, rememberMe);
+    const res = startLocalWorkspace(localName, rememberMe);
     onAuthSuccess(res.user);
   };
 

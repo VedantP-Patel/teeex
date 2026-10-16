@@ -22,10 +22,8 @@ import {
   Edit3,
   Eye,
   Plus,
-  Lock,
   WifiOff,
   ShieldCheck,
-  Code,
   Search
 } from 'lucide-react';
 import type { CompileState, Collaborator, Project, ProjectRole, UserProfile } from '../types/latex';

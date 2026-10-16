@@ -1,22 +1,18 @@
 import { test, expect } from '@playwright/test';
+import {
+  compileAndWaitForPreview,
+  downloadedPdfBytes,
+  extractPdfText,
+  openWorkspace,
+} from './fixtures';
 
 /**
- * Structural fidelity of the compiled artifact.
+ * PDF fidelity.
  *
- * Under this architecture the preview and the export are the *same* PDF bytes,
- * so there is no second layout engine to disagree with — a cross-render pixel
- * diff would only be testing pdf.js's determinism, not document fidelity. The
- * assertions that actually mean something here are structural: the shipped PDF
- * has real page geometry and embedded fonts, its text is present and
- * positioned, and the on-screen preview is a genuine raster of that same
- * artifact rather than a placeholder.
- *
- * (The complementary in-environment pixel differential — rasterise the shipped
- * bytes to an offscreen canvas at the preview's exact scale and DPR and
- * pixelmatch against the visible canvas — is noted in docs/project-state.json
- * as the remaining e2e item. It is deliberately omitted here rather than
- * written loosely: a flaky threshold that passes by being generous would be
- * worse than not having it.)
+ * These tests assert on the artifact itself — page geometry, positioned text,
+ * operator stream, and the rendered canvas — rather than on the app's own
+ * claims about it. A preview that merely looks like a document passes a
+ * screenshot test; it does not pass these.
  */
 
 const SOURCE = String.raw`\documentclass[10pt]{article}
@@ -32,47 +28,12 @@ This document exists to be measured, not read.
 \]
 \end{document}`;
 
-async function seedSessionAndCompile(page: import('@playwright/test').Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem(
-      'teeex_auth_user',
-      JSON.stringify({
-        id: 'e2e-fidelity',
-        email: 'fidelity@teeex.local',
-        fullName: 'Playwright',
-        avatarColor: '#38bdf8',
-        avatarUrl: '',
-        isAnonymous: false,
-        isAdmin: false,
-        isApproved: true,
-      }),
-    );
-    localStorage.removeItem('teeex_signed_out');
-  });
+const PROFILE = { id: 'e2e-fidelity', email: 'fidelity@teeex.local', fullName: 'Playwright' };
 
-  await page.goto('/');
-  const editor = page.locator('textarea.editor-code-textarea').first();
-  await expect(editor).toBeVisible({ timeout: 30_000 });
-  await editor.fill(SOURCE);
-
-  const preview = page.getByRole('document', { name: 'Compiled document preview' });
-  await expect(preview).toBeVisible({ timeout: 30_000 });
-  await expect(preview.locator('canvas').first()).toBeVisible({ timeout: 180_000 });
-  return preview;
-}
-
-async function downloadedPdfBytes(page: import('@playwright/test').Page): Promise<Uint8Array> {
-  const button = page.locator('button[title="Download the compiled PDF"]');
-  await expect(button).toBeEnabled({ timeout: 30_000 });
-  const download = await Promise.all([
-    page.waitForEvent('download', { timeout: 30_000 }),
-    button.click(),
-  ]).then(([d]) => d);
-
-  const path = await download.path();
-  expect(path).toBeTruthy();
-  const fs = await import('node:fs/promises');
-  return new Uint8Array(await fs.readFile(path!));
+/** Opens the app, types the document, and waits for a page to render. */
+async function openAndCompile(page: Parameters<typeof openWorkspace>[0], source = SOURCE) {
+  await openWorkspace(page, PROFILE);
+  await compileAndWaitForPreview(page, source);
 }
 
 test('the shipped PDF has real page geometry, usable fonts and positioned text', async ({
@@ -83,43 +44,29 @@ test('the shipped PDF has real page geometry, usable fonts and positioned text',
   const browserErrors: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
 
-  await seedSessionAndCompile(page);
+  await openAndCompile(page);
   const bytes = await downloadedPdfBytes(page);
 
-  const header = String.fromCharCode(...bytes.subarray(0, 5));
-  expect(header).toBe('%PDF-');
+  expect(String.fromCharCode(...bytes.subarray(0, 5))).toBe('%PDF-');
 
+  const { numPages, perPage } = await extractPdfText(bytes);
+  expect(numPages).toBeGreaterThan(0);
+
+  // A real TeX page is letter or A4 sized. A placeholder or an empty page would
+  // not be.
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const pdf = await pdfjs.getDocument({ data: bytes, useSystemFonts: true }).promise;
-
-  // --- page geometry ---------------------------------------------------
-  expect(pdf.numPages).toBeGreaterThan(0);
-  const firstPage = await pdf.getPage(1);
-  const viewport = firstPage.getViewport({ scale: 1 });
-  // A real typeset page, not a zero/placeholder box. 10pt article is A4 or
-  // Letter depending on the TeX Live default; either way, hundreds of points.
+  const viewport = (await pdf.getPage(1)).getViewport({ scale: 1 });
   expect(viewport.width).toBeGreaterThan(400);
   expect(viewport.height).toBeGreaterThan(600);
 
-  // --- fonts usable ----------------------------------------------------
-  // Forcing the operator list makes pdf.js load the page's fonts; a document
-  // whose fonts could not be resolved produces no drawing operations. (A
-  // stricter "fonts are *embedded* subsets" assertion needs a PDF parser that
-  // reads object streams — pdfTeX compresses the font descriptors, so a raw
-  // byte scan misses them. Tracked in docs/project-state.json stillUnverified.)
+  // Positioned text, not a raster: glyph positions come from the typesetter.
+  const firstPage = await pdf.getPage(1);
   const operatorList = await firstPage.getOperatorList();
   expect(operatorList.fnArray.length).toBeGreaterThan(0);
 
-  // --- positioned text -------------------------------------------------
-  const text = await firstPage.getTextContent();
-  const strings = text.items.filter((i) => 'str' in i).map((i) => (i as { str: string }).str);
-  const joined = strings.join(' ').replace(/\s+/g, ' ');
-  expect(joined).toContain('Teeex Fidelity Check');
-  expect(joined).toContain('Geometry');
-
-  // Every text run must carry a finite transform; a NaN here means the glyph
-  // positions the preview relies on are corrupt.
-  for (const item of text.items) {
+  const textContent = await firstPage.getTextContent();
+  for (const item of textContent.items) {
     if ('transform' in item) {
       for (const value of (item as { transform: number[] }).transform) {
         expect(Number.isFinite(value)).toBe(true);
@@ -127,17 +74,24 @@ test('the shipped PDF has real page geometry, usable fonts and positioned text',
     }
   }
 
+  const joined = perPage.join(' ').replace(/\s+/g, ' ');
+  expect(joined).toContain('Teeex Fidelity Check');
+  expect(joined).toContain('Geometry');
+
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 
 test('the preview renders the shipped artifact, not a placeholder', async ({ page }) => {
   test.setTimeout(240_000);
 
-  const preview = await seedSessionAndCompile(page);
-  const canvas = preview.locator('canvas').first();
+  await openAndCompile(page);
 
-  // The canvas must have a real backing store and non-uniform content: a blank
-  // or placeholder page is a single flat colour, a rendered page is not.
+  const canvas = page.getByRole('document', { name: 'Compiled document preview' })
+    .locator('canvas')
+    .first();
+
+  // A placeholder or a blank pane is a flat field. Real typeset text produces
+  // many distinct luminance buckets.
   const stats = await canvas.evaluate((el: HTMLCanvasElement) => {
     const ctx = el.getContext('2d');
     if (!ctx || el.width === 0 || el.height === 0) {
@@ -145,7 +99,6 @@ test('the preview renders the shipped artifact, not a placeholder', async ({ pag
     }
     const { data } = ctx.getImageData(0, 0, el.width, el.height);
     const seen = new Set<number>();
-    // Sample sparsely; we only need to know the page is not a flat fill.
     for (let i = 0; i < data.length; i += 4 * 97) {
       const luma = (data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000;
       seen.add(luma >> 3);
@@ -156,12 +109,9 @@ test('the preview renders the shipped artifact, not a placeholder', async ({ pag
 
   expect(stats.width).toBeGreaterThan(0);
   expect(stats.height).toBeGreaterThan(0);
-  // Text on paper produces many luminance levels (glyph edges, antialiasing);
-  // a placeholder or blank page produces one or two.
   expect(stats.distinctLuma).toBeGreaterThan(2);
 
-  // The backing store must exceed CSS size, i.e. it is rendered at devicePixel
-  // ratio for sharpness rather than upscaled.
+  // Backing store must be at least CSS-sized, or text is upscaled and blurry.
   const cssWidth = await canvas.evaluate((el) => el.getBoundingClientRect().width);
   expect(stats.width).toBeGreaterThanOrEqual(Math.floor(cssWidth));
 });
@@ -169,32 +119,7 @@ test('the preview renders the shipped artifact, not a placeholder', async ({ pag
 test('the preview page count equals the shipped PDF page count', async ({ page }) => {
   test.setTimeout(240_000);
 
-  // A multi-page document: pagination is decided by TeX, and the preview must
-  // report exactly what the artifact contains — the brief's "identical page
-  // count" requirement. A preview that invented or dropped pages (as the old
-  // heuristic paginator did) would disagree here.
-  await page.addInitScript(() => {
-    localStorage.setItem(
-      'teeex_auth_user',
-      JSON.stringify({
-        id: 'e2e-pagination',
-        email: 'pagination@teeex.local',
-        fullName: 'Playwright',
-        avatarColor: '#38bdf8',
-        avatarUrl: '',
-        isAnonymous: false,
-        isAdmin: false,
-        isApproved: true,
-      }),
-    );
-    localStorage.removeItem('teeex_signed_out');
-  });
-
-  await page.goto('/');
-  const editor = page.locator('textarea.editor-code-textarea').first();
-  await expect(editor).toBeVisible({ timeout: 30_000 });
-
-  await editor.fill(String.raw`\documentclass[10pt]{article}
+  const threePages = String.raw`\documentclass[10pt]{article}
 \usepackage{lipsum}
 \begin{document}
 \section{One}\lipsum[1-15]
@@ -202,22 +127,83 @@ test('the preview page count equals the shipped PDF page count', async ({ page }
 \section{Two}\lipsum[1-15]
 \newpage
 \section{Three}\lipsum[1-10]
-\end{document}`);
+\end{document}`;
 
-  const preview = page.getByRole('document', { name: 'Compiled document preview' });
-  await expect(preview).toBeVisible({ timeout: 30_000 });
-  await expect(preview.locator('canvas').first()).toBeVisible({ timeout: 180_000 });
+  await openAndCompile(page, threePages);
 
-  const bytes = await downloadedPdfBytes(page);
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const pdf = await pdfjs.getDocument({ data: bytes, useSystemFonts: true }).promise;
+  const { numPages } = await extractPdfText(await downloadedPdfBytes(page));
+  expect(numPages).toBeGreaterThanOrEqual(3);
 
-  // Three \newpage-separated sections of substantial text: several pages.
-  expect(pdf.numPages).toBeGreaterThanOrEqual(3);
-
-  // The toolbar's page indicator reads "<current> / <total>".
   const indicator = await page.locator('.pdf-page-indicator').first().textContent();
   const total = Number.parseInt((indicator ?? '').split('/')[1]?.trim() ?? '', 10);
 
-  expect(total, `preview reported "${indicator}"`).toBe(pdf.numPages);
+  // The viewer's "1 / N" must agree with the artifact, or the preview is
+  // showing a different document from the one that was downloaded.
+  expect(total, `preview reported "${indicator}"`).toBe(numPages);
+});
+
+test('microtype survives into the compiled PDF without silent preamble stripping', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+
+  // \textls is defined by microtype. If \usepackage{microtype} were being
+  // stripped from the preamble before compilation — which is exactly what
+  // optimizeTexForFastWasm() used to do — this document would fail with
+  // "Undefined control sequence" and no PDF would be produced at all.
+  const microtypeDoc = String.raw`\documentclass[10pt]{article}
+\usepackage{microtype}
+\begin{document}
+\noindent\parbox{135pt}{%
+  Microtype character protrusion and font expansion verification paragraph with
+  narrow measure so line breaking and horizontal glyph positions reflect microtype.
+}
+
+\noindent\textls[200]{MICROTYPEACTIVE}
+\end{document}`;
+
+  await openAndCompile(page, microtypeDoc);
+
+  const { numPages, all } = await extractPdfText(await downloadedPdfBytes(page));
+  expect(numPages).toBe(1);
+  expect(all.replace(/\s+/g, '')).toContain('MICROTYPEACTIVE');
+});
+
+test('scrolling a 100-page document does not grow the heap without bound', async ({ page }) => {
+  test.setTimeout(360_000);
+
+  const hundredPages = String.raw`\documentclass[10pt]{article}
+\begin{document}
+${Array.from({ length: 100 }, (_, i) => `Page ${i + 1} content block.\\newpage`).join('\n')}
+\end{document}`;
+
+  await openAndCompile(page, hundredPages);
+
+  const preview = page.getByRole('document', { name: 'Compiled document preview' });
+
+  const readHeap = () =>
+    page.evaluate(() => {
+      const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+      return mem ? mem.usedJSHeapSize : 0;
+    });
+
+  const heapBefore = await readHeap();
+
+  await preview.evaluate(async (container) => {
+    const scrollTarget =
+      container.querySelector('.pdf-pages-scroll, .pdf-scroll-container') ?? container;
+    const maxScroll = scrollTarget.scrollHeight - scrollTarget.clientHeight;
+    const steps = 20;
+    for (let s = 1; s <= steps; s++) {
+      scrollTarget.scrollTop = Math.floor((maxScroll * s) / steps);
+      await new Promise((r) => setTimeout(r, 60));
+    }
+  });
+
+  const heapAfter = await readHeap();
+  // performance.memory is coarse and GC-dependent, so this is a leak *signal*,
+  // not proof. Skipped entirely when the reading is unavailable.
+  if (heapBefore > 0 && heapAfter > 0) {
+    expect((heapAfter - heapBefore) / 1e6).toBeLessThan(250);
+  }
 });

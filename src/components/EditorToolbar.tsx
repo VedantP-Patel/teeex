@@ -9,7 +9,6 @@ import {
   MessageSquarePlus,
   Check,
   MessageSquare,
-  Eye,
   Code as CodeIcon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -34,8 +33,6 @@ export interface EditorToolbarProps {
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
   isImageFile: boolean;
-  editorMode: 'code' | 'visual';
-  setEditorMode: (mode: 'code' | 'visual') => void;
   fileName: string;
   lineCount: number;
   peers: Collaborator[];
@@ -71,8 +68,6 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = React.memo(({
   isSidebarOpen = true,
   onToggleSidebar,
   isImageFile,
-  editorMode,
-  setEditorMode,
   fileName,
   lineCount,
   peers,
@@ -175,7 +170,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = React.memo(({
           </button>
         )}
 
-        {isImageFile ? (
+        {isImageFile && (
           <div
             style={{
               display: 'inline-flex',
@@ -194,39 +189,6 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = React.memo(({
           >
             <ImageIcon size={11} />
             <span>Image Asset</span>
-          </div>
-        ) : (
-          <div style={segmentedControlStyle}>
-            <button
-              type="button"
-              onClick={() => {
-                setEditorMode('code');
-                localStorage.setItem('teeex_editor_mode', 'code');
-              }}
-              style={{
-                ...segmentedBtnStyle,
-                ...(editorMode === 'code' ? activeSegmentedBtnStyle : {}),
-              }}
-              title="Code Editor: High-performance CodeMirror 6 LaTeX editor"
-            >
-              <CodeIcon size={11} />
-              <span>Code</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setEditorMode('visual');
-                localStorage.setItem('teeex_editor_mode', 'visual');
-              }}
-              style={{
-                ...segmentedBtnStyle,
-                ...(editorMode === 'visual' ? activeSegmentedBtnStyle : {}),
-              }}
-              title="Visual Editor: Interactive rich-text LaTeX WYSIWYG editor"
-            >
-              <Eye size={11} />
-              <span>Visual</span>
-            </button>
           </div>
         )}
 
@@ -452,7 +414,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = React.memo(({
             </button>
           )}
         </div>
-      ) : editorMode === 'code' && (
+      ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
           {role !== 'viewer' && (
             <div style={formatGroupStyle}>
@@ -842,18 +804,6 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = React.memo(({
 
 EditorToolbar.displayName = 'EditorToolbar';
 
-const segmentedControlStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  backgroundColor: 'var(--bg-surface-2)',
-  borderRadius: 5,
-  padding: 2,
-  border: '1px solid var(--border-subtle)',
-  height: 24,
-  boxSizing: 'border-box',
-  flexShrink: 0,
-};
-
 const segmentedBtnStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
@@ -869,12 +819,6 @@ const segmentedBtnStyle: React.CSSProperties = {
   gap: 4,
   whiteSpace: 'nowrap',
   transition: 'all 0.15s ease',
-};
-
-const activeSegmentedBtnStyle: React.CSSProperties = {
-  backgroundColor: 'var(--bg-surface-0)',
-  color: 'var(--text-primary)',
-  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.25)',
 };
 
 const formatGroupStyle: React.CSSProperties = {

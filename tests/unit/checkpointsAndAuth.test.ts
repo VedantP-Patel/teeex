@@ -12,7 +12,7 @@ import {
   saveSession,
   clearSession,
   isLocalProfile,
-  useLocalWorkspace,
+  startLocalWorkspace,
 } from '../../src/services/authService';
 import type { ProjectFile, UserProfile } from '../../src/types/latex';
 
@@ -164,7 +164,7 @@ describe('Session persistence', () => {
   });
 
   it('clears session properly upon sign out', () => {
-    useLocalWorkspace('Local Author', true);
+    startLocalWorkspace('Local Author', true);
     expect(getStoredSession().user).not.toBeNull();
 
     clearSession();
@@ -173,13 +173,13 @@ describe('Session persistence', () => {
   });
 
   it('creates a local workspace with no privileges and a stable id', () => {
-    const first = useLocalWorkspace('Local Author');
+    const first = startLocalWorkspace('Local Author');
     expect(first.user.authProvider).toBe('local');
     expect(first.user.isAdmin).toBe(false);
     expect(isLocalProfile(first.user)).toBe(true);
 
     // The id is per-browser, so reopening the workspace keeps project ownership.
-    const second = useLocalWorkspace('Renamed Author');
+    const second = startLocalWorkspace('Renamed Author');
     expect(second.user.id).toBe(first.user.id);
     expect(second.user.fullName).toBe('Renamed Author');
   });
