@@ -44,56 +44,12 @@ function summarise(samples: number[]) {
   };
 }
 
-async function setCodeMirrorContent(page: Page, source: string): Promise<void> {
-  const editor = page.locator('.cm-content').first();
-  await expect(editor).toBeVisible({ timeout: 30_000 });
-  await editor.click();
-  await page.keyboard.press('ControlOrMeta+a');
-  await editor.evaluate((el, text) => {
-    const dt = new DataTransfer();
-    dt.setData('text/plain', text);
-    const pasteEvent = new ClipboardEvent('paste', {
-      bubbles: true,
-      cancelable: true,
-      clipboardData: dt,
-    });
-    el.dispatchEvent(pasteEvent);
-
-    if (!pasteEvent.defaultPrevented) {
-      const anyEl = el as unknown as {
-        cmView?: { view?: { state: { doc: { length: number } }; dispatch: (tr: unknown) => void } };
-      };
-      const rootEl = el.closest('.cm-editor') as unknown as typeof anyEl | null;
-      const view = anyEl.cmView?.view ?? rootEl?.cmView?.view;
-      view?.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: text },
-        userEvent: 'input.paste',
-      });
-    }
-  }, source);
-}
+import { openWorkspace, setEditorContent } from './fixtures';
 
 test('measure compile latency, first-paint, structure outline latency and heap stability', async ({
   page,
 }) => {
   test.setTimeout(600_000);
-
-  await page.addInitScript(() => {
-    localStorage.setItem(
-      'teeex_auth_user',
-      JSON.stringify({
-        id: 'e2e-bench',
-        email: 'bench@teeex.local',
-        fullName: 'Playwright',
-        avatarColor: '#38bdf8',
-        avatarUrl: '',
-        isAnonymous: false,
-        isAdmin: false,
-        isApproved: true,
-      }),
-    );
-    localStorage.removeItem('teeex_signed_out');
-  });
 
   const results: Record<string, unknown> = {
     machine: 'local dev (see host); single Chromium worker',
@@ -106,8 +62,12 @@ test('measure compile latency, first-paint, structure outline latency and heap s
   const canvas = preview.locator('canvas').first();
 
   const t0 = Date.now();
-  await page.goto('/');
-  await setCodeMirrorContent(page, DOCS.small);
+  await openWorkspace(page, {
+    id: 'e2e-bench',
+    email: 'bench@teeex.local',
+    fullName: 'Playwright',
+  });
+  await setEditorContent(page, DOCS.small);
   await expect(canvas).toBeVisible({ timeout: 180_000 });
   results.coldStartToFirstPaintMs = Date.now() - t0;
 
@@ -118,7 +78,8 @@ test('measure compile latency, first-paint, structure outline latency and heap s
 
   const measureCompile = async (source: string, rep: number): Promise<number> => {
     const marked = source.replace('\\begin{document}', `\\begin{document}\n% rep ${rep}`);
-    await setCodeMirrorContent(page, marked);
+    await setEditorContent(page, marked);
+    await page.keyboard.press('ControlOrMeta+Enter');
     await expect(busy).toBeVisible({ timeout: 30_000 });
     const start = Date.now();
     await expect(busy).toBeHidden({ timeout: 180_000 });
@@ -142,7 +103,7 @@ test('measure compile latency, first-paint, structure outline latency and heap s
     for (let rep = 0; rep < 5; rep++) {
       const token = `MARKER_${rep}_${Date.now()}`;
       const start = Date.now();
-      await setCodeMirrorContent(page, DOCS.small.replace('\\section{Small}', `\\section{${token}}`));
+      await setEditorContent(page, DOCS.small.replace('\\section{Small}', `\\section{${token}}`));
       await expect(page.locator('.structure-panel')).toContainText(token, { timeout: 30_000 });
       outlineSamples.push(Date.now() - start);
     }
@@ -157,13 +118,15 @@ test('measure compile latency, first-paint, structure outline latency and heap s
       return mem ? mem.usedJSHeapSize : 0;
     });
 
-  await setCodeMirrorContent(page, DOCS.medium);
+  await setEditorContent(page, DOCS.medium);
+  await page.keyboard.press('ControlOrMeta+Enter');
   await expect(canvas).toBeVisible({ timeout: 180_000 });
   await page.waitForTimeout(500);
   const heapBefore = await heapReading();
 
   for (let i = 0; i < 6; i++) {
-    await setCodeMirrorContent(page, DOCS.medium.replace('\\begin{document}', `\\begin{document}\n% churn ${i}`));
+    await setEditorContent(page, DOCS.medium.replace('\\begin{document}', `\\begin{document}\n% churn ${i}`));
+    await page.keyboard.press('ControlOrMeta+Enter');
     await expect(busy).toBeVisible({ timeout: 30_000 });
     await expect(busy).toBeHidden({ timeout: 180_000 });
   }

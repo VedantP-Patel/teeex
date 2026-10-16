@@ -185,12 +185,13 @@ class BusytexPipeline {
     }
 
     async reload_module_if_needed(cond, env, project_dir, data_packages_js) {
+        const pkgs = Array.isArray(data_packages_js) ? data_packages_js : [];
         if (cond) {
-            return this.reload_module(env, project_dir, data_packages_js, true);
+            return this.reload_module(env, project_dir, pkgs, true);
         } else if (this.Module) {
             const Module = await this.Module;
-            const enabled_packages_js = Module.data_packages_js;
-            const new_data_packages_js = data_packages_js.filter(dp => !enabled_packages_js.includes(dp));
+            const enabled_packages_js = Array.isArray(Module?.data_packages_js) ? Module.data_packages_js : [];
+            const new_data_packages_js = pkgs.filter(dp => !enabled_packages_js.includes(dp));
 
             if (new_data_packages_js.length > 0) {
                 return this.reload_module(env, project_dir, Array.from(enabled_packages_js).concat(Array.from(new_data_packages_js)), false);
@@ -200,7 +201,8 @@ class BusytexPipeline {
     }
 
     async reload_module(env, project_dir, data_packages_js = [], report_applet_versions = false) {
-        const data_packages_js_promise = data_packages_js.map(dp => this.load_package(dp));
+        const pkgs = Array.isArray(data_packages_js) ? data_packages_js : [];
+        const data_packages_js_promise = pkgs.map(dp => this.load_package(dp));
         const [em_module, wasm_module] = await Promise.all([
             this.em_module_promise,
             WebAssembly.compileStreaming ? this.wasm_module_promise : this.wasm_module_promise.then(r => r.arrayBuffer()),

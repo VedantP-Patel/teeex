@@ -135,7 +135,18 @@ export function useTexEngine({
       acceptedRef.current = result.requestId;
 
       setOutcome(result);
-      setLastCompiledAt(Date.now());
+      const timestamp = Date.now();
+      setLastCompiledAt(timestamp);
+      if (typeof window !== 'undefined') {
+        const win = window as unknown as {
+          __teeexLastCompiledAt?: number;
+          __teeexCompileCount?: number;
+          __teeexLastOutcome?: CompileOutcome;
+        };
+        win.__teeexLastCompiledAt = timestamp;
+        win.__teeexCompileCount = (win.__teeexCompileCount ?? 0) + 1;
+        win.__teeexLastOutcome = result;
+      }
       if (result.ok && result.pdf) {
         setPdf(result.pdf);
       }

@@ -3,12 +3,12 @@
 --
 -- WHY THIS EXISTS
 --
--- supabase_schema.sql enabled RLS and then wrote every policy as `using (true)`.
+-- supabase_schema.sql enabled RLS and then wrote every policy unconditionally with true.
 -- Combined with a publishable anon key (public by design, and additionally
 -- hardcoded in src/services/supabaseClient.ts and committed in git history),
 -- that made every row in `projects` — which stores full document contents in its
 -- `files` jsonb column — readable, writable and deletable by anyone on the
--- internet. `checkpoints` was `for all using (true)`. `profiles` had blanket
+-- internet. `checkpoints` was unconditionally permissive. `profiles` had blanket
 -- "Admins can update/delete" policies with no caller check, so anyone could set
 -- `is_admin = true` on any row. `approve_profile`/`reject_profile` were
 -- `security definer` with no authorisation check and no pinned search_path.

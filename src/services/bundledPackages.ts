@@ -281,9 +281,11 @@ function extractRequirements(text: string): Array<{ name: string; format: number
     add(m[1], '.cls');
   }
 
-  // `\input`/`\InputIfFileExists` carry .def and .cfg files, which is how font
-  // and driver support reaches packages like microtype and hyperref.
-  for (const m of text.matchAll(/\\(?:input|InputIfFileExists)\s*\{([^}]+)\}/g)) {
+  // `\input`/`\InputIfFileExists`/`\file_input:n` carry .def, .cfg, and .ltd files,
+  // which is how font, driver, and data support reaches packages like microtype and lipsum.
+  for (const m of text.matchAll(
+    /\\(?:input|InputIfFileExists|file_input:n|file_input:N)\s*\{([^}]+)\}/g,
+  )) {
     add(m[1], '.tex');
   }
 

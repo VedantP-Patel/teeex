@@ -76,7 +76,17 @@ then limited to the locally provisioned package set.
 
 ## Scripts
 
-CommandPurposenpm run devDev server (provisions assets first)npm run buildTypecheck and production buildnpm run engineProvision the pdfTeX engine subsetnpm run engine:fullAlso provision XeTeX and LuaHBTeXnpm run engine:verifyFail if engine assets are missing or incompletenpm testUnit and fuzz suites (vitest)npm run test:e2ePlaywright browser verification suitenpx playwright test tests/e2e/benchmark.spec.tsCapture cold-start, warm compile, and heap baselines to docs/benchmarks.jsonnpm run lintoxlint
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Dev server (provisions assets first) |
+| `npm run build` | Typecheck and production build |
+| `npm run engine` | Provision the pdfTeX engine subset |
+| `npm run engine:full` | Also provision XeTeX and LuaHBTeX |
+| `npm run engine:verify` | Fail if engine assets are missing or incomplete |
+| `npm test` | Unit and fuzz suites (vitest) |
+| `npm run test:e2e` | Playwright browser verification suite |
+| `npx playwright test tests/e2e/benchmark.spec.ts` | Capture cold-start, warm compile, and heap baselines to `docs/benchmarks.json` |
+| `npm run lint` | oxlint |
 
 ## Status
 

@@ -31,8 +31,20 @@ This document exists to be measured, not read.
 const PROFILE = { id: 'e2e-fidelity', email: 'fidelity@teeex.local', fullName: 'Playwright' };
 
 /** Opens the app, types the document, and waits for a page to render. */
-async function openAndCompile(page: Parameters<typeof openWorkspace>[0], source = SOURCE) {
-  await openWorkspace(page, PROFILE);
+async function openAndCompile(
+  page: Parameters<typeof openWorkspace>[0],
+  source = SOURCE,
+  profileId = 'e2e-fidelity',
+) {
+  await openWorkspace(
+    page,
+    {
+      id: profileId,
+      email: `${profileId}@teeex.local`,
+      fullName: 'Playwright',
+    },
+    source,
+  );
   await compileAndWaitForPreview(page, source);
 }
 
@@ -44,7 +56,7 @@ test('the shipped PDF has real page geometry, usable fonts and positioned text',
   const browserErrors: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
 
-  await openAndCompile(page);
+  await openAndCompile(page, SOURCE, 'e2e-fidelity-geom');
   const bytes = await downloadedPdfBytes(page);
 
   expect(String.fromCharCode(...bytes.subarray(0, 5))).toBe('%PDF-');
@@ -84,7 +96,7 @@ test('the shipped PDF has real page geometry, usable fonts and positioned text',
 test('the preview renders the shipped artifact, not a placeholder', async ({ page }) => {
   test.setTimeout(240_000);
 
-  await openAndCompile(page);
+  await openAndCompile(page, SOURCE, 'e2e-fidelity-raster');
 
   const canvas = page.getByRole('document', { name: 'Compiled document preview' })
     .locator('canvas')
@@ -129,7 +141,7 @@ test('the preview page count equals the shipped PDF page count', async ({ page }
 \section{Three}\lipsum[1-10]
 \end{document}`;
 
-  await openAndCompile(page, threePages);
+  await openAndCompile(page, threePages, 'e2e-fidelity-pages');
 
   const { numPages } = await extractPdfText(await downloadedPdfBytes(page));
   expect(numPages).toBeGreaterThanOrEqual(3);
@@ -162,7 +174,7 @@ test('microtype survives into the compiled PDF without silent preamble stripping
 \noindent\textls[200]{MICROTYPEACTIVE}
 \end{document}`;
 
-  await openAndCompile(page, microtypeDoc);
+  await openAndCompile(page, microtypeDoc, 'e2e-fidelity-microtype');
 
   const { numPages, all } = await extractPdfText(await downloadedPdfBytes(page));
   expect(numPages).toBe(1);
@@ -177,7 +189,7 @@ test('scrolling a 100-page document does not grow the heap without bound', async
 ${Array.from({ length: 100 }, (_, i) => `Page ${i + 1} content block.\\newpage`).join('\n')}
 \end{document}`;
 
-  await openAndCompile(page, hundredPages);
+  await openAndCompile(page, hundredPages, 'e2e-fidelity-heap');
 
   const preview = page.getByRole('document', { name: 'Compiled document preview' });
 

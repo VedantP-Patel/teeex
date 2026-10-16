@@ -220,11 +220,7 @@ export async function parseSyncTex(input: Uint8Array): Promise<SyncTexIndex> {
       if (box) boxes.push(box);
     } else if (marker === '[' || marker === 'v') {
       const box = parseRecord('vbox', line.slice(1), scale);
-      // Ignore giant full-page vbox containers (height > 400pt) because TeX stamps
-      // them with the line number where the page ended rather than the text inside!
-      if (box && box.height < 400) {
-        boxes.push(box);
-      }
+      if (box) boxes.push(box);
     }
   }
 

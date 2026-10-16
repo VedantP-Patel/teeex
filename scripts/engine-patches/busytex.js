@@ -6986,6 +6986,31 @@ changes have the same license
         var endpoint = Module.ENV['TEXLIVE_REMOTE_ENDPOINT'];
         if (!endpoint) return null;
 
+        // Never fetch local auxiliary/output files from remote or /packages/
+        var lower = name.toLowerCase();
+        if (
+          lower.endsWith('.aux') ||
+          lower.endsWith('.log') ||
+          lower.endsWith('.toc') ||
+          lower.endsWith('.lof') ||
+          lower.endsWith('.lot') ||
+          lower.endsWith('.bbl') ||
+          lower.endsWith('.blg') ||
+          lower.endsWith('.idx') ||
+          lower.endsWith('.ind') ||
+          lower.endsWith('.ilg') ||
+          lower.endsWith('.out') ||
+          lower.endsWith('.nav') ||
+          lower.endsWith('.snm') ||
+          lower.endsWith('.vrb') ||
+          lower.endsWith('.fls') ||
+          lower.endsWith('.synctex') ||
+          lower.endsWith('.synctex.gz')
+        ) {
+          KPSE_REMOTE.misses[format + '/' + name] = 1;
+          return null;
+        }
+
         // 1. Fast-path: check same-origin /packages/<name> for bundled assets (<10ms)
         try {
           var localXhr = new XMLHttpRequest();
@@ -6993,23 +7018,35 @@ changes have the same license
           localXhr.timeout = 1000;
           localXhr.responseType = 'arraybuffer';
           localXhr.send();
-          if (localXhr.status === 200 && localXhr.response && localXhr.response.byteLength > 0) {
+          var localType = localXhr.getResponseHeader('content-type') || '';
+          if (
+            localXhr.status === 200 &&
+            !localType.includes('text/html') &&
+            localXhr.response &&
+            localXhr.response.byteLength > 0
+          ) {
             var localBytes = new Uint8Array(localXhr.response);
             return KPSE_REMOTE.register(name, format, localBytes);
           }
         } catch (_localErr) {}
 
-        // 2. Fetch from remote endpoint with a 2.5s circuit breaker (never block for 30s)
+        // 2. Fetch from remote endpoint with an 8s circuit breaker (never block indefinitely)
         var url = endpoint + (endpoint.endsWith('/') ? '' : '/') + format + '/' + encodeURIComponent(name);
         var xhr = new XMLHttpRequest();
         xhr.open('GET', url, false);
-        xhr.timeout = 2500;
+        xhr.timeout = 8000;
         xhr.responseType = 'arraybuffer';
         try { xhr.send(); } catch (e) {
           KPSE_REMOTE.misses[format + '/' + name] = 1;
           return null;
         }
-        if (xhr.status === 200 && xhr.response && xhr.response.byteLength > 0) {
+        var remoteType = xhr.getResponseHeader('content-type') || '';
+        if (
+          xhr.status === 200 &&
+          !remoteType.includes('text/html') &&
+          xhr.response &&
+          xhr.response.byteLength > 0
+        ) {
           var bytes = new Uint8Array(xhr.response);
           if (typeof indexedDB !== 'undefined') {
             try {

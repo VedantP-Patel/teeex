@@ -78,11 +78,20 @@ export function useCodeMirror({
     });
 
     viewRef.current = view;
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __teeexEditorView?: EditorView }).__teeexEditorView = view;
+    }
     lastEmittedDocRef.current = code;
 
     return () => {
       view.destroy();
       viewRef.current = null;
+      if (typeof window !== 'undefined') {
+        const win = window as unknown as { __teeexEditorView?: EditorView };
+        if (win.__teeexEditorView === view) {
+          delete win.__teeexEditorView;
+        }
+      }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

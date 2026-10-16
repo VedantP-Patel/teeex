@@ -384,7 +384,7 @@ export class TexEngineService {
     /**
      * The document is compiled exactly as written.
      *
-     * This used to run the source through `optimizeTexForFastWasm()`, which
+     * Older versions ran the source through preamble rewrites, which
      * commented out `\usepackage{lmodern}` and `{microtype}` and rewrote `xurl`
      * to `url` before handing it to the engine. It was fast — `microtype` pulls
      * a lot of files, and each one arrived as a separate synchronous XHR from

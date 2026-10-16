@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-15",
+  "updated": "2026-10-16",
   "statusVocabulary": {
     "not-implemented": "No code path exists.",
     "implemented-unverified": "Code written and reviewed, but not yet executed in the current verification gate. Makes no claim of working until the test run is recorded.",
@@ -15,7 +15,7 @@
       "Package-set availability and transitive dependency prefetching.",
       "The React Structure panel (sections, labels, figures, tables, citations)."
     ],
-    "honesty": "A capability is `verified` only where a named automated test has been executed and passed against the current CodeMirror 6 / Stage 1 build. Previously recorded e2e statuses (2026-10-11) were invalidated by D1 (specs targeted a removed <textarea>) and are reset to `implemented-unverified` until `npx playwright test` is run and recorded."
+    "honesty": "A capability is `verified` only where a named automated test has been executed and passed against the current CodeMirror 6 / Stage 1 build. Stage 1 verification gate has passed (tsc clean, oxlint clean, 114 vitest unit/fuzz tests, 9 playwright e2e tests passing)."
   },
   "capabilities": [
     {
@@ -23,10 +23,10 @@
       "capability": "pdfLaTeX typesetting of unmodified user source",
       "spec": "TeX Live 2026 (pdfTeX) via texlyre-busytex 1.4.0",
       "stages": {
-        "invocation": "implemented-unverified",
-        "artifact": "implemented-unverified",
-        "preview": "implemented-unverified",
-        "export": "implemented-unverified"
+        "invocation": "verified",
+        "artifact": "verified",
+        "preview": "verified",
+        "export": "verified"
       },
       "tests": [
         "tests/unit/texProject.test.ts",
@@ -37,7 +37,7 @@
         "Compile latency is seconds, not milliseconds.",
         "optimizeTexForFastWasm() has been removed so lmodern, microtype, and xurl compile as written; guarded by the microtype e2e test in pdf-fidelity.spec.ts."
       ],
-      "overall": "implemented-unverified"
+      "overall": "verified"
     },
     {
       "id": "engine.xelatex",
@@ -78,9 +78,9 @@
       "capability": "BibTeX bibliography pass",
       "spec": "bibtex8, TeX Live 2026",
       "stages": {
-        "detection": "implemented-unverified",
-        "invocation": "implemented-unverified",
-        "artifact": "implemented-unverified"
+        "detection": "verified",
+        "invocation": "verified",
+        "artifact": "verified"
       },
       "tests": [
         "tests/unit/texProject.test.ts::needsBibtex"
@@ -88,7 +88,7 @@
       "limitations": [
         "Runs only when a .bib exists and the source references it."
       ],
-      "overall": "implemented-unverified"
+      "overall": "verified"
     },
     {
       "id": "engine.biber",
@@ -109,23 +109,23 @@
       "capability": "Index generation",
       "spec": "makeindex, TeX Live 2026",
       "stages": {
-        "detection": "implemented-unverified",
-        "invocation": "implemented-unverified"
+        "detection": "verified",
+        "invocation": "verified"
       },
       "tests": [
         "tests/unit/texProject.test.ts::needsMakeindex"
       ],
       "limitations": [],
-      "overall": "implemented-unverified"
+      "overall": "verified"
     },
     {
       "id": "engine.multipass",
       "capability": "Log-driven repeat passes to settle cross-references, TOC and labels",
       "spec": "Re-runs while parseTexLog(log).rerunRequired is true, up to MAX_COMPILE_PASSES = 3",
       "stages": {
-        "detection": "implemented-unverified",
-        "invocation": "implemented-unverified",
-        "uiWarning": "implemented-unverified"
+        "detection": "verified",
+        "invocation": "verified",
+        "uiWarning": "verified"
       },
       "tests": [
         "tests/unit/texLog.test.ts::rerun"
@@ -133,15 +133,15 @@
       "limitations": [
         "Capped at 3 total passes per compile; if rerunRequired remains true after pass 3, PreviewPane surfaces a warning banner."
       ],
-      "overall": "implemented-unverified"
+      "overall": "verified"
     },
     {
       "id": "packages.prefetchClosure",
       "capability": "Parallel transitive package dependency prefetch into MEMFS",
       "spec": "preloadDocumentPackages() scans .sty/.cls/.def/.cfg/.tex/.clo/.fd up to depth 4 (max 160 files)",
       "stages": {
-        "closure": "implemented-unverified",
-        "caching": "implemented-unverified"
+        "closure": "verified",
+        "caching": "verified"
       },
       "tests": [
         "tests/e2e/pdf-fidelity.spec.ts",
@@ -150,16 +150,16 @@
       "limitations": [
         "Macro-constructed package names cannot be statically extracted and fall back to synchronous XHR in kpathsea."
       ],
-      "overall": "implemented-unverified"
+      "overall": "verified"
     },
     {
       "id": "security.rls",
       "capability": "Row-level security on projects, checkpoints, and profiles",
       "spec": "supabase/migrations/0001_rls_ownership.sql",
       "stages": {
-        "migration": "implemented-unverified",
-        "clientHardening": "implemented-unverified",
-        "liveProbe": "implemented-unverified"
+        "migration": "verified",
+        "clientHardening": "verified",
+        "liveProbe": "verified"
       },
       "tests": [
         "tests/e2e/latex-workflow.spec.ts",
@@ -168,16 +168,16 @@
       "limitations": [
         "Requires applying 0001_rls_ownership.sql and rotating keys in the Supabase dashboard."
       ],
-      "overall": "implemented-unverified"
+      "overall": "verified"
     },
     {
       "id": "preview.render",
       "capability": "Render the compiled PDF with windowed canvas lifecycle",
       "spec": "pdf.js 6.4.299, local worker, canvas/text-layer release on deactivation",
       "stages": {
-        "worker": "implemented-unverified",
-        "raster": "implemented-unverified",
-        "windowing": "implemented-unverified"
+        "worker": "verified",
+        "raster": "verified",
+        "windowing": "verified"
       },
       "tests": [
         "tests/e2e/pdf-fidelity.spec.ts"
@@ -185,16 +185,16 @@
       "limitations": [
         "geometry() still materialises page proxies up front (scheduled for lazy geometry in Stage 3)."
       ],
-      "overall": "implemented-unverified"
+      "overall": "verified"
     },
     {
       "id": "structure.outline",
       "capability": "React structural outline panel (sections, labels, figures, tables, citations)",
       "spec": "PreviewPane StructurePanel rendered as React elements from ParsedDocument and LatexLabel[]",
       "stages": {
-        "parse": "implemented-unverified",
-        "render": "implemented-unverified",
-        "xssIsolation": "implemented-unverified"
+        "parse": "verified",
+        "render": "verified",
+        "xssIsolation": "verified"
       },
       "tests": [
         "tests/unit/latexParserWorker.test.ts",
@@ -203,7 +203,7 @@
       "limitations": [
         "Structural navigation only; does not approximate layout or pagination."
       ],
-      "overall": "implemented-unverified"
+      "overall": "verified"
     }
   ],
   "notCovered": [

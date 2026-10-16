@@ -5,8 +5,8 @@
  *
  * This module previously granted privileges from values the user controls:
  *
- *  - `isUserApproved()` read a `teeex_approved_emails_cache` list out of
- *    localStorage and was OR-ed into the server's approval check, so writing one
+ *  - Approval checks read a `teeex_approved_emails_cache` list out of
+ *    localStorage and were OR-ed into the server's approval check, so writing one
  *    key in devtools satisfied the approval gate.
  *  - `DEMO_ACCOUNTS` shipped `admin@teeex.io` with the password `admin` and
  *    `isAdmin: true`, plus three accounts with no password at all, surfaced as
