@@ -8,27 +8,25 @@
  * a build step.
  *
  * This script fetches only the subset the configured engine profile actually
- * loads, straight into `public/core/busytex/`, so the worker is served
- * same-origin and version-pinned rather than proxied from a third party at
- * runtime.
+ * loads (~159.5 MB for pdftex), straight into `public/core/busytex/`, so the
+ * worker is served same-origin and version-pinned rather than proxied from a
+ * third party at runtime.
  *
- * Everything outside the preloaded `texlive-basic` package resolves on demand
- * at compile time through the TeX Live remote endpoint (see
- * VITE_TEXLIVE_REMOTE_ENDPOINT), so this small subset does not limit which
- * packages a document may use.
+ * Cryptographic SHA-256 hashes are calculated on fetch/copy, validated against
+ * the pinned upstream golden digests, and stored in `.teeex-manifest.json`.
  *
  * Usage:
  *   node scripts/fetch-engine.mjs                  # pdftex profile (default)
- *   node scripts/fetch-engine.mjs --profile full   # + xetex/luahbtex + catalogs
+ *   node scripts/fetch-engine.mjs --profile pages  # assets <= 25MB for static Pages
  *   node scripts/fetch-engine.mjs --force          # re-download, ignore manifest
- *   node scripts/fetch-engine.mjs --verify         # check only, exit 1 if incomplete
+ *   node scripts/fetch-engine.mjs --verify         # check sizes & sha256 digests
  *
  * Env:
  *   TEEEX_ENGINE_BASE_URL   override the asset source origin
  */
 
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
@@ -41,17 +39,31 @@ const MANIFEST = join(DEST, '.teeex-manifest.json');
 const PATCHES_DIR = join(ROOT, 'scripts', 'engine-patches');
 
 /**
- * Pinned to the texlyre-busytex version in package.json. The upstream project
- * publishes these same files per release; bumping the dependency means bumping
- * this and re-running with --force.
+ * Pinned to the texlyre-busytex version in package.json.
  */
 const ENGINE_VERSION = '1.4.0';
 const DEFAULT_BASE_URL = 'https://texlyre.github.io/texlyre-busytex/core/busytex';
 
 /**
+ * Golden SHA-256 digests for official upstream texlyre-busytex@1.4.0 release files.
+ */
+const GOLDEN_UPSTREAM_DIGESTS = {
+  'biber.data': '9ea1357e6180477479b5edfe17538ba655ebebc03142a195d85fb1d47899df21',
+  'biber.js': 'f097b241ec1dfaff8c43b7c3e242a85c535d4a24b6252288da869d1a8b465c08',
+  'biber.wasm': '6c2ddccf3b95e06b419d4aee5f88ef10ddec658ce760fabb34d7145371ff18c5',
+  'busytex_biber.js': 'e1a3ff55a120e392d3a7ef27f1bff1978c7a9d5978999296e39e1cfeac01d923',
+  'busytex.wasm': '8d1988fc58cd1611c3cbd6bd986c3e607e5ff44f1d94252207ff7aae4cee72e0',
+  'texlive-basic.data': 'ccb35d98d77cbaf988e1481f8538709f72166196785cf6b8785eabe6c8fb2993',
+  'texlive-basic.js': 'd4abc2e93a1ae33099107c6ad8a61813978cd44036a95697db2f2365a393c283',
+  // Unpatched release upstream hashes for files that receive local patches:
+  'busytex.js': 'c505d883028d95bcffa692f994aa9e2c97b89022c63d8519a43c58bd715a7470',
+  'busytex_pipeline.js': '509475fdf6996e45bea5deaa2f5ca9dd1ce25d44b2208ab03b95a63123b2c6f6',
+  'busytex_worker.js': '04c77465d87885628663420838b288a6f870915995988ec7c4c320014e41b74d',
+};
+
+/**
  * Derived from BusyTexRunner.initializeWorker() / getEngineAssetNames() /
- * getBiberAssetPaths() in texlyre-busytex. If those change, this list must too —
- * which is exactly why --verify exists.
+ * getBiberAssetPaths() in texlyre-busytex.
  */
 const PROFILES = {
   pdftex: [
@@ -74,8 +86,6 @@ const PROFILES = {
     'busytex.wasm',
     'texlive-basic.js',
     'texlive-basic.data',
-    'texlive-recommended.js',
-    'texlive-recommended.data',
     'biber.js',
     'biber.wasm',
     'biber.data',
@@ -86,7 +96,6 @@ const PROFILES = {
     'busytex_biber.js',
     'busytex.js',
     'texlive-basic.js',
-    'texlive-recommended.js',
     'biber.js',
     'biber.wasm',
   ],
@@ -106,7 +115,7 @@ const isCloudflare = Boolean(
   process.env.CF_PAGES_BRANCH ||
   process.env.CLOUDFLARE_PAGES
 );
-const defaultProfile = isCloudflare ? 'pages' : 'full';
+const defaultProfile = isCloudflare ? 'pages' : 'pdftex';
 const profileName = option('profile', defaultProfile);
 const configuredBaseUrl = process.env.TEEEX_ENGINE_BASE_URL || DEFAULT_BASE_URL;
 const LOCAL_RELEASE = join(ROOT, 'tmp-busytex-assets', 'busytex');
@@ -127,6 +136,15 @@ function fail(message) {
 
 function mib(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+}
+
+async function computeSha256(filePath) {
+  const hash = createHash('sha256');
+  const stream = createReadStream(filePath);
+  for await (const chunk of stream) {
+    hash.update(chunk);
+  }
+  return hash.digest('hex');
 }
 
 async function readManifest() {
@@ -171,7 +189,6 @@ class Semaphore {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Check if a local file exists and is non-empty */
 async function getLocalFileInfo(filePath) {
   try {
     const s = await stat(filePath);
@@ -181,17 +198,20 @@ async function getLocalFileInfo(filePath) {
   }
 }
 
-/** True when every file in the profile is present at its recorded size. */
+/** True when every file in the profile matches both byte size and sha256. */
 async function isProvisioned(manifest) {
   if (!manifest) return false;
   if (manifest.engineVersion !== ENGINE_VERSION) return false;
 
   for (const name of files) {
     const recorded = manifest.files?.[name];
-    if (!recorded) return false;
+    if (!recorded || !recorded.sha256) return false;
     try {
-      const stats = await stat(join(DEST, name));
+      const filePath = join(DEST, name);
+      const stats = await stat(filePath);
       if (stats.size !== recorded.bytes) return false;
+      const actualDigest = await computeSha256(filePath);
+      if (actualDigest !== recorded.sha256) return false;
     } catch {
       return false;
     }
@@ -201,8 +221,7 @@ async function isProvisioned(manifest) {
 
 /**
  * Downloads or copies an asset to disk via a temp file so an interrupted run never leaves
- * a truncated .wasm or .data behind — those fail at WebAssembly instantiation
- * with messages that point nowhere near the real cause.
+ * a truncated .wasm or .data behind. Validates against golden upstream digests.
  */
 async function download(name, localInfo) {
   const localSource = join(LOCAL_RELEASE, name);
@@ -223,8 +242,18 @@ async function download(name, localInfo) {
           `Size mismatch copying ${name}: source=${localInfo.size}, copied=${copied.size}`
         );
       }
+
+      const digest = await computeSha256(temp);
+      const expectedDigest = GOLDEN_UPSTREAM_DIGESTS[name];
+      if (expectedDigest && digest !== expectedDigest) {
+        await rm(temp, { force: true });
+        throw new Error(
+          `Checksum mismatch copying ${name}: expected=${expectedDigest}, actual=${digest}`
+        );
+      }
+
       await rename(temp, target);
-      return { bytes: copied.size, sha256: null, source: 'local' };
+      return { bytes: copied.size, sha256: digest, source: 'local' };
     }
 
     // Remote download fallback with retry
@@ -252,8 +281,6 @@ async function download(name, localInfo) {
 
     const contentEncoding = res.headers.get('content-encoding');
     const rawContentLength = res.headers.get('content-length');
-    // Node fetch automatically decompresses gzip/br/deflate, so Content-Length
-    // reflects the compressed wire bytes while downloaded.size is uncompressed bytes.
     const expectedLength = !contentEncoding && rawContentLength
       ? parseInt(rawContentLength, 10)
       : null;
@@ -275,8 +302,17 @@ async function download(name, localInfo) {
       throw new Error(`Downloaded zero-byte asset: ${name}`);
     }
 
+    const digest = await computeSha256(temp);
+    const expectedDigest = GOLDEN_UPSTREAM_DIGESTS[name];
+    if (expectedDigest && digest !== expectedDigest) {
+      await rm(temp, { force: true });
+      throw new Error(
+        `Checksum mismatch downloading ${name}: expected=${expectedDigest}, actual=${digest}`
+      );
+    }
+
     await rename(temp, target);
-    return { bytes: downloaded.size, sha256: null, source: 'remote' };
+    return { bytes: downloaded.size, sha256: digest, source: 'remote' };
   } catch (error) {
     await rm(temp, { force: true }).catch(() => {});
     throw error;
@@ -290,11 +326,13 @@ async function applyEnginePatches() {
     const patchPath = join(PATCHES_DIR, patchName);
     const patchStat = await getLocalFileInfo(patchPath);
     if (patchStat) {
+      const destPath = join(DEST, patchName);
       await pipeline(
         createReadStream(patchPath),
-        createWriteStream(join(DEST, patchName))
+        createWriteStream(destPath)
       );
-      applied[patchName] = patchStat.size;
+      const digest = await computeSha256(destPath);
+      applied[patchName] = { size: patchStat.size, sha256: digest };
     }
   }
   return applied;
@@ -312,26 +350,30 @@ async function main() {
   if (verifyOnly) {
     const existing = await readManifest();
 
-    if (!(await isProvisioned(existing))) {
+    if (!existing || !(await isProvisioned(existing))) {
       fail(
-        'The asset manifest is missing or stale.\n' +
+        'The asset manifest is missing, corrupt, or stale.\n' +
         '         Run: node scripts/fetch-engine.mjs'
       );
     }
 
-    console.log(`  Verified ${files.length} local assets.\n`);
+    console.log(`  Verified ${files.length} local assets with SHA-256 integrity.\n`);
     return;
   }
 
   await mkdir(DEST, { recursive: true });
 
-  // When building with the 'pages' profile, clean up any existing heavy files (>25MB)
-  // so Vite does not copy them into dist/ where Cloudflare Pages would reject them.
+  // Clean up any unreferenced 205MB assets that may be lingering on disk
+  const bloatFiles = ['texlive-recommended.data', 'texlive-recommended.js', 'busytex.js.pre-diagnostic-restore'];
+  for (const b of bloatFiles) {
+    await rm(join(DEST, b), { force: true }).catch(() => {});
+  }
+
+  // When building with the 'pages' profile, clean up files >25MB
   if (profileName === 'pages') {
     const heavyFiles = [
       'busytex.wasm',
       'texlive-basic.data',
-      'texlive-recommended.data',
       'biber.data',
     ];
     for (const heavy of heavyFiles) {
@@ -361,40 +403,45 @@ async function main() {
           info.size === 0 ||
           (localSourceInfo && info.size !== localSourceInfo.size);
 
+        let sha256Digest = null;
         if (needsFetch) {
           const downloadResult = await download(name, localSourceInfo);
           info = { isFile: () => true, size: downloadResult.bytes };
+          sha256Digest = downloadResult.sha256;
+        } else {
+          sha256Digest = await computeSha256(join(DEST, name));
         }
 
         if (!info || !info.isFile() || info.size === 0) {
           fail(`Missing or empty engine asset: ${name}`);
         }
 
-        results[index] = { name, size: info.size };
+        results[index] = { name, size: info.size, sha256: sha256Digest };
       })
     )
   );
 
   const patched = await applyEnginePatches();
-  for (const [name, size] of Object.entries(patched)) {
+  for (const [name, patchInfo] of Object.entries(patched)) {
     const resIdx = results.findIndex((r) => r && r.name === name);
     if (resIdx !== -1) {
-      results[resIdx].size = size;
+      results[resIdx].size = patchInfo.size;
+      results[resIdx].sha256 = patchInfo.sha256;
     }
   }
 
   const record = {};
   let totalBytes = 0;
 
-  for (const [index, { name, size }] of results.entries()) {
+  for (const [index, { name, size, sha256 }] of results.entries()) {
     const position = `${String(index + 1).padStart(2)}/${files.length}`;
     record[name] = {
       bytes: size,
-      sha256: null,
+      sha256,
     };
     totalBytes += size;
     console.log(
-      `  ${position}  ${name.padEnd(26)}${mib(size).padStart(10)}`
+      `  ${position}  ${name.padEnd(24)} ${mib(size).padStart(9)}   sha256:${sha256.slice(0, 8)}...`
     );
   }
 
@@ -413,7 +460,7 @@ async function main() {
   );
 
   console.log(
-    `\n  Validated ${files.length} engine assets, ${mib(totalBytes)} total.`
+    `\n  Validated ${files.length} engine assets, ${mib(totalBytes)} total with SHA-256 integrity.`
   );
 }
 

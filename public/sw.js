@@ -1,13 +1,21 @@
 /**
- * Teeex — High-Speed Service Worker Cache for WASM, PDF.js, and TeX Live Packages.
- * Intercepts synchronous XHRs from busytex_worker.js and serves cached .sty/.cls/.tfm/.pfb
- * assets in <0.2ms with zero network roundtrips.
+ * Teeex — 3-Tier Partitioned Service Worker Cache with LRU Eviction & Navigation Freshness.
+ *
+ * Cache Partitioning:
+ * - CACHE_STATIC: Build-stamped application shell, JS/CSS bundles, fonts, and icons.
+ *   Purged automatically on worker activation when new deploys are detected.
+ * - CACHE_ENGINE: Version-pinned TeX engine assets (/core/busytex/*).
+ *   Preserved across application releases to avoid re-downloading ~152 MB.
+ * - CACHE_PACKAGES: Dynamic on-demand TeX Live packages (/packages/*, /api/texlive/*).
+ *   Guarded against HTML response poisoning; capped at 300 entries with LRU eviction.
  */
 
-const CACHE_STATIC = 'teeex-static-v3';
-const CACHE_TEXLIVE = 'teeex-texlive-v3';
+const CACHE_STATIC = 'teeex-static-v4-20261016';
+const CACHE_ENGINE = 'teeex-engine-v1.4.0';
+const CACHE_PACKAGES = 'teeex-packages-v1';
+const MAX_PACKAGE_ENTRIES = 300;
 
-const PRECACHE_URLS = [
+const PRECACHE_STATIC_URLS = [
   '/',
   '/index.html',
   '/favicon.svg',
@@ -16,7 +24,7 @@ const PRECACHE_URLS = [
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_STATIC).then((cache) => cache.addAll(PRECACHE_URLS).catch(() => { }))
+    caches.open(CACHE_STATIC).then((cache) => cache.addAll(PRECACHE_STATIC_URLS).catch(() => {}))
   );
 });
 
@@ -26,7 +34,7 @@ self.addEventListener('activate', (event) => {
       const keys = await caches.keys();
       await Promise.all(
         keys
-          .filter((k) => k !== CACHE_STATIC && k !== CACHE_TEXLIVE)
+          .filter((k) => k !== CACHE_STATIC && k !== CACHE_ENGINE && k !== CACHE_PACKAGES)
           .map((k) => caches.delete(k))
       );
       await self.clients.claim();
@@ -34,13 +42,18 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-function isImmutableTexAsset(pathname) {
-  return (
-    pathname.startsWith('/api/texlive/') ||
-    pathname.startsWith('/packages/') ||
-    pathname.startsWith('/core/busytex/') ||
-    pathname.startsWith('/pdfjs/')
-  );
+async function trimCache(cache, maxItems) {
+  try {
+    const keys = await cache.keys();
+    if (keys.length > maxItems) {
+      const purgeCount = Math.ceil(maxItems * 0.2); // Purge oldest 20%
+      for (let i = 0; i < purgeCount; i++) {
+        await cache.delete(keys[i]);
+      }
+    }
+  } catch {
+    // Non-fatal
+  }
 }
 
 self.addEventListener('fetch', (event) => {
@@ -49,27 +62,113 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // 1. Cache-First strategy for TeX Live packages, fonts, WASM engine, and PDF.js assets
-  if (url.origin === self.location.origin && isImmutableTexAsset(url.pathname)) {
+  // 1. Navigation requests: Network-First with 2.5s timeout, falling back to cached index.html
+  // Fixes Defect S3a (the stale-deploy trap) where users were stuck on old builds indefinitely.
+  if (
+    request.mode === 'navigate' ||
+    (url.origin === self.location.origin && (url.pathname === '/' || url.pathname === '/index.html'))
+  ) {
     event.respondWith(
       (async () => {
-        const cache = await caches.open(CACHE_TEXLIVE);
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2500);
+          const networkRes = await fetch(request, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          if (networkRes && networkRes.ok) {
+            const cache = await caches.open(CACHE_STATIC);
+            cache.put(request, networkRes.clone()).catch(() => {});
+            return networkRes;
+          }
+        } catch (_err) {
+          // Offline or network timeout — fall back to cache below
+        }
+
+        const cached = await caches.match(request);
+        if (cached) return cached;
+        const indexFallback = await caches.match('/index.html');
+        if (indexFallback) return indexFallback;
+
+        return new Response('Offline: Teeex is unavailable without network.', {
+          status: 503,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
+      })()
+    );
+    return;
+  }
+
+  // 2. TeX Engine Assets (/core/busytex/*): Cache-First in version-pinned CACHE_ENGINE
+  if (url.origin === self.location.origin && url.pathname.startsWith('/core/busytex/')) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE_ENGINE);
         const cached = await cache.match(request);
         if (cached) return cached;
 
         try {
-          const response = await fetch(request);
-          const contentType = response.headers.get('content-type') || '';
-          // Only cache valid binary/tex responses (never cache SPA index.html fallbacks)
-          if (
-            response.ok &&
-            (!contentType.includes('text/html') || url.pathname.endsWith('.html'))
-          ) {
-            cache.put(request, response.clone()).catch(() => { });
+          const res = await fetch(request);
+          const ct = res.headers.get('content-type') || '';
+          // Guard: Never cache SPA HTML fallback responses as engine binaries
+          if (res.ok && !ct.includes('text/html')) {
+            cache.put(request, res.clone()).catch(() => {});
           }
-          return response;
-        } catch (err) {
-          if (cached) return cached;
+          return res;
+        } catch (_err) {
+          return new Response('Offline: Engine asset unavailable', { status: 503 });
+        }
+      })()
+    );
+    return;
+  }
+
+  // 3. Dynamic TeX Live Packages (/packages/*, /api/texlive/*): Cache-First with LRU & HTML Poison Guard
+  if (
+    url.origin === self.location.origin &&
+    (url.pathname.startsWith('/packages/') || url.pathname.startsWith('/api/texlive/'))
+  ) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE_PACKAGES);
+        const cached = await cache.match(request);
+        if (cached) return cached;
+
+        try {
+          const res = await fetch(request);
+          const ct = res.headers.get('content-type') || '';
+          // Guard: Never cache 404 HTML fallback responses into TeX package cache
+          if (res.ok && !ct.includes('text/html')) {
+            cache.put(request, res.clone()).then(() => trimCache(cache, MAX_PACKAGE_ENTRIES)).catch(() => {});
+          }
+          return res;
+        } catch (_err) {
+          return new Response('Offline: Package unavailable', { status: 503 });
+        }
+      })()
+    );
+    return;
+  }
+
+  // 4. Content-Hashed Assets, Fonts, & PDF.js (/assets/*, /fonts/*, /pdfjs/*): Cache-First
+  if (
+    url.origin === self.location.origin &&
+    (url.pathname.startsWith('/assets/') ||
+      url.pathname.startsWith('/fonts/') ||
+      url.pathname.startsWith('/pdfjs/'))
+  ) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE_STATIC);
+        const cached = await cache.match(request);
+        if (cached) return cached;
+
+        try {
+          const res = await fetch(request);
+          if (res.ok) {
+            cache.put(request, res.clone()).catch(() => {});
+          }
+          return res;
+        } catch (_err) {
           return new Response('Offline asset unavailable', { status: 503 });
         }
       })()
@@ -77,22 +176,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. Stale-While-Revalidate for application shell & JS/CSS bundles
+  // 5. General same-origin assets: Stale-While-Revalidate
   if (url.origin === self.location.origin) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE_STATIC);
         const cached = await cache.match(request);
-        const networkPromise = fetch(request)
-          .then((response) => {
-            if (response.ok) {
-              cache.put(request, response.clone()).catch(() => { });
-            }
-            return response;
+        const netFetch = fetch(request)
+          .then((res) => {
+            if (res.ok) cache.put(request, res.clone()).catch(() => {});
+            return res;
           })
           .catch(() => cached);
-
-        return cached || networkPromise;
+        return cached || netFetch;
       })()
     );
   }

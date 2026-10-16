@@ -38,6 +38,8 @@ const ESSENTIAL_PACKAGES = [
   'algorithmic.sty',
   'algpseudocode.sty',
   'wrapfig.sty',
+  'lipsum.sty',
+  'lipsum.ltd',
 ];
 
 const UPSTREAM_BASE = 'https://texlive2026.texlyre.org/26';

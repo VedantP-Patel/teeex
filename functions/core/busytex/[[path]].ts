@@ -1,25 +1,34 @@
-// Cloudflare Pages Function: proxies /core/busytex/*
-// 1. If TEEEX_ENGINE_BUCKET is bound, serves from R2.
-// 2. Otherwise falls back to static files (for worker scripts <= 25MB).
-// 3. For large engine assets not in static bundle (>25MB), proxies from upstream and caches at Cloudflare edge.
+// Cloudflare Pages Function: /core/busytex/*
+// Dual-Mode delivery pipeline:
+// 1. If TEEEX_ENGINE_BUCKET is bound (R2 mode), serves directly from private R2 bucket.
+// 2. Otherwise serves static assets <= 25MB from the deployment bundle.
+// 3. For large engine assets (>25MB) in Zero-Credit-Card mode (no R2 bound),
+//    streams from the configured upstream engine source and caches indefinitely at Cloudflare edge.
 
 interface Env {
-  // Bound in Cloudflare Pages dashboard -> Settings -> Functions -> R2 bucket bindings
   TEEEX_ENGINE_BUCKET?: R2Bucket;
+  TEEEX_ENGINE_BASE_URL?: string;
 }
 
-const UPSTREAM_ASSET_BASE = 'https://texlyre.github.io/texlyre-busytex/core/busytex';
+const DEFAULT_UPSTREAM_BASE = 'https://texlyre.github.io/texlyre-busytex/core/busytex';
+
+function getContentType(key: string): string {
+  if (key.endsWith('.wasm')) return 'application/wasm';
+  if (key.endsWith('.data')) return 'application/octet-stream';
+  if (key.endsWith('.js')) return 'application/javascript';
+  if (key.endsWith('.json')) return 'application/json';
+  return 'application/octet-stream';
+}
 
 export const onRequest: PagesFunction<Env> = async (context) => {
   const url = new URL(context.request.url);
-  // Extract key after /core/busytex/
   const key = url.pathname.replace(/^\/core\/busytex\//, '');
 
   if (!key) {
     return new Response('Not Found', { status: 404 });
   }
 
-  // 1. Try R2 bucket first if bound
+  // 1. Priority 1: Try R2 bucket first if bound
   if (context.env?.TEEEX_ENGINE_BUCKET) {
     try {
       const object = await context.env.TEEEX_ENGINE_BUCKET.get(key);
@@ -28,8 +37,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         object.writeHttpMetadata(headers);
         headers.set('etag', object.httpEtag);
         headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-        headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
         headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+        headers.set('Content-Type', getContentType(key));
 
         const clientEtag = context.request.headers.get('if-none-match');
         if (clientEtag && clientEtag === object.httpEtag) {
@@ -39,25 +48,31 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return new Response(object.body, { headers });
       }
     } catch (_err) {
-      // Fall through on R2 error
+      // Fall through to next handler on R2 error
     }
   }
 
-  // 2. For scripts <= 25MB that are in the static bundle, serve statically
-  // Note: files > 25MB (like busytex.wasm and *.data) are not in the static bundle
+  // 2. Priority 2: Static files <= 25MB in deployment bundle
   const isHeavyFile = key.endsWith('.data') || key === 'busytex.wasm';
   if (!isHeavyFile) {
     const staticResponse = await context.next();
     const contentType = staticResponse.headers.get('content-type') || '';
-    // If the file exists statically, it will NOT be text/html (our SPA fallback is index.html)
     if (staticResponse.status === 200 && !contentType.includes('text/html')) {
-      return staticResponse;
+      const headers = new Headers(staticResponse.headers);
+      headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+      headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+      headers.set('Content-Type', getContentType(key));
+      return new Response(staticResponse.body, {
+        status: 200,
+        headers,
+      });
     }
   }
 
-  // 3. Fallback: proxy from upstream and cache for 1 year at Cloudflare edge
+  // 3. Priority 3: Zero-Credit-Card Mode (stream large files and cache at Cloudflare edge)
   try {
-    const upstreamUrl = `${UPSTREAM_ASSET_BASE}/${key}`;
+    const upstreamBase = (context.env?.TEEEX_ENGINE_BASE_URL || DEFAULT_UPSTREAM_BASE).replace(/\/+$/, '');
+    const upstreamUrl = `${upstreamBase}/${key}`;
     const upstreamRes = await fetch(upstreamUrl, {
       cf: {
         cacheTtl: 31536000,
@@ -68,11 +83,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (upstreamRes.ok && upstreamRes.body) {
       const headers = new Headers(upstreamRes.headers);
       headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-      headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
       headers.set('Cross-Origin-Resource-Policy', 'same-origin');
-      if (key.endsWith('.wasm')) headers.set('Content-Type', 'application/wasm');
-      if (key.endsWith('.data')) headers.set('Content-Type', 'application/octet-stream');
-      if (key.endsWith('.js')) headers.set('Content-Type', 'application/javascript');
+      headers.set('Content-Type', getContentType(key));
 
       return new Response(upstreamRes.body, {
         status: upstreamRes.status,
@@ -80,7 +92,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       });
     }
   } catch (_err) {
-    // Return error if upstream fetch fails
+    // Return honest 404 below
   }
 
   return new Response(`Asset not found: ${key}`, { status: 404 });

@@ -2,6 +2,9 @@
 /**
  * Teeex — Upload TeX engine assets to Cloudflare R2 bucket.
  *
+ * Uploads the provisioned, patched, and SHA-256-verified engine assets from
+ * `public/core/busytex/` to a Cloudflare R2 bucket (`TEEEX_ENGINE_BUCKET`).
+ *
  * Usage:
  *   node scripts/upload-r2.mjs
  *   node scripts/upload-r2.mjs --bucket my-custom-bucket
@@ -13,16 +16,15 @@
 
 import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readdir, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const LOCAL_RELEASE = join(ROOT, 'tmp-busytex-assets', 'busytex');
-const PUBLIC_DIR = join(ROOT, 'public', 'core', 'busytex');
-const SOURCE_DIR = existsSync(LOCAL_RELEASE) ? LOCAL_RELEASE : PUBLIC_DIR;
+const SOURCE_DIR = join(ROOT, 'public', 'core', 'busytex');
 
 const FILES_TO_UPLOAD = [
+  '.teeex-manifest.json',
   'busytex_worker.js',
   'busytex_pipeline.js',
   'busytex_biber.js',
@@ -30,8 +32,6 @@ const FILES_TO_UPLOAD = [
   'busytex.wasm',
   'texlive-basic.js',
   'texlive-basic.data',
-  'texlive-recommended.js',
-  'texlive-recommended.data',
   'biber.js',
   'biber.wasm',
   'biber.data',
@@ -57,7 +57,7 @@ async function main() {
   const files = FILES_TO_UPLOAD.filter((f) => existsSync(join(SOURCE_DIR, f)));
 
   if (files.length === 0) {
-    console.error(`No assets found in ${SOURCE_DIR}. Run "npm run engine:full" first.`);
+    console.error(`No assets found in ${SOURCE_DIR}. Run "npm run engine" first.`);
     process.exit(1);
   }
 

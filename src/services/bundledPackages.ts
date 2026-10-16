@@ -58,6 +58,8 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'algorithmic.sty', format: 26 },
   { name: 'algpseudocode.sty', format: 26 },
   { name: 'wrapfig.sty', format: 26 },
+  { name: 'lipsum.sty', format: 26 },
+  { name: 'lipsum.ltd', format: 26 },
 ];
 
 const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
@@ -73,6 +75,23 @@ const DB_NAME = 'teeex_packages_db';
 const DB_VERSION = 1;
 const STORE_PACKAGES = 'packages';
 const STORE_MISSES = 'misses';
+
+/**
+ * Sniffs response headers and binary payload to reject HTML error pages (e.g. 404 SPA fallbacks)
+ * from poisoning TeX package storage in IndexedDB and memory cache.
+ */
+export function isHtmlResponse(buf: Uint8Array, contentType?: string | null): boolean {
+  if (contentType && contentType.toLowerCase().includes('text/html')) {
+    return true;
+  }
+  if (buf.length >= 5) {
+    const head = String.fromCharCode(...buf.subarray(0, Math.min(buf.length, 64))).toLowerCase();
+    if (head.includes('<!doctype') || head.includes('<html') || head.includes('<head')) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Bounds on dependency resolution. Depth 4 covers the chains real documents
@@ -214,15 +233,18 @@ export async function getBundledPackages(): Promise<LoadedPackage[]> {
             const res = await fetch(`/packages/${pkg.name}`);
             if (res.ok) {
               const buf = new Uint8Array(await res.arrayBuffer());
-              const loaded: LoadedPackage = {
-                name: pkg.name,
-                format: pkg.format,
-                content: buf,
-                contents: buf,
-              };
-              resultsMap.set(pkg.name, loaded);
-              packageMemoryCache.set(pkg.name, buf);
-              saveToIndexedDb(loaded);
+              const ct = res.headers.get('content-type');
+              if (buf.length > 0 && !isHtmlResponse(buf, ct)) {
+                const loaded: LoadedPackage = {
+                  name: pkg.name,
+                  format: pkg.format,
+                  content: buf,
+                  contents: buf,
+                };
+                resultsMap.set(pkg.name, loaded);
+                packageMemoryCache.set(pkg.name, buf);
+                saveToIndexedDb(loaded);
+              }
             }
           } catch {
             // Ignore
@@ -322,16 +344,19 @@ async function resolveBatch(
 
         if (res.ok) {
           const buf = new Uint8Array(await res.arrayBuffer());
-          const loaded: LoadedPackage = {
-            name: target.name,
-            format: target.format,
-            content: buf,
-            contents: buf,
-          };
-          packageMemoryCache.set(target.name, buf);
-          saveToIndexedDb(loaded);
-          resolved.push(loaded);
-          return;
+          const ct = res.headers.get('content-type');
+          if (buf.length > 0 && !isHtmlResponse(buf, ct)) {
+            const loaded: LoadedPackage = {
+              name: target.name,
+              format: target.format,
+              content: buf,
+              contents: buf,
+            };
+            packageMemoryCache.set(target.name, buf);
+            saveToIndexedDb(loaded);
+            resolved.push(loaded);
+            return;
+          }
         }
 
         // Only a definitive 404 is remembered. A timeout or a 5xx used to be

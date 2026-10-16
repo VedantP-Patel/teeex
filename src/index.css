@@ -1,6 +1,49 @@
 @import "katex/dist/katex.min.css";
 
 /* ==========================================================================
+   Self-Hosted Modern Variable Fonts (100% Offline, Zero Third-Party Leaks)
+   ========================================================================== */
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('/fonts/PlusJakartaSans-Variable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-Variable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: italic;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-Italic-Variable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('/fonts/Newsreader-Variable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: italic;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('/fonts/Newsreader-Italic-Variable.woff2') format('woff2');
+}
+
+/* ==========================================================================
    Teeex Studio — Modern Editorial & Precision Engineering Design System
    No AI Slop: High-contrast, refined typography, obsidian dark, smooth micro-motion
    ========================================================================== */
