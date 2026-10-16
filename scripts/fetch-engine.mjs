@@ -48,17 +48,34 @@ const DEFAULT_BASE_URL = 'https://texlyre.github.io/texlyre-busytex/core/busytex
  * Golden SHA-256 digests for official upstream texlyre-busytex@1.4.0 release files.
  */
 const GOLDEN_UPSTREAM_DIGESTS = {
-  'biber.data': '9ea1357e6180477479b5edfe17538ba655ebebc03142a195d85fb1d47899df21',
-  'biber.js': 'f097b241ec1dfaff8c43b7c3e242a85c535d4a24b6252288da869d1a8b465c08',
-  'biber.wasm': '6c2ddccf3b95e06b419d4aee5f88ef10ddec658ce760fabb34d7145371ff18c5',
-  'busytex_biber.js': 'e1a3ff55a120e392d3a7ef27f1bff1978c7a9d5978999296e39e1cfeac01d923',
-  'busytex.wasm': '8d1988fc58cd1611c3cbd6bd986c3e607e5ff44f1d94252207ff7aae4cee72e0',
-  'texlive-basic.data': 'ccb35d98d77cbaf988e1481f8538709f72166196785cf6b8785eabe6c8fb2993',
-  'texlive-basic.js': 'd4abc2e93a1ae33099107c6ad8a61813978cd44036a95697db2f2365a393c283',
-  // Unpatched release upstream hashes for files that receive local patches:
-  'busytex.js': 'c505d883028d95bcffa692f994aa9e2c97b89022c63d8519a43c58bd715a7470',
-  'busytex_pipeline.js': '509475fdf6996e45bea5deaa2f5ca9dd1ce25d44b2208ab03b95a63123b2c6f6',
-  'busytex_worker.js': '04c77465d87885628663420838b288a6f870915995988ec7c4c320014e41b74d',
+  'biber.data': ['9ea1357e6180477479b5edfe17538ba655ebebc03142a195d85fb1d47899df21'],
+  'biber.js': [
+    'f08b8db474874ea8213ee6146847c778d5cf4e00f7856237ad7c428484948868', // remote texlyre.github.io
+    'f097b241ec1dfaff8c43b7c3e242a85c535d4a24b6252288da869d1a8b465c08', // local release
+  ],
+  'biber.wasm': ['6c2ddccf3b95e06b419d4aee5f88ef10ddec658ce760fabb34d7145371ff18c5'],
+  'busytex_biber.js': [
+    '1dfc8f07df938fde690303f67b108d8b9efc8039e60b56bac0f6586835fc7147', // remote texlyre.github.io
+    'e1a3ff55a120e392d3a7ef27f1bff1978c7a9d5978999296e39e1cfeac01d923', // local release
+  ],
+  'busytex.wasm': ['8d1988fc58cd1611c3cbd6bd986c3e607e5ff44f1d94252207ff7aae4cee72e0'],
+  'texlive-basic.data': ['ccb35d98d77cbaf988e1481f8538709f72166196785cf6b8785eabe6c8fb2993'],
+  'texlive-basic.js': [
+    '3f4f6006df549f8f36fe7262911b4b1c1943c24b9d45c9ac4521d0f09fd66fc3', // remote texlyre.github.io
+    'd4abc2e93a1ae33099107c6ad8a61813978cd44036a95697db2f2365a393c283', // local release
+  ],
+  'busytex.js': [
+    '752060769b85f104ecb314f50a77786f0f4c098e2fe539e892416b13295cb95d', // remote texlyre.github.io
+    'c505d883028d95bcffa692f994aa9e2c97b89022c63d8519a43c58bd715a7470', // local release
+  ],
+  'busytex_pipeline.js': [
+    '2625186ee7b454049b5479a7b50476369e3d9c30bc6eb9435d85067cca5cd0d2', // remote texlyre.github.io
+    '509475fdf6996e45bea5deaa2f5ca9dd1ce25d44b2208ab03b95a63123b2c6f6', // local release
+  ],
+  'busytex_worker.js': [
+    'a38e756734f99d37bbdcaf7f315e332150f9f0a45ccb2adb551e54478ba664d1', // remote texlyre.github.io
+    '04c77465d87885628663420838b288a6f870915995988ec7c4c320014e41b74d', // local release
+  ],
 };
 
 /**
@@ -244,11 +261,12 @@ async function download(name, localInfo) {
       }
 
       const digest = await computeSha256(temp);
-      const expectedDigest = GOLDEN_UPSTREAM_DIGESTS[name];
-      if (expectedDigest && digest !== expectedDigest) {
+      const expected = GOLDEN_UPSTREAM_DIGESTS[name];
+      const allowedDigests = Array.isArray(expected) ? expected : (expected ? [expected] : []);
+      if (allowedDigests.length > 0 && !allowedDigests.includes(digest)) {
         await rm(temp, { force: true });
         throw new Error(
-          `Checksum mismatch copying ${name}: expected=${expectedDigest}, actual=${digest}`
+          `Checksum mismatch copying ${name}: expected ${allowedDigests.join(' or ')}, actual=${digest}`
         );
       }
 
@@ -303,11 +321,12 @@ async function download(name, localInfo) {
     }
 
     const digest = await computeSha256(temp);
-    const expectedDigest = GOLDEN_UPSTREAM_DIGESTS[name];
-    if (expectedDigest && digest !== expectedDigest) {
+    const expected = GOLDEN_UPSTREAM_DIGESTS[name];
+    const allowedDigests = Array.isArray(expected) ? expected : (expected ? [expected] : []);
+    if (allowedDigests.length > 0 && !allowedDigests.includes(digest)) {
       await rm(temp, { force: true });
       throw new Error(
-        `Checksum mismatch downloading ${name}: expected=${expectedDigest}, actual=${digest}`
+        `Checksum mismatch downloading ${name}: expected ${allowedDigests.join(' or ')}, actual=${digest}`
       );
     }
 
