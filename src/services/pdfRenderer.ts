@@ -100,6 +100,61 @@ function isCancellation(error: unknown): boolean {
   return error instanceof RenderingCancelledException;
 }
 
+export class CanvasPool {
+  private readonly pool: Array<HTMLCanvasElement | OffscreenCanvas> = [];
+  private readonly maxPoolSize: number;
+
+  constructor(maxPoolSize = 4) {
+    this.maxPoolSize = maxPoolSize;
+  }
+
+  get size(): number {
+    return this.pool.length;
+  }
+
+  acquire(width: number, height: number): HTMLCanvasElement | OffscreenCanvas {
+    let canvas: HTMLCanvasElement | OffscreenCanvas | undefined = this.pool.pop();
+    if (!canvas) {
+      if (typeof OffscreenCanvas !== 'undefined') {
+        try {
+          canvas = new OffscreenCanvas(width, height);
+        } catch {
+          canvas = typeof document !== 'undefined' ? document.createElement('canvas') : ({ width, height } as unknown as HTMLCanvasElement);
+        }
+      } else if (typeof document !== 'undefined') {
+        canvas = document.createElement('canvas');
+      } else {
+        canvas = { width, height } as unknown as HTMLCanvasElement;
+      }
+    }
+    const c = canvas!;
+    if (c.width !== width) c.width = width;
+    if (c.height !== height) c.height = height;
+    return c;
+  }
+
+  release(canvas: HTMLCanvasElement | OffscreenCanvas): void {
+    if (this.pool.length < this.maxPoolSize) {
+      this.pool.push(canvas);
+    } else {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }
+
+  clear(): void {
+    while (this.pool.length > 0) {
+      const c = this.pool.pop();
+      if (c) {
+        c.width = 0;
+        c.height = 0;
+      }
+    }
+  }
+}
+
+export const sharedCanvasPool = new CanvasPool(4);
+
 export class PdfDocument {
   private readonly doc: PDFDocumentProxy;
   private readonly loadingTask: PDFDocumentLoadingTask;
@@ -257,16 +312,17 @@ export class PdfDocument {
     const pixelWidth = Math.max(1, Math.floor(viewport.width * ratio));
     const pixelHeight = Math.max(1, Math.floor(viewport.height * ratio));
 
-    // Render to an offscreen staging canvas so the visible canvas never blanks out
-    const offscreen = document.createElement('canvas');
-    offscreen.width = pixelWidth;
-    offscreen.height = pixelHeight;
-    const offscreenCtx = offscreen.getContext('2d', { alpha: false });
-    if (!offscreenCtx) return false;
+    // Acquire an offscreen staging canvas from the pool to avoid DOM churn and memory leaks
+    const offscreen = sharedCanvasPool.acquire(pixelWidth, pixelHeight);
+    const offscreenCtx = offscreen.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+    if (!offscreenCtx) {
+      sharedCanvasPool.release(offscreen);
+      return false;
+    }
 
     const task = page.render({
       canvas: null,
-      canvasContext: offscreenCtx,
+      canvasContext: offscreenCtx as any,
       viewport,
       transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
     });
@@ -292,9 +348,7 @@ export class PdfDocument {
       throw error;
     } finally {
       if (this.tasks.get(pageNumber) === task) this.tasks.delete(pageNumber);
-      // Release offscreen backing store memory immediately
-      offscreen.width = 0;
-      offscreen.height = 0;
+      sharedCanvasPool.release(offscreen);
     }
   }
 

@@ -6,7 +6,6 @@ import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { registerServiceWorker } from './services/serviceWorker'
 import { texEngine } from './services/latexCompiler'
-import { prewarmPdfRenderer } from './services/pdfRenderer'
 
 // Kick off Service Worker immediately
 registerServiceWorker().catch(() => {});
@@ -15,12 +14,12 @@ registerServiceWorker().catch(() => {});
 if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
   window.requestIdleCallback(() => {
     texEngine.prewarm('pdflatex');
-    prewarmPdfRenderer();
+    import('./services/pdfRenderer').then((m) => m.prewarmPdfRenderer()).catch(() => {});
   }, { timeout: 1200 });
 } else {
   setTimeout(() => {
     texEngine.prewarm('pdflatex');
-    prewarmPdfRenderer();
+    import('./services/pdfRenderer').then((m) => m.prewarmPdfRenderer()).catch(() => {});
   }, 300);
 }
 

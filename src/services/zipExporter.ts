@@ -1,4 +1,3 @@
-import JSZip from 'jszip';
 import type { ProjectFile } from '../types/latex';
 import { dataUrlToUint8Array } from './virtualFileSystem';
 
@@ -7,6 +6,7 @@ import { dataUrlToUint8Array } from './virtualFileSystem';
  * Ready for submission to arXiv, IEEE, ACM, or Overleaf.
  */
 export async function exportProjectAsZip(projectTitle: string, files: ProjectFile[]): Promise<void> {
+  const { default: JSZip } = await import('jszip');
   const zip = new JSZip();
 
   for (const file of files) {

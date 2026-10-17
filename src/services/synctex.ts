@@ -31,6 +31,10 @@ export interface SyncTexIndex {
   version: number;
   files: Map<number, string>;
   pages: Map<number, SyncTexBox[]>;
+  /** Fast O(1) lookup by tag and source line */
+  lineIndex?: Map<number, Map<number, Array<{ page: number; box: SyncTexBox }>>>;
+  /** Sorted unique line numbers per tag for fast binary search */
+  sortedLines?: Map<number, number[]>;
 }
 
 export interface ForwardMatch {
@@ -224,7 +228,33 @@ export async function parseSyncTex(input: Uint8Array): Promise<SyncTexIndex> {
     }
   }
 
-  return { version, files, pages };
+  // Build fast O(1) lineIndex and sorted line numbers for sub-millisecond forward lookup
+  const lineIndex = new Map<number, Map<number, Array<{ page: number; box: SyncTexBox }>>>();
+
+  for (const [page, pBoxes] of pages) {
+    for (const box of pBoxes) {
+      if (box.kind === 'vbox') continue;
+      let fileMap = lineIndex.get(box.tag);
+      if (!fileMap) {
+        fileMap = new Map();
+        lineIndex.set(box.tag, fileMap);
+      }
+      let lineList = fileMap.get(box.line);
+      if (!lineList) {
+        lineList = [];
+        fileMap.set(box.line, lineList);
+      }
+      lineList.push({ page, box });
+    }
+  }
+
+  const sortedLines = new Map<number, number[]>();
+  for (const [tag, fileMap] of lineIndex) {
+    const sorted = Array.from(fileMap.keys()).sort((a, b) => a - b);
+    sortedLines.set(tag, sorted);
+  }
+
+  return { version, files, pages, lineIndex, sortedLines };
 }
 
 function tagFor(index: SyncTexIndex, file: string): number | null {
@@ -239,6 +269,27 @@ function tagFor(index: SyncTexIndex, file: string): number | null {
   return null;
 }
 
+export function findNearestLine(sorted: number[], target: number): number | null {
+  if (sorted.length === 0) return null;
+  let low = 0;
+  let high = sorted.length - 1;
+
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const val = sorted[mid];
+    if (val === target) return val;
+    if (val < target) low = mid + 1;
+    else high = mid - 1;
+  }
+
+  if (low >= sorted.length) return sorted[high];
+  if (high < 0) return sorted[low];
+
+  const diffLow = Math.abs(sorted[low] - target);
+  const diffHigh = Math.abs(sorted[high] - target);
+  return diffLow < diffHigh ? sorted[low] : sorted[high];
+}
+
 export function forwardSync(
   index: SyncTexIndex,
   file: string,
@@ -247,6 +298,40 @@ export function forwardSync(
   const tag = tagFor(index, file);
   if (tag === null) return null;
 
+  // 1. Fast O(1) / O(log N) lookup if lineIndex is available
+  if (index.lineIndex && index.sortedLines) {
+    const fileMap = index.lineIndex.get(tag);
+    const sorted = index.sortedLines.get(tag);
+
+    if (fileMap && sorted && sorted.length > 0) {
+      let targetLine = line;
+      let exact = fileMap.has(line);
+
+      if (!exact) {
+        const nearest = findNearestLine(sorted, line);
+        if (nearest !== null) {
+          targetLine = nearest;
+        }
+      }
+
+      const entries = fileMap.get(targetLine);
+      if (entries && entries.length > 0) {
+        const page = entries[0].page;
+        const pageEntries = entries.filter((e) => e.page === page);
+        const hboxes = pageEntries.filter((e) => e.box.kind === 'hbox').map((e) => e.box);
+        const rectBoxes = hboxes.length > 0 ? hboxes : pageEntries.map((e) => e.box);
+
+        return {
+          page,
+          rects: rectBoxes.slice(0, 6).map(boxToRect),
+          matchedLine: targetLine,
+          exact,
+        };
+      }
+    }
+  }
+
+  // 2. Fallback path for manually constructed mock indexes without lineIndex
   let best: { page: number; boxes: SyncTexBox[]; line: number } | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
 
@@ -295,10 +380,19 @@ export function inverseSync(
   const primaryBoxes = boxes.filter((b) => b.kind !== 'vbox');
   const candidates = primaryBoxes.length > 0 ? primaryBoxes : boxes;
 
+  // Spatial candidate pruning on dense pages: only test boxes within vertical reach (80pt)
+  let candidateList = candidates;
+  if (candidates.length > 80) {
+    const nearby = candidates.filter((b) => Math.abs(b.y - y) <= 80);
+    if (nearby.length > 0) {
+      candidateList = nearby;
+    }
+  }
+
   let bestContainingHbox: { box: SyncTexBox; score: number } | null = null;
   let bestNearest: { box: SyncTexBox; score: number } | null = null;
 
-  for (const box of candidates) {
+  for (const box of candidateList) {
     const file = index.files.get(box.tag);
     // Ignore boxes originating from internal .aux / .toc / .sty / .cls files
     if (!file || !file.endsWith('.tex')) continue;

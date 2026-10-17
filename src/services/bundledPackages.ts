@@ -60,6 +60,13 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'wrapfig.sty', format: 26 },
   { name: 'lipsum.sty', format: 26 },
   { name: 'lipsum.ltd', format: 26 },
+  { name: 'totpages.sty', format: 26 },
+  { name: 'environ.sty', format: 26 },
+  { name: 'ACM-Reference-Format.bst', format: 26 },
+  { name: 'program.sty', format: 26 },
+  { name: 'breakurl.sty', format: 26 },
+  { name: 'sn-jnl.cls', format: 26 },
+  { name: 'sn-basic.bst', format: 26 },
 ];
 
 const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));

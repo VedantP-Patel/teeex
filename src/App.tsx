@@ -384,10 +384,13 @@ export function App() {
   }, [activeProjectId, currentUser?.fullName]);
 
   // Periodic autosaving of history (automatic checkpoints every 90s if files changed)
-  const lastAutoCheckpointTimeRef = useRef<number>(Date.now());
+  const lastAutoCheckpointTimeRef = useRef<number>(0);
   const lastAutoCheckpointFilesRef = useRef<ProjectFile[]>(files);
 
   useEffect(() => {
+    if (lastAutoCheckpointTimeRef.current === 0) {
+      lastAutoCheckpointTimeRef.current = Date.now();
+    }
     const interval = setInterval(() => {
       const now = Date.now();
       const elapsed = now - lastAutoCheckpointTimeRef.current;

@@ -40,14 +40,28 @@ const ESSENTIAL_PACKAGES = [
   'wrapfig.sty',
   'lipsum.sty',
   'lipsum.ltd',
+  'totpages.sty',
+  'environ.sty',
+  'ACM-Reference-Format.bst',
+  'program.sty',
+  'breakurl.sty',
 ];
 
 const UPSTREAM_BASE = 'https://texlive2026.texlyre.org/26';
+const SPECIAL_SOURCES = {
+  'sn-jnl.cls': 'https://raw.githubusercontent.com/godkingjay/springer-nature-latex-template/master/sn-jnl.cls',
+  'sn-basic.bst': 'https://raw.githubusercontent.com/godkingjay/springer-nature-latex-template/master/sn-basic.bst',
+};
 
 async function main() {
-  console.log(`Downloading ${ESSENTIAL_PACKAGES.length} essential packages into ${PACKAGES_DIR}...`);
+  const allTargets = [
+    ...ESSENTIAL_PACKAGES.map((pkg) => ({ name: pkg, url: `${UPSTREAM_BASE}/${pkg}` })),
+    ...Object.entries(SPECIAL_SOURCES).map(([pkg, url]) => ({ name: pkg, url })),
+  ];
 
-  for (const pkg of ESSENTIAL_PACKAGES) {
+  console.log(`Downloading ${allTargets.length} packages into ${PACKAGES_DIR}...`);
+
+  for (const { name: pkg, url } of allTargets) {
     const dest = path.join(PACKAGES_DIR, pkg);
     if (fs.existsSync(dest) && fs.statSync(dest).size > 100) {
       console.log(`[skip] ${pkg} already exists (${fs.statSync(dest).size} bytes)`);
@@ -55,7 +69,6 @@ async function main() {
     }
 
     try {
-      const url = `${UPSTREAM_BASE}/${pkg}`;
       const res = await fetch(url);
       if (!res.ok) {
         console.warn(`[fail] ${pkg} returned status ${res.status}`);

@@ -2,12 +2,15 @@
  * Teeex — PDF preview shell and React structural outline panel.
  */
 
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState, lazy, Suspense } from 'react';
 import { AlertTriangle, BookOpen, FileCode2, FileText, Hash, Loader2 } from 'lucide-react';
 import type { LatexLabel, ParsedDocument } from '../types/latex';
 import type { SyncTexIndex, ForwardMatch } from '../services/synctex';
 import type { EngineStatus } from '../services/latexCompiler';
-import { PdfPreviewPane } from './PdfPreviewPane';
+
+const PdfPreviewPane = lazy(() =>
+  import('./PdfPreviewPane').then((m) => ({ default: m.PdfPreviewPane }))
+);
 
 type Surface = 'pdf' | 'outline';
 
@@ -318,20 +321,39 @@ export function PreviewPane({
         }}
       >
         {pdf ? (
-          <PdfPreviewPane
-            pdf={pdf}
-            status={status}
-            isCompiling={isCompiling}
-            isDebouncing={isDebouncing}
-            durationMs={durationMs}
-            isStale={isStale}
-            errorSummary={errorSummary}
-            documentTitle={documentTitle}
-            onCompile={onCompile}
-            syncTexIndex={syncTexIndex}
-            forwardTarget={forwardTarget}
-            onInverseSync={onInverseSync}
-          />
+          <Suspense
+            fallback={
+              <div
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  color: 'var(--text-muted)',
+                  fontSize: 12,
+                }}
+              >
+                <Loader2 size={18} className="spin" color="#38bdf8" />
+                <span>Initializing PDF Viewer…</span>
+              </div>
+            }
+          >
+            <PdfPreviewPane
+              pdf={pdf}
+              status={status}
+              isCompiling={isCompiling}
+              isDebouncing={isDebouncing}
+              durationMs={durationMs}
+              isStale={isStale}
+              errorSummary={errorSummary}
+              documentTitle={documentTitle}
+              onCompile={onCompile}
+              syncTexIndex={syncTexIndex}
+              forwardTarget={forwardTarget}
+              onInverseSync={onInverseSync}
+            />
+          </Suspense>
         ) : (
           <div
             style={{

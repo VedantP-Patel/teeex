@@ -41,12 +41,14 @@ export function dataUrlToUint8Array(dataUrl: string): Uint8Array {
  * Converts raw Uint8Array binary bytes into a browser Data URL.
  */
 export function uint8ArrayToDataUrl(bytes: Uint8Array, mimeType: string = 'image/png'): string {
-  let binary = '';
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const CHUNK_SIZE = 0x8000; // 32768
+  const chunks: string[] = [];
+  const len = bytes.length;
+  for (let i = 0; i < len; i += CHUNK_SIZE) {
+    const sub = bytes.subarray(i, Math.min(i + CHUNK_SIZE, len));
+    chunks.push(String.fromCharCode.apply(null, sub as unknown as number[]));
   }
-  const base64 = btoa(binary);
+  const base64 = btoa(chunks.join(''));
   return `data:${mimeType};base64,${base64}`;
 }
 

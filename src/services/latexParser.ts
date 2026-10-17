@@ -882,57 +882,74 @@ export function cleanLatexInline(text: string): string {
   return cleaned;
 }
 
-export function extractLatexLabels(files: ProjectFile[]): LatexLabel[] {
-  const labels: LatexLabel[] = [];
+const labelFileCache = new Map<string, { content: string; labels: LatexLabel[] }>();
 
-  for (const file of files) {
-    if (!file.content) continue;
-    const shielded = shieldVerbatimBlocks(file.content);
-    const lines = shielded.split('\n');
-    const origLines = file.content.split('\n');
+export function extractLatexLabelsForFile(file: ProjectFile): LatexLabel[] {
+  if (!file.content) return [];
+  const fileKey = file.id || file.name;
+  const cached = labelFileCache.get(fileKey);
+  if (cached && cached.content === file.content) {
+    return cached.labels;
+  }
 
-    for (let i = 0; i < lines.length; i++) {
-      const lineText = lines[i];
-      const match = lineText.match(/\\label\s*\{/);
-      if (match && match.index !== undefined) {
-        const braceStart = match.index + match[0].length - 1;
-        const braced = extractBalancedBracedGroup(origLines[i], braceStart);
-        if (braced) {
-          const key = braced.content.trim();
-          let type: LatexLabel['type'] = 'other';
-          if (key.startsWith('sec:') || key.startsWith('subsec:')) type = 'section';
-          else if (key.startsWith('fig:')) type = 'figure';
-          else if (key.startsWith('tab:')) type = 'table';
-          else if (key.startsWith('eq:')) type = 'equation';
-          else if (key.startsWith('thm:') || key.startsWith('lem:') || key.startsWith('def:')) type = 'theorem';
-          else if (key.startsWith('alg:')) type = 'algorithm';
+  const fileLabels: LatexLabel[] = [];
+  const shielded = shieldVerbatimBlocks(file.content);
+  const lines = shielded.split('\n');
+  const origLines = file.content.split('\n');
 
-          let caption = '';
-          const start = Math.max(0, i - 3);
-          const end = Math.min(origLines.length - 1, i + 3);
-          for (let j = start; j <= end; j++) {
-            const capMatch = origLines[j].match(/\\caption\s*\{/) || origLines[j].match(/\\(?:section|subsection)\*?\s*\{/);
-            if (capMatch && capMatch.index !== undefined) {
-              const capBraceStart = capMatch.index + capMatch[0].length - 1;
-              const capBraced = extractBalancedBracedGroup(origLines[j], capBraceStart);
-              if (capBraced) {
-                caption = cleanLatexInline(capBraced.content);
-                break;
-              }
+  for (let i = 0; i < lines.length; i++) {
+    const lineText = lines[i];
+    const match = lineText.match(/\\label\s*\{/);
+    if (match && match.index !== undefined) {
+      const braceStart = match.index + match[0].length - 1;
+      const braced = extractBalancedBracedGroup(origLines[i], braceStart);
+      if (braced) {
+        const key = braced.content.trim();
+        let type: LatexLabel['type'] = 'other';
+        if (key.startsWith('sec:') || key.startsWith('subsec:')) type = 'section';
+        else if (key.startsWith('fig:')) type = 'figure';
+        else if (key.startsWith('tab:')) type = 'table';
+        else if (key.startsWith('eq:')) type = 'equation';
+        else if (key.startsWith('thm:') || key.startsWith('lem:') || key.startsWith('def:')) type = 'theorem';
+        else if (key.startsWith('alg:')) type = 'algorithm';
+
+        let caption = '';
+        const start = Math.max(0, i - 3);
+        const end = Math.min(origLines.length - 1, i + 3);
+        for (let j = start; j <= end; j++) {
+          const capMatch = origLines[j].match(/\\caption\s*\{/) || origLines[j].match(/\\(?:section|subsection)\*?\s*\{/);
+          if (capMatch && capMatch.index !== undefined) {
+            const capBraceStart = capMatch.index + capMatch[0].length - 1;
+            const capBraced = extractBalancedBracedGroup(origLines[j], capBraceStart);
+            if (capBraced) {
+              caption = cleanLatexInline(capBraced.content);
+              break;
             }
           }
-
-          labels.push({
-            key,
-            type,
-            caption: caption || undefined,
-            line: i + 1,
-            fileName: file.name,
-          });
         }
+
+        fileLabels.push({
+          key,
+          type,
+          caption: caption || undefined,
+          line: i + 1,
+          fileName: file.name,
+        });
       }
     }
   }
 
+  labelFileCache.set(fileKey, { content: file.content, labels: fileLabels });
+  return fileLabels;
+}
+
+export function extractLatexLabels(files: ProjectFile[]): LatexLabel[] {
+  const labels: LatexLabel[] = [];
+  for (const file of files) {
+    const fileLabels = extractLatexLabelsForFile(file);
+    for (let k = 0; k < fileLabels.length; k++) {
+      labels.push(fileLabels[k]);
+    }
+  }
   return labels;
 }

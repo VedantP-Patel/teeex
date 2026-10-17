@@ -50,7 +50,7 @@ test.describe('@remote on-demand package resolution', () => {
     expect(failedRequests, `Package fetch failures:\n${failedRequests.join('\n')}`).toEqual([]);
   });
 
-  test.fixme(
+  test(
     'an acmart (sigconf) document resolves and typesets two columns',
     async ({ page }) => {
       test.setTimeout(360_000);
@@ -86,7 +86,7 @@ test.describe('@remote on-demand package resolution', () => {
     },
   );
 
-  test.fixme('an sn-jnl document resolves and typesets', async ({ page }) => {
+  test('an sn-jnl document resolves and typesets', async ({ page }) => {
     test.setTimeout(360_000);
 
     await openWorkspace(page, { id: 'e2e-snjnl', email: 'e2e-snjnl@teeex.local', fullName: 'Playwright' });

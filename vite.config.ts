@@ -38,6 +38,34 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (
+            id.includes('node_modules/react/') ||
+            id.includes('node_modules/react-dom/') ||
+            id.includes('node_modules/scheduler/')
+          ) {
+            return 'react-vendor';
+          }
+          if (id.includes('node_modules/pdfjs-dist')) {
+            return 'pdfjs';
+          }
+          if (
+            id.includes('node_modules/@codemirror') ||
+            id.includes('node_modules/codemirror') ||
+            id.includes('node_modules/@lezer')
+          ) {
+            return 'codemirror';
+          }
+          if (
+            id.includes('node_modules/yjs') ||
+            id.includes('node_modules/y-codemirror.next') ||
+            id.includes('node_modules/y-protocols') ||
+            id.includes('node_modules/lib0')
+          ) {
+            return 'yjs-collab';
+          }
+          if (id.includes('node_modules/jszip')) {
+            return 'jszip';
+          }
           if (id.includes('node_modules/katex')) {
             return 'katex';
           }
