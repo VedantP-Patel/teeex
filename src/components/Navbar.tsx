@@ -25,9 +25,13 @@ import {
   WifiOff,
   ShieldCheck,
   Search,
-  Cat
+  Cat,
+  DownloadCloud
 } from 'lucide-react';
 import type { CompileState, Collaborator, Project, ProjectRole, UserProfile } from '../types/latex';
+import type { EngineStatus } from '../services/latexCompiler';
+import { usePwaInstall } from '../hooks/usePwaInstall';
+import { EngineWarmupBadge } from './EngineWarmupBadge';
 
 interface Props {
   projectTitle: string;
@@ -61,6 +65,7 @@ interface Props {
   isOffline?: boolean;
   isDeskPetEnabled?: boolean;
   onToggleDeskPet?: () => void;
+  engineStatus?: EngineStatus;
 }
 
 export const Navbar: React.FC<Props> = ({
@@ -93,7 +98,9 @@ export const Navbar: React.FC<Props> = ({
   currentRole,
   isEncrypted: _isEncrypted,
   isOffline,
+  engineStatus,
 }) => {
+  const { isInstallable, isInstalled, installApp } = usePwaInstall();
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const [isInsertDropdownOpen, setIsInsertDropdownOpen] = useState(false);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
@@ -332,6 +339,11 @@ export const Navbar: React.FC<Props> = ({
           )}
         </div>
 
+        {/* TeX Live WebAssembly Engine Warmup & Telemetry Capsule */}
+        {engineStatus && (
+          <EngineWarmupBadge status={engineStatus} isOffline={isOffline} />
+        )}
+
         {/* Command Palette Trigger Pill (Cmd+K / Ctrl+K) */}
         {onOpenCommandPalette && (
           <button
@@ -463,6 +475,20 @@ export const Navbar: React.FC<Props> = ({
           <FolderArchive size={11} color="#38bdf8" />
           <span>ZIP</span>
         </button>
+
+        {/* PWA App Install Action */}
+        {isInstallable && !isInstalled && (
+          <button
+            type="button"
+            onClick={installApp}
+            className="pwa-install-btn"
+            title="Install Teeex Desktop App (PWA)"
+            aria-label="Install Teeex Desktop App"
+          >
+            <DownloadCloud size={12} />
+            <span>Install App</span>
+          </button>
+        )}
 
         {/* Theme Toggle */}
         <button

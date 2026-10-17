@@ -1,0 +1,47 @@
+{
+  "name": "Teeex — Real-Time Collaborative LaTeX IDE",
+  "short_name": "Teeex",
+  "description": "Browser-first LaTeX editor with real WebAssembly pdfLaTeX typesetting, instant PDF previews, and multi-user CRDT collaboration.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "theme_color": "#090d16",
+  "background_color": "#090d16",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New LaTeX Document",
+      "url": "/?action=new",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Projects Hub",
+      "url": "/?action=projects",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "/",
+      "name": "LaTeX Document",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }],
+      "accept": {
+        "text/x-tex": [".tex", ".ltx", ".sty", ".cls"],
+        "text/plain": [".bib"]
+      }
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "categories": ["education", "productivity", "utilities"]
+}

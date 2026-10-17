@@ -34,6 +34,9 @@ export interface EngineStatus {
   progress: number;
   engine: EngineId;
   error?: string;
+  loadedBytes?: number;
+  totalBytes?: number;
+  speedMbps?: number;
 }
 
 export interface CompileInput {
@@ -193,7 +196,17 @@ export class TexEngineService {
   }
 
   private async initialiseRunner(engine: EngineId): Promise<BusyTexRunner> {
-    this.setStatus({ phase: 'fetching', progress: 0, engine });
+    const ESTIMATED_TOTAL_BYTES = 127_694_000; // ~121.8 MB uncompressed engine + basic data
+    const downloadStartTime = Date.now();
+
+    this.setStatus({
+      phase: 'fetching',
+      progress: 0,
+      engine,
+      loadedBytes: 0,
+      totalBytes: ESTIMATED_TOTAL_BYTES,
+      speedMbps: 0,
+    });
 
     const config: BusyTexConfig = {
       busytexBasePath: ENGINE_BASE_PATH,
@@ -204,10 +217,18 @@ export class TexEngineService {
       ],
       catalogDataPackages: [],
       onDownloadProgress: ({ percent }) => {
+        const clampedPercent = Math.max(0, Math.min(100, percent));
+        const loadedBytes = Math.round((clampedPercent / 100) * ESTIMATED_TOTAL_BYTES);
+        const elapsedSec = Math.max(0.1, (Date.now() - downloadStartTime) / 1000);
+        const speedMbps = Number(((loadedBytes / elapsedSec) / (1024 * 1024)).toFixed(1));
+
         this.setStatus({
           phase: 'fetching',
-          progress: Math.max(0, Math.min(100, percent)),
+          progress: clampedPercent,
           engine,
+          loadedBytes,
+          totalBytes: ESTIMATED_TOTAL_BYTES,
+          speedMbps,
         });
       },
     };
@@ -215,6 +236,14 @@ export class TexEngineService {
     try {
       const runner = new BusyTexRunner(config);
       await runner.initialize(true);
+
+      this.setStatus({
+        phase: 'ready',
+        progress: 100,
+        engine,
+        loadedBytes: ESTIMATED_TOTAL_BYTES,
+        totalBytes: ESTIMATED_TOTAL_BYTES,
+      });
 
       const mountedSet = new Set<string>();
       this.mountedPackagesByEngine.set(engine, mountedSet);

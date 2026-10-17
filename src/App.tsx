@@ -19,6 +19,7 @@ import { ModalContainer } from './components/modals/ModalContainer';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { useGlobalKeyboardShortcuts } from './hooks/useGlobalKeyboardShortcuts';
 import { useResizableSplit } from './hooks/useResizableSplit';
+import { useFileHandling } from './hooks/useFileHandling';
 
 import { formatLatexCode } from './services/latexFormatter';
 import { logAuditAction } from './services/auditService';
@@ -466,6 +467,28 @@ export function App() {
       );
     },
   });
+
+  useFileHandling(
+    useCallback((file) => {
+      setFiles((prev) => {
+        const existing = prev.find((f) => f.name === file.name);
+        if (existing) {
+          return prev.map((f) =>
+            f.name === file.name ? { ...f, content: file.content } : f
+          );
+        }
+        const isBib = file.name.endsWith('.bib');
+        const newFile: ProjectFile = {
+          id: `file-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
+          name: file.name,
+          content: file.content,
+          type: isBib ? 'bib' : 'tex',
+        };
+        return [...prev, newFile];
+      });
+      setToast(`Opened file "${file.name}" via desktop handler`);
+    }, [])
+  );
   const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -1677,6 +1700,7 @@ export function App() {
         isOffline={isOffline}
         isDeskPetEnabled={deskPet.isEnabled}
         onToggleDeskPet={deskPet.toggleEnabled}
+        engineStatus={texEngineView.status}
       />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>

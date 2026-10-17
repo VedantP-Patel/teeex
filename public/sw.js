@@ -10,7 +10,7 @@
  *   Guarded against HTML response poisoning; capped at 300 entries with LRU eviction.
  */
 
-const CACHE_STATIC = 'teeex-static-v4-20261016';
+const CACHE_STATIC = 'teeex-static-v5-20261017';
 const CACHE_ENGINE = 'teeex-engine-v1.4.0';
 const CACHE_PACKAGES = 'teeex-packages-v1';
 const MAX_PACKAGE_ENTRIES = 300;
@@ -20,6 +20,11 @@ const PRECACHE_STATIC_URLS = [
   '/index.html',
   '/favicon.svg',
 ];
+
+let swChannel = null;
+try {
+  swChannel = new BroadcastChannel('teeex_sw_channel');
+} catch {}
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -41,6 +46,26 @@ self.addEventListener('activate', (event) => {
     })()
   );
 });
+
+self.addEventListener('message', async (event) => {
+  if (event.data?.type === 'GET_ENGINE_STATUS') {
+    try {
+      const cache = await caches.open(CACHE_ENGINE);
+      const wasm = await cache.match('/core/busytex/busytex.wasm');
+      const data = await cache.match('/core/busytex/texlive-basic.data');
+      event.ports?.[0]?.postMessage({
+        isCached: Boolean(wasm && data),
+        hasWasm: Boolean(wasm),
+        hasData: Boolean(data),
+      });
+    } catch {
+      event.ports?.[0]?.postMessage({ isCached: false });
+    }
+  } else if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 
 async function trimCache(cache, maxItems) {
   try {
@@ -112,6 +137,9 @@ self.addEventListener('fetch', (event) => {
           // Guard: Never cache SPA HTML fallback responses as engine binaries
           if (res.ok && !ct.includes('text/html')) {
             cache.put(request, res.clone()).catch(() => {});
+            try {
+              swChannel?.postMessage({ type: 'ENGINE_ASSET_CACHED', url: url.pathname });
+            } catch {}
           }
           return res;
         } catch (_err) {
