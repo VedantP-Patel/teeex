@@ -502,5 +502,305 @@ describe('TeXCat Desk Companion (useDeskPet & DeskPet)', () => {
       expect(localStorage.getItem('teeex_desk_pet_volume')).toBe('0.85');
     });
   });
+
+  describe('Stage 15: Roaming Modes (Dock Patrol vs. Desktop Free-Roam)', () => {
+    beforeEach(() => {
+      localStorage.setItem('teeex_desk_pet_enabled', 'true');
+    });
+
+    it('defaults to dock roam mode and persists to localStorage', async () => {
+      await mountHook();
+      expect(currentHook.roamMode).toBe('dock');
+    });
+
+    it('toggles roam mode between dock and free roam', async () => {
+      await mountHook();
+      expect(currentHook.roamMode).toBe('dock');
+
+      await act(async () => {
+        currentHook.toggleRoamMode();
+      });
+      expect(currentHook.roamMode).toBe('free');
+      expect(localStorage.getItem('teeex_desk_pet_roam_mode')).toBe('free');
+
+      await act(async () => {
+        currentHook.toggleRoamMode();
+      });
+      expect(currentHook.roamMode).toBe('dock');
+      expect(localStorage.getItem('teeex_desk_pet_roam_mode')).toBe('dock');
+    });
+
+    it('triggerRoam initiates walking and resolves cleanly with landing', async () => {
+      await mountHook();
+      expect(currentHook.state).toBe('idle');
+
+      await act(async () => {
+        currentHook.triggerRoam();
+      });
+      expect(currentHook.state).toBe('walk');
+
+      // Fast-forward walk and landing duration to settle back to idle
+      await act(async () => {
+        vi.advanceTimersByTime(3500);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+  });
+
+  describe('Stage 15: Feline Mischief & Annoyance Animations', () => {
+    beforeEach(() => {
+      localStorage.setItem('teeex_desk_pet_enabled', 'true');
+    });
+
+    it('triggers knock-mug animation for 2.4s', async () => {
+      await mountHook();
+      expect(currentHook.state).toBe('idle');
+
+      await act(async () => {
+        currentHook.triggerKnockMug();
+      });
+      expect(currentHook.state).toBe('knock-mug');
+
+      await act(async () => {
+        vi.advanceTimersByTime(2400);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+
+    it('triggers swat-cursor animation for 1.8s', async () => {
+      await mountHook();
+      expect(currentHook.state).toBe('idle');
+
+      await act(async () => {
+        currentHook.triggerSwatCursor();
+      });
+      expect(currentHook.state).toBe('swat-cursor');
+
+      await act(async () => {
+        vi.advanceTimersByTime(1800);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+
+    it('triggers belly-flop animation for 2.6s', async () => {
+      await mountHook();
+      expect(currentHook.state).toBe('idle');
+
+      await act(async () => {
+        currentHook.triggerBellyFlop();
+      });
+      expect(currentHook.state).toBe('belly-flop');
+
+      await act(async () => {
+        vi.advanceTimersByTime(2600);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+
+    it('triggers peek-a-boo hiding animation for 2.6s', async () => {
+      await mountHook();
+      expect(currentHook.state).toBe('idle');
+
+      await act(async () => {
+        currentHook.triggerPeekABoo();
+      });
+      expect(currentHook.state).toBe('peek-a-boo');
+
+      await act(async () => {
+        vi.advanceTimersByTime(2600);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+
+    it('triggers ear-scratch animation for 2.2s', async () => {
+      await mountHook();
+      expect(currentHook.state).toBe('idle');
+
+      await act(async () => {
+        currentHook.triggerEarScratch();
+      });
+      expect(currentHook.state).toBe('ear-scratch');
+
+      await act(async () => {
+        vi.advanceTimersByTime(2200);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+
+    it('triggers nap-yawn animation for 2.4s', async () => {
+      await mountHook();
+      expect(currentHook.state).toBe('idle');
+
+      await act(async () => {
+        currentHook.triggerNapYawn();
+      });
+      expect(currentHook.state).toBe('nap-yawn');
+
+      await act(async () => {
+        vi.advanceTimersByTime(2400);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+  });
+
+  describe('Stage 15: Interactive Toys & Treats', () => {
+    beforeEach(() => {
+      localStorage.setItem('teeex_desk_pet_enabled', 'true');
+    });
+
+    it('triggers laser chase mode and resolves after 4.5s', async () => {
+      await mountHook();
+      expect(currentHook.isLaserActive).toBe(false);
+
+      await act(async () => {
+        currentHook.triggerLaser();
+      });
+      expect(currentHook.isLaserActive).toBe(true);
+      expect(currentHook.state).toBe('laser-chase');
+
+      await act(async () => {
+        vi.advanceTimersByTime(4500);
+      });
+      expect(currentHook.isLaserActive).toBe(false);
+      expect(currentHook.state).toBe('idle');
+    });
+
+    it('triggers \\hbox cardboard box sit for 3.4s', async () => {
+      await mountHook();
+      expect(currentHook.state).toBe('idle');
+
+      await act(async () => {
+        currentHook.triggerBox();
+      });
+      expect(currentHook.state).toBe('box-sit');
+
+      await act(async () => {
+        vi.advanceTimersByTime(3400);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+
+    it('triggers golden fish snack treat feast for 2.8s', async () => {
+      await mountHook();
+      expect(currentHook.state).toBe('idle');
+
+      await act(async () => {
+        currentHook.triggerFish();
+      });
+      expect(currentHook.state).toBe('fish-feast');
+
+      await act(async () => {
+        vi.advanceTimersByTime(2800);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+
+    it('triggers Donald Knuth $2.56 Bug Reward Check celebration for 3.6s', async () => {
+      await mountHook();
+      expect(currentHook.state).toBe('idle');
+
+      await act(async () => {
+        currentHook.triggerKnuthCelebration();
+      });
+      expect(currentHook.state).toBe('knuth-check');
+
+      await act(async () => {
+        vi.advanceTimersByTime(3600);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+  });
+
+  describe('Stage 15: Fluid State Transitions', () => {
+    beforeEach(() => {
+      localStorage.setItem('teeex_desk_pet_enabled', 'true');
+    });
+
+    it('activates isTransitioning for 180ms during state morphs', async () => {
+      await mountHook();
+      expect(currentHook.isTransitioning).toBe(false);
+
+      await act(async () => {
+        currentHook.triggerNapYawn();
+      });
+      expect(currentHook.isTransitioning).toBe(true);
+
+      await act(async () => {
+        vi.advanceTimersByTime(180);
+      });
+      expect(currentHook.isTransitioning).toBe(false);
+    });
+  });
+
+  describe('Stage 15: Component Keyboard Shortcuts & Quick Toys', () => {
+    it('handles keyboard shortcuts for interactive toys', async () => {
+      const mockTriggerLaser = vi.fn();
+      const mockTriggerBox = vi.fn();
+      const mockTriggerFish = vi.fn();
+      const mockTriggerKnuth = vi.fn();
+      const mockTriggerPeek = vi.fn();
+      const mockToggleRoam = vi.fn();
+
+      await act(async () => {
+        root.render(
+          React.createElement(DeskPet, {
+            isEnabled: true,
+            state: 'idle',
+            direction: 'right',
+            pacingOffset: 0,
+            isSleeping: false,
+            isReducedMotion: false,
+            isPaused: false,
+            petCount: 0,
+            triggerLaser: mockTriggerLaser,
+            triggerBox: mockTriggerBox,
+            triggerFish: mockTriggerFish,
+            triggerKnuthCelebration: mockTriggerKnuth,
+            triggerPeekABoo: mockTriggerPeek,
+            toggleRoamMode: mockToggleRoam,
+          })
+        );
+      });
+
+      const mascot = container.querySelector('[role="img"]') as HTMLElement;
+      expect(mascot).not.toBeNull();
+
+      // Trigger 'l' for laser
+      await act(async () => {
+        mascot.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true }));
+      });
+      expect(mockTriggerLaser).toHaveBeenCalledTimes(1);
+
+      // Trigger 'b' for box
+      await act(async () => {
+        mascot.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true }));
+      });
+      expect(mockTriggerBox).toHaveBeenCalledTimes(1);
+
+      // Trigger 'f' for fish treat
+      await act(async () => {
+        mascot.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', bubbles: true }));
+      });
+      expect(mockTriggerFish).toHaveBeenCalledTimes(1);
+
+      // Trigger 'k' for Knuth celebration
+      await act(async () => {
+        mascot.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }));
+      });
+      expect(mockTriggerKnuth).toHaveBeenCalledTimes(1);
+
+      // Trigger 'p' for peek-a-boo
+      await act(async () => {
+        mascot.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true }));
+      });
+      expect(mockTriggerPeek).toHaveBeenCalledTimes(1);
+
+      // Trigger 'r' for roam mode toggle
+      await act(async () => {
+        mascot.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
+      });
+      expect(mockToggleRoam).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 

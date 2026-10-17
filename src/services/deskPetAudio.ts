@@ -354,6 +354,212 @@ export class DeskPetAudioEngine {
   }
 
   /**
+   * Procedural Feline Meow: Generates a resonant cat meow using modulated sine wave and vocal formants.
+   */
+  public playMeow(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      // Pitch glide: 520Hz -> 840Hz -> 410Hz
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(520, now);
+      osc.frequency.linearRampToValueAtTime(840, now + 0.18);
+      osc.frequency.exponentialRampToValueAtTime(410, now + 0.42);
+
+      // Resonant formant filter
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(1100, now);
+      filter.Q.setValueAtTime(2.5, now);
+
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.getDestination(ctx));
+
+      osc.start(now);
+      osc.stop(now + 0.48);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Sleepy Yawn Sigh: Soft descending breathy tone.
+   */
+  public playYawnSigh(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(620, now);
+      osc.frequency.exponentialRampToValueAtTime(220, now + 0.65);
+
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.08, now + 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+
+      osc.connect(gain);
+      gain.connect(this.getDestination(ctx));
+
+      osc.start(now);
+      osc.stop(now + 0.72);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Ceramic Coffee Mug Clink: High chime tap followed by soft surface thud.
+   */
+  public playMugClink(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+
+      // Sharp ceramic clink (1420Hz)
+      osc1.type = 'triangle';
+      osc1.frequency.setValueAtTime(1420, now);
+      gain1.gain.setValueAtTime(0.15, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+      osc1.connect(gain1);
+      gain1.connect(this.getDestination(ctx));
+      osc1.start(now);
+      osc1.stop(now + 0.15);
+
+      // Low surface knock
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(210, now + 0.08);
+      osc2.frequency.exponentialRampToValueAtTime(80, now + 0.22);
+      gain2.gain.setValueAtTime(0.12, now + 0.08);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+      osc2.connect(gain2);
+      gain2.connect(this.getDestination(ctx));
+      osc2.start(now + 0.08);
+      osc2.stop(now + 0.24);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Laser Pointer Chirp: High-frequency modulated laser dot peep.
+   */
+  public playLaserChirp(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(780, now);
+      osc.frequency.linearRampToValueAtTime(1240, now + 0.07);
+      osc.frequency.exponentialRampToValueAtTime(540, now + 0.18);
+
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      osc.connect(gain);
+      gain.connect(this.getDestination(ctx));
+
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Fish Treat Crunch: Crispy wooden snack munch sound.
+   */
+  public playTreatCrunch(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      [0, 0.09, 0.19].forEach((offset, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(idx === 1 ? 460 : 380, now + offset);
+        osc.frequency.exponentialRampToValueAtTime(120, now + offset + 0.06);
+
+        gain.gain.setValueAtTime(0.12, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.06);
+
+        osc.connect(gain);
+        gain.connect(this.getDestination(ctx));
+
+        osc.start(now + offset);
+        osc.stop(now + offset + 0.07);
+      });
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Cardboard Box Thud: Hollow box landing impact.
+   */
+  public playBoxThud(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(120, now);
+      osc.frequency.exponentialRampToValueAtTime(45, now + 0.18);
+
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      osc.connect(gain);
+      gain.connect(this.getDestination(ctx));
+
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
    * Suspend context on tab backgrounding.
    */
   public handleVisibilityChange(hidden: boolean): void {

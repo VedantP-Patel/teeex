@@ -10,7 +10,23 @@ export type DeskPetActionState =
   | 'compile-warning'
   | 'compile-fail'
   | 'knuth-texbook'
+  | 'knuth-check'
   | 'yarn-chase'
+  | 'laser-chase'
+  | 'laser-pounce'
+  | 'box-sit'
+  | 'fish-feast'
+  | 'tail-chase'
+  | 'curious-peep'
+  | 'peek-a-boo'
+  | 'swat-cursor'
+  | 'knock-mug'
+  | 'nap-yawn'
+  | 'belly-flop'
+  | 'ear-scratch'
+  | 'coffee-sip'
+  | 'tail-flick'
+  | 'origami-crane'
   | 'sleep'
   | 'waking-stretch'
   | 'lifted-scruff'
@@ -20,6 +36,8 @@ export type DeskPetActionState =
   | 'butterfly-bat'
   | 'face-wash'
   | 'fling-air';
+
+export type DeskPetRoamMode = 'dock' | 'free';
 
 export type DeskPetSkin = 'tuxedo' | 'ginger' | 'calico' | 'siamese' | 'cyberpunk';
 export const DESK_PET_SKINS: DeskPetSkin[] = ['tuxedo', 'ginger', 'calico', 'siamese', 'cyberpunk'];
@@ -88,6 +106,24 @@ export interface UseDeskPetReturn {
   triggerPet: () => void;
   wakeUp: () => void;
   toggleSleep: () => void;
+  // Stage 15 additions:
+  roamMode: DeskPetRoamMode;
+  setRoamMode: (mode: DeskPetRoamMode) => void;
+  toggleRoamMode: () => void;
+  isTransitioning: boolean;
+  isLaserActive: boolean;
+  laserCoords: { x: number; y: number };
+  triggerLaser: () => void;
+  triggerBox: () => void;
+  triggerFish: () => void;
+  triggerKnuthCelebration: () => void;
+  triggerPeekABoo: () => void;
+  triggerSwatCursor: () => void;
+  triggerKnockMug: () => void;
+  triggerBellyFlop: () => void;
+  triggerEarScratch: () => void;
+  triggerNapYawn: () => void;
+  triggerRoam: () => void;
 }
 
 const STORAGE_KEY = 'teeex_desk_pet_enabled';
@@ -98,6 +134,7 @@ const ACCESSORY_STORAGE_KEY = 'teeex_desk_pet_accessory';
 const PERCH_X_STORAGE_KEY = 'teeex_desk_pet_perch_x';
 const PERCH_Y_STORAGE_KEY = 'teeex_desk_pet_perch_y';
 const SNAPPED_STORAGE_KEY = 'teeex_desk_pet_is_snapped';
+const ROAM_MODE_STORAGE_KEY = 'teeex_desk_pet_roam_mode';
 
 export function useDeskPet({
   compileStatus = 'idle',
@@ -320,7 +357,7 @@ export function useDeskPet({
     }
   }, []);
 
-  // 6. Action state & physics
+  // 6. Action state, physics & transitions
   const [state, setState] = useState<DeskPetActionState>('idle');
   const [direction, setDirection] = useState<'left' | 'right'>('right');
   const [pacingOffset, setPacingOffset] = useState<number>(0);
@@ -329,7 +366,50 @@ export function useDeskPet({
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragTilt, setDragTilt] = useState<number>(0);
+  const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
   const [currentDreamFormula, setCurrentDreamFormula] = useState<string>(MATH_DREAM_FORMULAS[0]);
+
+  // Stage 15: Roam Mode ('dock' | 'free')
+  const [roamMode, setRoamModeState] = useState<DeskPetRoamMode>(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const saved = window.localStorage.getItem(ROAM_MODE_STORAGE_KEY);
+        if (saved === 'free' || saved === 'dock') return saved as DeskPetRoamMode;
+      }
+    } catch {
+      // Ignore
+    }
+    return 'dock';
+  });
+
+  const setRoamMode = useCallback((mode: DeskPetRoamMode) => {
+    setRoamModeState(mode);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(ROAM_MODE_STORAGE_KEY, mode);
+      }
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  const toggleRoamMode = useCallback(() => {
+    setRoamModeState(prev => {
+      const next = prev === 'dock' ? 'free' : 'dock';
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(ROAM_MODE_STORAGE_KEY, next);
+        }
+      } catch {
+        // Ignore
+      }
+      return next;
+    });
+  }, []);
+
+  // Stage 15: Red Laser Pointer Tracking Mode
+  const [isLaserActive, setIsLaserActive] = useState<boolean>(false);
+  const [laserCoords, setLaserCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const dragStartRef = useRef<{
     clientX: number;
@@ -345,10 +425,11 @@ export function useDeskPet({
 
   // References for active timers
   const stateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loafTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const randomIdleIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const walkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const organicScheduleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const walkStepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dreamIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevCompileStatusRef = useRef<string>(compileStatus);
@@ -361,7 +442,33 @@ export function useDeskPet({
       clearTimeout(stateTimerRef.current);
       stateTimerRef.current = null;
     }
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
   }, []);
+
+  // Smooth State Transition Helper (triggers 180ms ease blending)
+  const transitionTo = useCallback((nextState: DeskPetActionState, durationMs?: number, nextCallback?: () => void) => {
+    clearStateTimer();
+
+    setIsTransitioning(true);
+    transitionTimerRef.current = setTimeout(() => {
+      setIsTransitioning(false);
+    }, 180);
+
+    setState(nextState);
+
+    if (durationMs) {
+      stateTimerRef.current = setTimeout(() => {
+        if (nextCallback) {
+          nextCallback();
+        } else {
+          setState('idle');
+        }
+      }, durationMs);
+    }
+  }, [clearStateTimer]);
 
   const setIsEnabled = useCallback((enabled: boolean) => {
     if (enabled) {
@@ -419,6 +526,66 @@ export function useDeskPet({
     };
   }, []);
 
+  // Inactivity & Loaf Progression: idle -> loaf (18s) -> sleep (45s)
+  const resetInactivityTimer = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+
+    if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    if (loafTimerRef.current) clearTimeout(loafTimerRef.current);
+
+    // 18s idle loaf trigger
+    loafTimerRef.current = setTimeout(() => {
+      clearStateTimer();
+      if (organicScheduleTimerRef.current) {
+        clearTimeout(organicScheduleTimerRef.current);
+        organicScheduleTimerRef.current = null;
+      }
+      setState(current => {
+        const nonInterruptible: DeskPetActionState[] = [
+          'compiling-scholar',
+          'compile-success',
+          'compile-fail',
+          'typing-paws',
+          'yarn-chase',
+          'laser-chase',
+          'box-sit',
+          'fish-feast',
+          'knuth-check',
+          'lifted-scruff',
+          'sleep',
+        ];
+        if (!nonInterruptible.includes(current)) {
+          return 'loaf';
+        }
+        return current;
+      });
+    }, 18000);
+
+    // 45s sleep trigger
+    inactivityTimerRef.current = setTimeout(() => {
+      clearStateTimer();
+      if (organicScheduleTimerRef.current) {
+        clearTimeout(organicScheduleTimerRef.current);
+        organicScheduleTimerRef.current = null;
+      }
+      setState(current => {
+        const nonInterruptible: DeskPetActionState[] = [
+          'compiling-scholar',
+          'compile-success',
+          'compile-fail',
+          'typing-paws',
+          'yarn-chase',
+          'laser-chase',
+          'lifted-scruff',
+        ];
+        if (!nonInterruptible.includes(current)) {
+          return 'sleep';
+        }
+        return current;
+      });
+    }, inactivitySleepMs);
+  }, [isEnabled, isPaused, inactivitySleepMs, clearStateTimer]);
+
   // Tab visibility listener (zero CPU/timer consumption when hidden)
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -428,8 +595,8 @@ export function useDeskPet({
         clearStateTimer();
         if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
         if (loafTimerRef.current) clearTimeout(loafTimerRef.current);
-        if (walkIntervalRef.current) clearInterval(walkIntervalRef.current);
-        if (randomIdleIntervalRef.current) clearInterval(randomIdleIntervalRef.current);
+        if (organicScheduleTimerRef.current) clearTimeout(organicScheduleTimerRef.current);
+        if (walkStepTimerRef.current) clearTimeout(walkStepTimerRef.current);
         if (dreamIntervalRef.current) clearInterval(dreamIntervalRef.current);
       } else {
         setIsPaused(false);
@@ -444,35 +611,7 @@ export function useDeskPet({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [clearStateTimer]);
-
-  // Inactivity & Loaf Progression: idle -> loaf (18s) -> sleep (45s)
-  const resetInactivityTimer = useCallback(() => {
-    if (!isEnabled || isPaused) return;
-
-    if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
-    if (loafTimerRef.current) clearTimeout(loafTimerRef.current);
-
-    // 18s idle loaf trigger
-    loafTimerRef.current = setTimeout(() => {
-      setState(current => {
-        if (current === 'idle' || current === 'walk') {
-          return 'loaf';
-        }
-        return current;
-      });
-    }, 18000);
-
-    // 45s sleep trigger
-    inactivityTimerRef.current = setTimeout(() => {
-      setState(current => {
-        if (current === 'idle' || current === 'walk' || current === 'loaf') {
-          return 'sleep';
-        }
-        return current;
-      });
-    }, inactivitySleepMs);
-  }, [isEnabled, isPaused, inactivitySleepMs]);
+  }, [clearStateTimer, resetInactivityTimer]);
 
   const wakeUp = useCallback(() => {
     resetInactivityTimer();
@@ -510,37 +649,6 @@ export function useDeskPet({
       }
     });
   }, [isEnabled, isPaused, clearStateTimer]);
-
-  // Randomized Organic Idle Behaviors (every 14–22s while sitting idle)
-  useEffect(() => {
-    if (!isEnabled || isPaused || isReducedMotion) {
-      if (randomIdleIntervalRef.current) clearInterval(randomIdleIntervalRef.current);
-      return;
-    }
-
-    randomIdleIntervalRef.current = setInterval(() => {
-      setState(cur => {
-        if (cur === 'idle' && !isTypingRef.current && !isDragging) {
-          const roll = Math.random();
-          if (roll < 0.33) {
-            setTimeout(() => setState(c => (c === 'yoga-stretch' ? 'idle' : c)), 2200);
-            return 'yoga-stretch';
-          } else if (roll < 0.66) {
-            setTimeout(() => setState(c => (c === 'butterfly-bat' ? 'idle' : c)), 2400);
-            return 'butterfly-bat';
-          } else {
-            setTimeout(() => setState(c => (c === 'face-wash' ? 'idle' : c)), 2000);
-            return 'face-wash';
-          }
-        }
-        return cur;
-      });
-    }, 28000);
-
-    return () => {
-      if (randomIdleIntervalRef.current) clearInterval(randomIdleIntervalRef.current);
-    };
-  }, [isEnabled, isPaused, isReducedMotion, isDragging]);
 
   // Dream formula cycling during sleep
   useEffect(() => {
@@ -599,7 +707,7 @@ export function useDeskPet({
         if (cur === 'sleep' || cur === 'loaf') {
           return 'waking-stretch';
         }
-        if (cur === 'idle' || cur === 'walk' || cur === 'yoga-stretch' || cur === 'face-wash') {
+        if (cur === 'idle' || cur === 'walk' || cur === 'yoga-stretch' || cur === 'face-wash' || cur === 'tail-flick') {
           return 'typing-paws';
         }
         return cur;
@@ -668,45 +776,213 @@ export function useDeskPet({
     }
   }, [compileStatus, lastCompiledAt, warningCount, isEnabled, isPaused, clearStateTimer, resetInactivityTimer]);
 
-  // Idle Pacing / Walk along dock ledge
+  // Autonomous Waypoint Navigation Stroll
+  const triggerRoam = useCallback(() => {
+    if (!isEnabled || isPaused || isReducedMotion || isTypingRef.current || isDragging) return;
+
+    if (roamMode === 'dock') {
+      // Dock Patrol Mode: Choose dynamic offset along status ledge
+      const maxLedgeOffset = typeof window !== 'undefined' ? Math.min(window.innerWidth - 140, 360) : 300;
+      const targetOffset = Math.round(Math.random() * maxLedgeOffset);
+      const isMovingLeft = targetOffset > pacingOffset;
+      setDirection(isMovingLeft ? 'left' : 'right');
+
+      const distance = Math.abs(targetOffset - pacingOffset);
+      const duration = Math.max(1200, Math.min(3000, distance * 10));
+
+      transitionTo('walk', duration, () => {
+        transitionTo('landing', 300, () => {
+          setState('idle');
+        });
+      });
+      setPacingOffset(targetOffset);
+    } else {
+      // Free Roam Desktop Mode: Choose safe 2D coordinates across screen
+      const maxW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+      const maxH = typeof window !== 'undefined' ? window.innerHeight : 800;
+
+      const targetX = Math.round(Math.max(28, Math.min(maxW - 80, Math.random() * (maxW - 120))));
+      const targetY = Math.round(Math.max(36, Math.min(maxH - 100, Math.random() * (maxH - 140))));
+
+      setDirection(targetX > perchX ? 'left' : 'right');
+      const dx = targetX - perchX;
+      const dy = targetY - perchY;
+      const dist = Math.hypot(dx, dy);
+      const duration = Math.max(1400, Math.min(3600, dist * 8));
+
+      transitionTo('walk', duration, () => {
+        transitionTo('landing', 300, () => {
+          setState('idle');
+        });
+      });
+
+      setPerchX(targetX);
+      setPerchY(targetY);
+      setIsSnappedToDock(targetY <= 68);
+    }
+  }, [isEnabled, isPaused, isReducedMotion, isDragging, roamMode, pacingOffset, perchX, perchY, transitionTo]);
+
+  // Stage 15: Dynamic Organic Behavior Scheduler (Every 5–9.5s when idle)
   useEffect(() => {
     if (!isEnabled || isPaused || isReducedMotion) {
-      if (walkIntervalRef.current) clearInterval(walkIntervalRef.current);
+      if (organicScheduleTimerRef.current) clearTimeout(organicScheduleTimerRef.current);
       return;
     }
 
-    walkIntervalRef.current = setInterval(() => {
-      setState(current => {
-        if (current === 'idle' && !isTypingRef.current && !isDragging) {
-          setDirection(prev => (prev === 'right' ? 'left' : 'right'));
-          setPacingOffset(prev => (prev === 0 ? 44 : 0));
+    const scheduleNextBehavior = () => {
+      const delay = 5000 + Math.random() * 4500; // 5000ms - 9500ms
+      organicScheduleTimerRef.current = setTimeout(() => {
+        if (state === 'idle' && !isTypingRef.current && !isDragging && !isLaserActive) {
+          const roll = Math.random();
 
-          setTimeout(() => {
-            setState(cur => (cur === 'walk' ? 'idle' : cur));
-          }, 3200);
-
-          return 'walk';
+          if (roll < 0.08) {
+            // 8% Sleepy Nap Yawn
+            audioEngineRef.current?.playYawnSigh();
+            transitionTo('nap-yawn', 2400);
+          } else if (roll < 0.15) {
+            // 7% Playful Belly-Up Flop
+            audioEngineRef.current?.playPurr(1200);
+            transitionTo('belly-flop', 2600);
+          } else if (roll < 0.22) {
+            // 7% Rapid Ear Scratch with Hind Paw
+            transitionTo('ear-scratch', 2200);
+          } else if (roll < 0.30) {
+            // 8% Peek-a-Boo Hiding behind ledge
+            audioEngineRef.current?.playMeow();
+            transitionTo('peek-a-boo', 2600);
+          } else if (roll < 0.37) {
+            // 7% Playful Cursor Swat
+            audioEngineRef.current?.playMeow();
+            transitionTo('swat-cursor', 1800);
+          } else if (roll < 0.43) {
+            // 6% Knock Coffee Mug Antics
+            audioEngineRef.current?.playMugClink();
+            transitionTo('knock-mug', 2400);
+          } else if (roll < 0.51) {
+            // 8% Downward Cat Yoga Stretch
+            transitionTo('yoga-stretch', 2200);
+          } else if (roll < 0.59) {
+            // 8% Attentive Face & Paw Wash
+            transitionTo('face-wash', 2200);
+          } else if (roll < 0.65) {
+            // 6% Playful Butterfly Batting
+            transitionTo('butterfly-bat', 2400);
+          } else if (roll < 0.71) {
+            // 6% Tail Chase Spin
+            transitionTo('tail-chase', 2000);
+          } else if (roll < 0.78) {
+            // 7% Donald Knuth's TeXbook Celebration
+            audioEngineRef.current?.playSuccessChime();
+            transitionTo('knuth-texbook', 3200);
+          } else if (roll < 0.86) {
+            // 8% Peaceful Loaf Pose
+            transitionTo('loaf', 3800);
+          } else if (roll < 0.90) {
+            // 4% \hbox Box Sit Peek
+            audioEngineRef.current?.playBoxThud();
+            transitionTo('box-sit', 3000);
+          } else {
+            // 10% Autonomous Waypoint Stroll
+            triggerRoam();
+          }
         }
-        return current;
-      });
-    }, 24000);
+        scheduleNextBehavior();
+      }, delay);
+    };
+
+    scheduleNextBehavior();
 
     return () => {
-      if (walkIntervalRef.current) clearInterval(walkIntervalRef.current);
+      if (organicScheduleTimerRef.current) clearTimeout(organicScheduleTimerRef.current);
     };
-  }, [isEnabled, isPaused, isReducedMotion, isDragging]);
+  }, [isEnabled, isPaused, isReducedMotion, state, isDragging, isLaserActive, transitionTo, triggerRoam]);
 
-  // Interactive Actions: Yarn chase & Petting
+  // Stage 15: Interactive Toys & Quick Action Triggers
   const triggerYarnChase = useCallback(() => {
     if (!isEnabled || isPaused) return;
-    clearStateTimer();
     resetInactivityTimer();
-    setState('yarn-chase');
     audioEngineRef.current?.playYarnChirp();
-    stateTimerRef.current = setTimeout(() => {
-      setState('idle');
-    }, 2800);
-  }, [isEnabled, isPaused, clearStateTimer, resetInactivityTimer]);
+    transitionTo('yarn-chase', 2800);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerLaser = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    setIsLaserActive(prev => {
+      const next = !prev;
+      if (next) {
+        audioEngineRef.current?.playLaserChirp();
+        transitionTo('laser-chase', 4500, () => {
+          setIsLaserActive(false);
+          setState('idle');
+        });
+      } else {
+        setState('idle');
+      }
+      return next;
+    });
+  }, [isEnabled, isPaused, transitionTo]);
+
+  const triggerBox = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playBoxThud();
+    transitionTo('box-sit', 3400);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerFish = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playTreatCrunch();
+    transitionTo('fish-feast', 2800);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerKnuthCelebration = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playSuccessChime();
+    transitionTo('knuth-check', 3600);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerPeekABoo = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playMeow();
+    transitionTo('peek-a-boo', 2600);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerSwatCursor = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playMeow();
+    transitionTo('swat-cursor', 1800);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerKnockMug = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playMugClink();
+    transitionTo('knock-mug', 2400);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerBellyFlop = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playPurr(1400);
+    transitionTo('belly-flop', 2600);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerEarScratch = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    transitionTo('ear-scratch', 2200);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerNapYawn = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playYawnSigh();
+    transitionTo('nap-yawn', 2400);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
 
   const triggerPet = useCallback(() => {
     if (!isEnabled || isPaused) return;
@@ -717,6 +993,20 @@ export function useDeskPet({
       wakeUp();
     }
   }, [isEnabled, isPaused, state, wakeUp, resetInactivityTimer]);
+
+  // Pointer move tracking for Laser Pointer Mode
+  useEffect(() => {
+    if (!isLaserActive || !isEnabled || isPaused) return;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      setLaserCoords({ x: e.clientX, y: e.clientY });
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+    };
+  }, [isLaserActive, isEnabled, isPaused]);
 
   // 2D Pointer Drag, Ledge Snap & Shimeji-Style Fling Physics
   const startDrag = useCallback((e: React.PointerEvent) => {
@@ -838,14 +1128,15 @@ export function useDeskPet({
       clearStateTimer();
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
       if (loafTimerRef.current) clearTimeout(loafTimerRef.current);
-      if (walkIntervalRef.current) clearInterval(walkIntervalRef.current);
-      if (randomIdleIntervalRef.current) clearInterval(randomIdleIntervalRef.current);
+      if (organicScheduleTimerRef.current) clearTimeout(organicScheduleTimerRef.current);
+      if (walkStepTimerRef.current) clearTimeout(walkStepTimerRef.current);
       if (typingSettleTimerRef.current) clearTimeout(typingSettleTimerRef.current);
       if (dreamIntervalRef.current) clearInterval(dreamIntervalRef.current);
       setState('idle');
       setPacingOffset(0);
       setIsDragging(false);
       setDragTilt(0);
+      setIsLaserActive(false);
     } else {
       resetInactivityTimer();
     }
@@ -853,8 +1144,8 @@ export function useDeskPet({
       clearStateTimer();
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
       if (loafTimerRef.current) clearTimeout(loafTimerRef.current);
-      if (walkIntervalRef.current) clearInterval(walkIntervalRef.current);
-      if (randomIdleIntervalRef.current) clearInterval(randomIdleIntervalRef.current);
+      if (organicScheduleTimerRef.current) clearTimeout(organicScheduleTimerRef.current);
+      if (walkStepTimerRef.current) clearTimeout(walkStepTimerRef.current);
       if (typingSettleTimerRef.current) clearTimeout(typingSettleTimerRef.current);
       if (dreamIntervalRef.current) clearInterval(dreamIntervalRef.current);
     };
@@ -896,5 +1187,23 @@ export function useDeskPet({
     triggerPet,
     wakeUp,
     toggleSleep,
+    // Stage 15 additions:
+    roamMode,
+    setRoamMode,
+    toggleRoamMode,
+    isTransitioning,
+    isLaserActive,
+    laserCoords,
+    triggerLaser,
+    triggerBox,
+    triggerFish,
+    triggerKnuthCelebration,
+    triggerPeekABoo,
+    triggerSwatCursor,
+    triggerKnockMug,
+    triggerBellyFlop,
+    triggerEarScratch,
+    triggerNapYawn,
+    triggerRoam,
   };
 }

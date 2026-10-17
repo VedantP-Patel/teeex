@@ -2012,10 +2012,57 @@ p.latex-force-indent {
   --pet-chest-fill: #e2e8f0;
 }
 
+/* Container Isolation & Compositor Containment */
+.desk-pet-container {
+  contain: layout style paint;
+}
+
 /* Paused state when document.hidden is active */
 .desk-pet-container.is-paused,
 .desk-pet-container.is-paused * {
   animation-play-state: paused !important;
+}
+
+/* Smooth Continuous SVG Geometry & Rig Transitions (eliminates snapping) */
+.texcat-rig {
+  transition: transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+  will-change: transform;
+}
+
+.texcat-body ellipse,
+.texcat-head,
+.texcat-tail,
+.texcat-paw-left,
+.texcat-paw-right,
+.texcat-stripes,
+.texcat-accessory-bowtie,
+.texcat-accessory-scarf,
+.texcat-accessory-mortarboard,
+.texcat-accessory-detective {
+  transition: transform 0.28s cubic-bezier(0.25, 1, 0.5, 1),
+              opacity 0.22s ease-out,
+              rx 0.3s cubic-bezier(0.25, 1, 0.5, 1),
+              ry 0.3s cubic-bezier(0.25, 1, 0.5, 1),
+              cy 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+  will-change: transform;
+}
+
+/* Prop Slide-and-Fade Entrance/Exit Wrappers */
+.pet-prop-wrapper {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease-out;
+  will-change: transform, opacity;
+}
+
+.pet-prop-wrapper.prop-hidden {
+  opacity: 0;
+  transform: translateY(8px) scale(0.7);
+  pointer-events: none;
+}
+
+.pet-prop-wrapper.prop-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
 }
 
 /* Base Mascot Hover & Focus */
@@ -2513,6 +2560,185 @@ p.latex-force-indent {
 
 .texcat-rig.state-loaf {
   animation: pet-loaf-breathe 4s ease-in-out infinite;
+}
+
+/* 8. Sleepy Nap Yawn with Back Arch */
+.texcat-rig.state-nap-yawn {
+  animation: pet-yawn 2.4s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+@keyframes pet-yawn {
+  0%, 100% {
+    transform: scale(1) translateY(0);
+  }
+  25% {
+    transform: scaleX(1.12) scaleY(0.9) translateY(2px);
+  }
+  50% {
+    transform: scaleX(0.92) scaleY(1.14) translateY(-5px);
+  }
+  75% {
+    transform: scaleX(1.04) scaleY(0.96) translateY(1px);
+  }
+}
+
+/* 9. Playful Belly-Up Flop */
+.texcat-rig.state-belly-flop {
+  animation: pet-belly-flop 2.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes pet-belly-flop {
+  0% { transform: rotate(0deg) translateY(0); }
+  22% { transform: rotate(35deg) translateY(-8px) scale(1.06); }
+  45% { transform: rotate(180deg) translateY(-4px) scale(1.04); }
+  82% { transform: rotate(180deg) translateY(-4px) scale(1.04); }
+  100% { transform: rotate(0deg) translateY(0); }
+}
+
+/* 10. Rapid Hind-Leg Ear Scratch */
+.texcat-rig.state-ear-scratch {
+  animation: pet-ear-scratch 2.2s ease-in-out forwards;
+}
+
+@keyframes pet-ear-scratch {
+  0%, 100% { transform: rotate(0deg); }
+  15%, 35%, 55%, 75% { transform: rotate(-9deg) translateY(1px); }
+  25%, 45%, 65%, 85% { transform: rotate(5deg) translateY(0); }
+}
+
+/* 11. Peek-a-Boo Hiding Behind Dock Ledge */
+.texcat-rig.state-peek-a-boo {
+  animation: pet-peek-duck 2.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pet-peek-duck {
+  0% { transform: translateY(0); }
+  20% { transform: translateY(30px) scale(0.94); }
+  72% { transform: translateY(30px) scale(0.94); }
+  85% { transform: translateY(-5px) scale(1.08); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* 12. Playful Cursor Swat */
+.texcat-rig.state-swat-cursor {
+  animation: pet-swat-paw 1.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes pet-swat-paw {
+  0% { transform: translateY(0) rotate(0deg); }
+  20% { transform: translateY(-4px) rotate(-8deg) scale(1.06); }
+  45% { transform: translateY(-14px) rotate(-16deg) scale(1.12); }
+  70% { transform: translateY(-2px) rotate(3deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}
+
+/* 13. Knock Mini Coffee Mug */
+.texcat-rig.state-knock-mug {
+  animation: pet-mug-tap 2.4s ease-in-out forwards;
+}
+
+@keyframes pet-mug-tap {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  20% { transform: translateY(-2px) rotate(4deg); }
+  40% { transform: translateY(-3px) rotate(7deg); }
+  60% { transform: translateY(-6px) rotate(16deg); }
+  80% { transform: translateY(0) rotate(-4deg); }
+}
+
+/* 14. Laser Chase Sprint & Butt Wiggle */
+.texcat-rig.state-laser-chase {
+  animation: pet-laser-sprint 0.32s ease-in-out infinite alternate;
+}
+
+@keyframes pet-laser-sprint {
+  0% { transform: translateY(0) scaleX(1.08) scaleY(0.92); }
+  100% { transform: translateY(-7px) scaleX(0.94) scaleY(1.08); }
+}
+
+/* 15. Cardboard Box Sit Peek-a-Boo */
+.texcat-rig.state-box-sit {
+  animation: pet-box-peek 3s ease-in-out infinite alternate;
+}
+
+@keyframes pet-box-peek {
+  0%, 100% { transform: translateY(4px) scale(0.96); }
+  50% { transform: translateY(0) scale(1); }
+}
+
+/* 16. Fish Snack Feast Munching */
+.texcat-rig.state-fish-feast {
+  animation: pet-fish-munch 0.38s ease-in-out infinite alternate;
+}
+
+@keyframes pet-fish-munch {
+  0% { transform: translateY(0) scale(1); }
+  100% { transform: translateY(2px) scale(1.04, 0.96); }
+}
+
+/* 17. Tail Chase 360-Degree Spin */
+.texcat-rig.state-tail-chase {
+  animation: pet-tail-spin 1.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes pet-tail-spin {
+  0% { transform: rotate(0deg) scale(1); }
+  45% { transform: rotate(180deg) scale(0.94); }
+  90% { transform: rotate(360deg) scale(1.06); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+/* 18. Downward Cat Yoga Stretch */
+.texcat-rig.state-yoga-stretch {
+  animation: pet-yoga-arch 2.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pet-yoga-arch {
+  0%, 100% { transform: translateY(0) scale(1); }
+  35% { transform: translateY(3px) scaleX(1.16) scaleY(0.84); }
+  70% { transform: translateY(-5px) scaleX(0.9) scaleY(1.14); }
+}
+
+/* 19. Attentive Face & Ear Wash */
+.texcat-rig.state-face-wash {
+  animation: pet-face-wash-motion 2s ease-in-out forwards;
+}
+
+@keyframes pet-face-wash-motion {
+  0%, 100% { transform: rotate(0deg); }
+  25%, 65% { transform: rotate(-6deg) translateY(1px); }
+  45%, 85% { transform: rotate(4deg) translateY(0); }
+}
+
+/* 20. Donald Knuth TeXbook & $2.56 Check Celebration */
+.texcat-rig.state-knuth-texbook,
+.texcat-rig.state-knuth-check {
+  animation: pet-knuth-present 3.2s ease-in-out forwards;
+}
+
+@keyframes pet-knuth-present {
+  0%, 100% { transform: translateY(0) scale(1); }
+  28% { transform: translateY(-9px) scale(1.08); }
+  58% { transform: translateY(-5px) scale(1.04); }
+}
+
+/* 21. Pixel Butterfly Batting Paw */
+.texcat-rig.state-butterfly-bat {
+  animation: pet-bat-rig 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes pet-bat-rig {
+  0% { transform: translateY(0) rotate(0deg); }
+  100% { transform: translateY(-4px) rotate(-5deg); }
+}
+
+/* 22. Contented Tail Flicking */
+.texcat-rig.state-tail-flick .texcat-tail {
+  animation: pet-tail-flick-fast 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes pet-tail-flick-fast {
+  0% { transform: rotate(-5deg); }
+  100% { transform: rotate(24deg); }
 }
 
 /* Bouncy Yarn Ball Simulation */
