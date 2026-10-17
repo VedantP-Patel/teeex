@@ -8,7 +8,7 @@
 
 import type { ProjectFile } from '../types/latex';
 import { mountVirtualTeXFileSystem } from './virtualFileSystem';
-import { getCachedPackageContent } from './bundledPackages';
+import { BUNDLED_PACKAGES, getCachedPackageContent } from './bundledPackages';
 
 /** A file as the engine's virtual filesystem expects it. */
 export interface EngineFile {
@@ -69,40 +69,61 @@ export function toEngineFiles(
     out.push({ path: alias, content: entry.content });
   }
 
-  // Pre-seed academic classes and styles directly into working directory if referenced
+  // Pre-seed academic classes, styles, and companion assets directly into working directory if referenced
   const entryFile = files.find((file) => file.name === entryPath);
   const entryContent = entryFile?.content || '';
 
-  if (
-    /\\documentclass\s*(?:\[[^\]]*\])?\s*\{[^}]*\bIEEEtran\b[^}]*\}/i.test(entryContent) &&
-    !seen.has('IEEEtran.cls')
-  ) {
-    const cached = getCachedPackageContent('IEEEtran.cls');
-    if (cached) {
-      seen.add('IEEEtran.cls');
-      out.push({ path: 'IEEEtran.cls', content: cached });
+  const requestedClasses = new Set<string>();
+  for (const match of entryContent.matchAll(/\\documentclass\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/gi)) {
+    for (const name of match[1].split(',')) {
+      const trimmed = name.trim();
+      if (trimmed) requestedClasses.add(trimmed.toLowerCase());
     }
   }
 
-  if (
-    /\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bcite\b[^}]*\}/i.test(entryContent) &&
-    !seen.has('cite.sty')
-  ) {
-    const cached = getCachedPackageContent('cite.sty');
-    if (cached) {
-      seen.add('cite.sty');
-      out.push({ path: 'cite.sty', content: cached });
+  const requestedPackages = new Set<string>();
+  for (const match of entryContent.matchAll(/\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/gi)) {
+    for (const name of match[1].split(',')) {
+      const trimmed = name.trim();
+      if (trimmed) requestedPackages.add(trimmed.toLowerCase());
     }
   }
 
-  if (
-    /\\documentclass\s*(?:\[[^\]]*\])?\s*\{[^}]*\bacmart\b[^}]*\}/i.test(entryContent) &&
-    !seen.has('acmart.cls')
-  ) {
-    const cached = getCachedPackageContent('acmart.cls');
-    if (cached) {
-      seen.add('acmart.cls');
-      out.push({ path: 'acmart.cls', content: cached });
+  for (const pkg of BUNDLED_PACKAGES) {
+    if (seen.has(pkg.name)) continue;
+
+    let shouldMount = false;
+    const lowerName = pkg.name.toLowerCase();
+
+    if (lowerName.endsWith('.cls')) {
+      const base = lowerName.slice(0, -4);
+      if (requestedClasses.has(base)) shouldMount = true;
+    } else if (lowerName.endsWith('.sty')) {
+      const base = lowerName.slice(0, -4);
+      if (requestedPackages.has(base)) {
+        shouldMount = true;
+      } else if (base === 'caption3' && (requestedPackages.has('caption') || requestedPackages.has('subcaption'))) {
+        shouldMount = true;
+      } else if (base === 'everysel' && requestedPackages.has('ragged2e')) {
+        shouldMount = true;
+      }
+    } else if (lowerName === 'microtype-pdftex.def' && requestedPackages.has('microtype')) {
+      shouldMount = true;
+    } else if (lowerName === 'tfrupee.tfm' && requestedPackages.has('tfrupee')) {
+      shouldMount = true;
+    } else if (
+      (lowerName.endsWith('.tfm') || lowerName.endsWith('.fd')) &&
+      (requestedClasses.has('ieeetran') || requestedClasses.has('acmart'))
+    ) {
+      shouldMount = true;
+    }
+
+    if (shouldMount) {
+      const cached = getCachedPackageContent(pkg.name);
+      if (cached) {
+        seen.add(pkg.name);
+        out.push({ path: pkg.name, content: cached });
+      }
     }
   }
 

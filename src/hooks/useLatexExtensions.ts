@@ -161,5 +161,5 @@ export function useLatexExtensions({
     ];
 
     return extensions;
-  }, [theme, isLight, bibEntries, labels, readOnly, onCompileShortcut, onForwardSync, onOpenCommandPalette, onSaveShortcut]);
+  }, [theme, isLight, readOnly, onCompileShortcut, onForwardSync, onOpenCommandPalette, onSaveShortcut]);
 }

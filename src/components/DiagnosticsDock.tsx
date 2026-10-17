@@ -208,7 +208,12 @@ export const DiagnosticsDock: React.FC<Props> = ({
 
           {activeTab === 'logs' && (
             <div style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              {rawLogs.map((log, idx) => (
+              {rawLogs.length > 500 && (
+                <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', marginBottom: 8, paddingBottom: 4, borderBottom: '1px dashed var(--border-subtle)' }}>
+                  ... {rawLogs.length - 500} earlier log lines omitted for performance (showing latest 500 lines) ...
+                </div>
+              )}
+              {rawLogs.slice(-500).map((log, idx) => (
                 <div key={idx} style={{ color: log.startsWith('!') ? '#f43f5e' : log.includes('Warning') ? '#f59e0b' : 'var(--text-muted)' }}>
                   {log}
                 </div>

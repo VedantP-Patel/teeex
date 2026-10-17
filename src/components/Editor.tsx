@@ -188,6 +188,8 @@ export const Editor: React.FC<Props> = ({
     theme: syntaxTheme,
     isLight: isLightMode,
     readOnly: role === 'viewer',
+    bibEntries,
+    labels: labelKeys,
     peers,
     diagnostics,
     targetLine,

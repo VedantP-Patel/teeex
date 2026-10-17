@@ -9,7 +9,10 @@ import { yCollab } from 'y-codemirror.next';
 import type { Collaborator, Diagnostic } from '../types/latex';
 import type { SyntaxTheme } from '../services/syntaxHighlighter';
 import { createEditorTheme } from '../services/codeMirrorThemes';
-import { themeCompartment, readOnlyCompartment } from './useLatexExtensions';
+import { themeCompartment, readOnlyCompartment, completionCompartment } from './useLatexExtensions';
+import { autocompletion } from '@codemirror/autocomplete';
+import { createLatexCompletionSource } from '../services/codeMirrorCompletion';
+import type { BibEntry } from '../services/bibtexParser';
 import { setPeersEffect } from './usePeerDecorations';
 
 export const flashLineEffect = StateEffect.define<number>();
@@ -48,6 +51,8 @@ export interface UseCodeMirrorProps {
   theme: SyntaxTheme;
   isLight: boolean;
   readOnly?: boolean;
+  bibEntries?: BibEntry[];
+  labels?: string[];
   peers?: Collaborator[];
   diagnostics?: Diagnostic[];
   targetLine?: number | null;
@@ -66,6 +71,8 @@ export function useCodeMirror({
   theme,
   isLight,
   readOnly = false,
+  bibEntries = [],
+  labels = [],
   peers = [],
   diagnostics = [],
   targetLine,
@@ -222,6 +229,21 @@ export function useCodeMirror({
       effects: readOnlyCompartment.reconfigure(EditorView.editable.of(!readOnly)),
     });
   }, [readOnly]);
+
+  // Update autocomplete dictionary dynamically when bibEntries or labels change
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+
+    view.dispatch({
+      effects: completionCompartment.reconfigure(
+        autocompletion({
+          override: [createLatexCompletionSource(bibEntries, labels)],
+          defaultKeymap: true,
+        })
+      ),
+    });
+  }, [bibEntries, labels]);
 
   // Update peer collaborator cursors
   useEffect(() => {

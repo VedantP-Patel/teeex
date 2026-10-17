@@ -132,15 +132,16 @@ function PdfPageView({
     const textContainer = textRef.current;
 
     if (!active) {
-      // Release high-DPI bitmap backing store and text layer DOM nodes when outside window
+      // 1. Cancel in-flight PDF.js rendering task first to prevent writing into detached nodes
+      doc.releaseTextLayer?.(geometry.pageNumber);
+      // 2. Release text layer DOM nodes and high-DPI bitmap backing store
+      if (textContainer) {
+        textContainer.replaceChildren();
+      }
       if (canvas) {
         canvas.width = 0;
         canvas.height = 0;
       }
-      if (textContainer) {
-        textContainer.replaceChildren();
-      }
-      doc.releaseTextLayer?.(geometry.pageNumber);
       setPainted(false);
       return;
     }
@@ -158,7 +159,7 @@ function PdfPageView({
         if (!cancelled && ok) {
           setPainted(true);
           const container = textRef.current;
-          if (container) {
+          if (container && !cancelled) {
             void doc.renderTextLayer(geometry.pageNumber, rasterZoom, container).catch(() => {});
           }
         }
@@ -169,6 +170,7 @@ function PdfPageView({
 
     return () => {
       cancelled = true;
+      doc.releaseTextLayer?.(geometry.pageNumber);
     };
   }, [doc, geometry.pageNumber, rasterZoom, active]);
 

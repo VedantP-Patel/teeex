@@ -87,24 +87,15 @@ export const EditorMinimap: React.FC<Props> = ({
     }
 
     ctx.globalAlpha = 1.0;
+  }, [code, theme, isLightMode, viewportHeight, width]);
 
-    // Draw Viewport Highlight Slider Box
-    if (totalContentHeight > viewportHeight) {
-      const visibleRatio = Math.min(1, viewportHeight / totalContentHeight);
-      const sliderHeight = Math.max(20, viewportHeight * visibleRatio);
-      const scrollRatio = Math.max(0, Math.min(1, scrollTop / (totalContentHeight - viewportHeight)));
-      const sliderY = scrollRatio * (viewportHeight - sliderHeight);
-
-      // Viewport background tint
-      ctx.fillStyle = isLightMode ? 'rgba(56, 189, 248, 0.15)' : 'rgba(56, 189, 248, 0.18)';
-      ctx.fillRect(0, sliderY, width, sliderHeight);
-
-      // Viewport borders
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(0.5, sliderY + 0.5, width - 1, sliderHeight - 1);
-    }
-  }, [code, theme, isLightMode, scrollTop, viewportHeight, totalContentHeight, width]);
+  // Compute slider bounds for hardware-accelerated CSS compositor layer
+  const visibleRatio = totalContentHeight > 0 ? Math.min(1, viewportHeight / totalContentHeight) : 1;
+  const sliderHeight = Math.max(20, viewportHeight * visibleRatio);
+  const scrollRange = Math.max(1, totalContentHeight - viewportHeight);
+  const scrollRatio = Math.max(0, Math.min(1, scrollTop / scrollRange));
+  const sliderY = scrollRatio * (viewportHeight - sliderHeight);
+  const showSlider = totalContentHeight > viewportHeight;
 
   // Handle Drag / Click navigation
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -158,6 +149,25 @@ export const EditorMinimap: React.FC<Props> = ({
           display: 'block',
         }}
       />
+      {showSlider && (
+        <div
+          className="minimap-viewport-slider"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: sliderHeight,
+            transform: `translate3d(0, ${sliderY}px, 0)`,
+            willChange: 'transform',
+            backgroundColor: isLightMode ? 'rgba(56, 189, 248, 0.16)' : 'rgba(56, 189, 248, 0.18)',
+            border: '1px solid #38bdf8',
+            borderRadius: 2,
+            boxSizing: 'border-box',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
     </div>
   );
 };

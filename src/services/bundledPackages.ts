@@ -178,22 +178,53 @@ async function getAllFromIndexedDb(): Promise<LoadedPackage[]> {
   });
 }
 
-function saveToIndexedDb(pkg: LoadedPackage): void {
-  void (async () => {
-    const db = await openPackagesDb();
-    if (!db) return;
+export async function saveBatchToIndexedDb(pkgs: LoadedPackage[]): Promise<void> {
+  if (pkgs.length === 0) return;
+  const db = await openPackagesDb();
+  if (!db) return;
+
+  return new Promise((resolve) => {
     try {
-      const tx = db.transaction(STORE_PACKAGES, 'readwrite');
-      tx.objectStore(STORE_PACKAGES).put({
-        key: `${pkg.format}/${pkg.name}`,
-        name: pkg.name,
-        format: pkg.format,
-        content: pkg.content,
-      });
+      // Use relaxed durability to bypass physical disk sync blocking on cached assets
+      const tx = (db as any).transaction(
+        STORE_PACKAGES,
+        'readwrite',
+        { durability: 'relaxed' },
+      );
+      const store = tx.objectStore(STORE_PACKAGES);
+      for (const pkg of pkgs) {
+        store.put({
+          key: `${pkg.format}/${pkg.name}`,
+          name: pkg.name,
+          format: pkg.format,
+          content: pkg.content,
+        });
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
     } catch {
-      // Non-fatal
+      try {
+        const tx = db.transaction(STORE_PACKAGES, 'readwrite');
+        const store = tx.objectStore(STORE_PACKAGES);
+        for (const pkg of pkgs) {
+          store.put({
+            key: `${pkg.format}/${pkg.name}`,
+            name: pkg.name,
+            format: pkg.format,
+            content: pkg.content,
+          });
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
     }
-  })();
+  });
+}
+
+export function saveToIndexedDb(pkg: LoadedPackage): void {
+  void saveBatchToIndexedDb([pkg]);
 }
 
 export async function getCachedMisses(): Promise<string[]> {
@@ -234,6 +265,7 @@ export async function getBundledPackages(): Promise<LoadedPackage[]> {
 
     const missingCore = BUNDLED_PACKAGES.filter((p) => !resultsMap.has(p.name));
     if (missingCore.length > 0) {
+      const newlyFetched: LoadedPackage[] = [];
       await Promise.all(
         missingCore.map(async (pkg) => {
           try {
@@ -250,7 +282,7 @@ export async function getBundledPackages(): Promise<LoadedPackage[]> {
                 };
                 resultsMap.set(pkg.name, loaded);
                 packageMemoryCache.set(pkg.name, buf);
-                saveToIndexedDb(loaded);
+                newlyFetched.push(loaded);
               }
             }
           } catch {
@@ -258,6 +290,9 @@ export async function getBundledPackages(): Promise<LoadedPackage[]> {
           }
         }),
       );
+      if (newlyFetched.length > 0) {
+        void saveBatchToIndexedDb(newlyFetched);
+      }
     }
 
     return Array.from(resultsMap.values());
@@ -327,6 +362,7 @@ async function resolveBatch(
   endpoint: string,
 ): Promise<LoadedPackage[]> {
   const resolved: LoadedPackage[] = [];
+  const newlyFetched: LoadedPackage[] = [];
 
   await Promise.all(
     targets.map(async (target) => {
@@ -360,7 +396,7 @@ async function resolveBatch(
               contents: buf,
             };
             packageMemoryCache.set(target.name, buf);
-            saveToIndexedDb(loaded);
+            newlyFetched.push(loaded);
             resolved.push(loaded);
             return;
           }
@@ -376,6 +412,10 @@ async function resolveBatch(
       }
     }),
   );
+
+  if (newlyFetched.length > 0) {
+    void saveBatchToIndexedDb(newlyFetched);
+  }
 
   return resolved;
 }

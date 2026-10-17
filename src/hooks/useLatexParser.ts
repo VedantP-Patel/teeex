@@ -60,6 +60,25 @@ function runSynchronousFallback(content: string, files: ProjectFile[], isTex: bo
   };
 }
 
+export function sanitizeWorkerFiles(files: ProjectFile[]): ProjectFile[] {
+  return files
+    .filter(
+      (f) =>
+        f.type !== 'image' &&
+        (f.name.endsWith('.tex') ||
+          f.name.endsWith('.bib') ||
+          f.name.endsWith('.sty') ||
+          f.name.endsWith('.cls')),
+    )
+    .map((f) => ({
+      id: f.id,
+      name: f.name,
+      content: f.content,
+      type: f.type,
+      isEntry: f.isEntry,
+    }));
+}
+
 export function useLatexParser({
   content,
   files,
@@ -146,7 +165,7 @@ export function useLatexParser({
           id: reqId,
           type: 'parse',
           content,
-          files,
+          files: sanitizeWorkerFiles(files),
           activeFileName,
         };
         worker.postMessage(msg);
