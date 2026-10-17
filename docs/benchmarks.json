@@ -1,42 +1,42 @@
 {
   "machine": "local dev (see host); single Chromium worker",
   "note": "Small-sample baseline. p95 over few samples is indicative only.",
-  "capturedAt": "2026-10-17T03:13:07.621Z",
-  "coldStartToFirstPaintMs": 15677,
+  "capturedAt": "2026-10-17T05:08:12.999Z",
+  "coldStartToFirstPaintMs": 19315,
   "compileLatencyMs": {
     "small": {
       "samples": 4,
-      "median": 202,
-      "p95": 265,
-      "min": 174,
-      "max": 273
+      "median": 183,
+      "p95": 211,
+      "min": 159,
+      "max": 215
     },
     "medium": {
       "samples": 4,
-      "median": 252,
-      "p95": 278,
-      "min": 168,
-      "max": 282
+      "median": 206,
+      "p95": 212,
+      "min": 156,
+      "max": 212
     },
     "large": {
       "samples": 4,
-      "median": 279,
-      "p95": 320,
-      "min": 233,
-      "max": 326
+      "median": 252,
+      "p95": 261,
+      "min": 199,
+      "max": 261
     }
   },
   "outlineLatencyMs": {
     "samples": 5,
-    "median": 402,
-    "p95": 412,
-    "min": 385,
-    "max": 414
+    "median": 353,
+    "p95": 380,
+    "min": 322,
+    "max": 384
   },
   "heap": {
     "available": true,
-    "beforeMB": 92,
-    "afterMB": 92,
+    "beforeMB": 97,
+    "afterMB": 97,
     "deltaMB": 0,
     "compiles": 6,
     "note": "performance.memory is coarse and GC-dependent; a large positive delta is a leak signal, not proof."

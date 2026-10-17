@@ -385,6 +385,9 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
           isOpen={isCommandPaletteOpen}
           onClose={() => setIsCommandPaletteOpen(false)}
           files={files}
+          projects={projects}
+          activeProjectId={activeProjectId}
+          onSelectProject={handleSelectProject}
           onSelectFile={handleSelectFile}
           onCompile={triggerCompile}
           onFormatDocument={handleFormatDocument}

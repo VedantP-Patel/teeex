@@ -20,12 +20,12 @@ import {
   ArrowRight,
   Save
 } from 'lucide-react';
-import type { ProjectFile } from '../../types/latex';
+import type { Project, ProjectFile } from '../../types/latex';
 import { PAPER_FORMATS, type PaperFormatId } from '../../services/paperFormats';
 
 export interface CommandItem {
   id: string;
-  category: 'Commands' | 'Academic Formats' | 'Files' | 'Sections';
+  category: 'Commands' | 'Academic Formats' | 'Files' | 'Sections' | 'Projects';
   title: string;
   subtitle?: string;
   icon: React.ReactNode;
@@ -37,6 +37,9 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   files: ProjectFile[];
+  projects?: Project[];
+  activeProjectId?: string;
+  onSelectProject?: (projectId: string) => void;
   onSelectFile: (fileId: string) => void;
   onCompile: () => void;
   onFormatDocument: () => void;
@@ -65,6 +68,9 @@ export const CommandPaletteModal: React.FC<Props> = ({
   isOpen,
   onClose,
   files,
+  projects = [],
+  activeProjectId,
+  onSelectProject,
   onSelectFile,
   onCompile,
   onFormatDocument,
@@ -96,7 +102,7 @@ export const CommandPaletteModal: React.FC<Props> = ({
   // Auto-focus input on open
   useEffect(() => {
     if (isOpen) {
-      setQuery(initialMode === 'files' ? 'p:' : '');
+      setQuery(initialMode === 'files' ? 'f:' : '');
       setSelectedIndex(0);
       const timer = setTimeout(() => inputRef.current?.focus(), 40);
       return () => clearTimeout(timer);
@@ -246,6 +252,24 @@ export const CommandPaletteModal: React.FC<Props> = ({
       onExecute: () => { onOpenProjectsHub(); onClose(); },
     });
 
+    // Projects (Low-friction project switching)
+    if (projects.length > 0 && onSelectProject) {
+      projects.forEach(p => {
+        const isCurrent = p.id === activeProjectId;
+        list.push({
+          id: `project-${p.id}`,
+          category: 'Projects',
+          title: p.title || 'Untitled Project',
+          subtitle: `Project • ${p.files?.length || 0} files${isCurrent ? ' • Active' : ''}`,
+          icon: isCurrent ? <Check size={13} color="#38bdf8" /> : <FolderKanban size={13} color="#38bdf8" />,
+          onExecute: () => {
+            onSelectProject(p.id);
+            onClose();
+          },
+        });
+      });
+    }
+
     // Academic Paper Formats
     (Object.keys(PAPER_FORMATS) as PaperFormatId[]).forEach(fmtId => {
       const fmt = PAPER_FORMATS[fmtId];
@@ -302,6 +326,9 @@ export const CommandPaletteModal: React.FC<Props> = ({
     onOpenTableBuilder,
     onOpenSymbols,
     onOpenProjectsHub,
+    projects,
+    activeProjectId,
+    onSelectProject,
     activeFormat,
     onSelectFormat,
     files,
@@ -328,7 +355,10 @@ export const CommandPaletteModal: React.FC<Props> = ({
     } else if (raw.startsWith('>')) {
       targetCategory = 'Commands';
       searchTerm = raw.slice(1).trim().toLowerCase();
-    } else if (raw.toLowerCase().startsWith('p:') || raw.toLowerCase().startsWith('f:')) {
+    } else if (raw.toLowerCase().startsWith('p:')) {
+      targetCategory = 'Projects';
+      searchTerm = raw.slice(2).trim().toLowerCase();
+    } else if (raw.toLowerCase().startsWith('f:')) {
       targetCategory = 'Files';
       searchTerm = raw.slice(2).trim().toLowerCase();
     }
@@ -611,10 +641,15 @@ export const CommandPaletteModal: React.FC<Props> = ({
           fontSize: 10,
           color: 'var(--text-muted)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span><kbd>↑</kbd> <kbd>↓</kbd> Navigate</span>
             <span><kbd>↵</kbd> Select</span>
             <span><kbd>ESC</kbd> Close</span>
+            <span style={{ opacity: 0.4 }}>|</span>
+            <span><kbd>p:</kbd> Projects</span>
+            <span><kbd>f:</kbd> Files</span>
+            <span><kbd>&gt;</kbd> Commands</span>
+            <span><kbd>@</kbd> Headings</span>
           </div>
           <span>{filteredCommands.length} actions</span>
         </div>

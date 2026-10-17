@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { UploadCloud, Loader2 } from 'lucide-react';
+import { UploadCloud, Loader2, AlertCircle } from 'lucide-react';
 import { AuthPortal } from './components/AuthPortal';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
@@ -45,6 +45,7 @@ import type {
   TrackedChange
 } from './types/latex';
 import { useLatexParser } from './hooks/useLatexParser';
+import { useAutosaveRecovery } from './hooks/useAutosaveRecovery';
 import { parseBibtex } from './services/bibtexParser';
 import { STARTER_TEMPLATES } from './services/templates';
 import { exportProjectAsZip } from './services/zipExporter';
@@ -155,17 +156,39 @@ export function App() {
 
   // Keep latest files & activeFileId in refs so callbacks never suffer from stale closures
   const filesRef = useRef(files);
-  filesRef.current = files;
   const activeFileIdRef = useRef(activeFileId);
-  activeFileIdRef.current = activeFileId;
   const activeProjectIdRef = useRef(activeProjectId);
-  activeProjectIdRef.current = activeProjectId;
   const foldersRef = useRef(folders);
-  foldersRef.current = folders;
   const projectTitleRef = useRef(projectTitle);
-  projectTitleRef.current = projectTitle;
   const projectsRef = useRef(projects);
-  projectsRef.current = projects;
+
+  useEffect(() => {
+    filesRef.current = files;
+    activeFileIdRef.current = activeFileId;
+    activeProjectIdRef.current = activeProjectId;
+    foldersRef.current = folders;
+    projectTitleRef.current = projectTitle;
+    projectsRef.current = projects;
+  }, [files, activeFileId, activeProjectId, folders, projectTitle, projects]);
+
+  const {
+    hasRecoverableCrash,
+    recoveredDraftInfo,
+    restoreRecoveredDraft,
+    discardRecoveredDraft,
+    markDirty,
+  } = useAutosaveRecovery({
+    activeProject,
+    files,
+    folders,
+    projectTitle,
+    onApplyRecoveredDraft: (draft) => {
+      setFiles(draft.files);
+      if (draft.folders) setFolders(draft.folders);
+      if (draft.title) setProjectTitle(draft.title);
+      setToast('Restored uncommitted session from crash recovery.');
+    },
+  });
 
   // Immediate save flush (safely called before project switch, on page reload, or tab close)
   const flushCurrentProjectSave = useCallback(() => {
@@ -528,6 +551,15 @@ export function App() {
       message: item.hint ? `${item.message} — ${item.hint}` : item.message,
       rule: item.code,
       rawLog: item.context ?? item.raw,
+      suggestedFix: item.suggestedFix
+        ? {
+            title: item.suggestedFix.title,
+            description: item.suggestedFix.description,
+            replacement: item.suggestedFix.replacement,
+            startLine: item.suggestedFix.startLine,
+            endLine: item.suggestedFix.endLine,
+          }
+        : undefined,
     }));
 
     return [...engineDiags, ...parserDiags];
@@ -747,7 +779,8 @@ export function App() {
     const currentId = activeFileIdRef.current;
     setFiles(prev => prev.map(f => f.id === currentId ? { ...f, content: newCode } : f));
     hub.broadcastFileUpdate(currentId, newCode);
-  }, [hub]);
+    markDirty();
+  }, [hub, markDirty]);
 
   // Cursor change: Broadcasts immediately to peers, throttles local UI outline update to 200ms
   const handleCursorChange = useCallback((line: number, col: number) => {
@@ -765,7 +798,18 @@ export function App() {
     const lines = currentFile.content.split('\n');
     const startIdx = Math.max(0, fix.startLine - 1);
     const deleteCount = Math.max(1, (fix.endLine ?? fix.startLine) - fix.startLine + 1);
-    lines.splice(startIdx, deleteCount, fix.replacement);
+
+    if (fix.startLine === 1 && (fix.endLine === 1 || !fix.endLine) && fix.replacement.startsWith('\\usepackage')) {
+      const docClassIdx = lines.findIndex(l => /\\documentclass/.test(l));
+      if (docClassIdx >= 0) {
+        lines.splice(docClassIdx + 1, 0, fix.replacement);
+      } else {
+        lines.unshift(fix.replacement);
+      }
+    } else {
+      lines.splice(startIdx, deleteCount, fix.replacement);
+    }
+
     handleCodeChange(lines.join('\n'));
     setTimeout(() => triggerCompile(), 50);
   }, [handleCodeChange, triggerCompile]);
@@ -1667,6 +1711,68 @@ export function App() {
             ×
           </button>
         </div>
+      )}
+
+      {hasRecoverableCrash && recoveredDraftInfo && (
+        <aside
+          className="crash-recovery-banner"
+          role="alert"
+          style={{
+            position: 'fixed',
+            bottom: 40,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '10px 16px',
+            backgroundColor: 'var(--bg-surface-2, #1e293b)',
+            border: '1px solid var(--accent-cyan, #38bdf8)',
+            borderRadius: 8,
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+            color: 'var(--text-primary, #f8fafc)',
+            fontSize: 13,
+          }}
+        >
+          <AlertCircle size={16} color="#38bdf8" />
+          <span>
+            Uncommitted changes ({recoveredDraftInfo.fileCount} files) from{' '}
+            {new Date(recoveredDraftInfo.timestamp).toLocaleTimeString()} recovered.
+          </span>
+          <div style={{ display: 'flex', gap: 8, marginLeft: 8 }}>
+            <button
+              type="button"
+              onClick={restoreRecoveredDraft}
+              className="btn-primary"
+              style={{
+                fontSize: 12,
+                padding: '4px 12px',
+                backgroundColor: '#0284c7',
+                color: '#fff',
+                borderRadius: 4,
+                cursor: 'pointer',
+              }}
+            >
+              Restore Draft
+            </button>
+            <button
+              type="button"
+              onClick={discardRecoveredDraft}
+              style={{
+                fontSize: 12,
+                padding: '4px 10px',
+                backgroundColor: 'transparent',
+                border: '1px solid var(--border-subtle, #334155)',
+                color: 'var(--text-secondary, #94a3b8)',
+                borderRadius: 4,
+                cursor: 'pointer',
+              }}
+            >
+              Discard
+            </button>
+          </div>
+        </aside>
       )}
       </div>
 

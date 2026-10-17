@@ -89,4 +89,81 @@ Let $E = mc^2$ be Einstein's energy equation, as shown in \\cite{einstein1905}.
     expect(doc.sections[0].title).not.toContain('<a ');
     expect(labels[0].key).toBe('sec:" onclick="alert(3)');
   });
+
+  it('shields verbatim and lstlisting blocks from false positive diagnostics and AST captures', () => {
+    const verbatimTex = `\\documentclass{article}
+\\begin{document}
+\\section{Real Section}
+\\begin{verbatim}
+\\section{Fake Verbatim Section}
+\\tableofcontent
+$unclosed math inside verbatim
+% unescaped 50% percent inside verbatim
+\\begin{tabular}
+\\end{tabular}
+\\end{verbatim}
+\\begin{lstlisting}
+\\subsection{Fake Listing Subsection}
+\\end{lstlisting}
+Inline code \\verb|\\section{Fake Verb}| is shielded.
+\\end{document}`;
+
+    const diags = diagnoseLatex(verbatimTex);
+    const doc = parseLatexDocument(verbatimTex);
+    const toc = generateTableOfContents(verbatimTex);
+
+    // No false positive diagnostics from inside code blocks
+    expect(diags).toEqual([]);
+
+    // Only the real section is extracted, not the ones inside verbatim or lstlisting
+    expect(doc.sections).toHaveLength(1);
+    expect(doc.sections[0].title).toBe('Real Section');
+    expect(toc).toHaveLength(1);
+    expect(toc[0].title).toBe('Real Section');
+  });
+
+  it('extracts balanced nested braces correctly without premature truncation', () => {
+    const nestedTex = `\\documentclass{article}
+\\title{Deep Learning on \\textbf{Nested {Hierarchical} Trees}}
+\\author{Alice {von Neumann} \\and Bob \\textbf{O'Connor}}
+\\begin{document}
+\\section{Study of \\textbf{Nested {Braced}} Groups and $\\mathcal{O}(n^2)$}
+\\label{sec:nested}
+\\end{document}`;
+
+    const doc = parseLatexDocument(nestedTex);
+    const toc = generateTableOfContents(nestedTex);
+
+    expect(doc.title).toBe('Deep Learning on Nested {Hierarchical} Trees');
+    expect(doc.authors).toEqual(['Alice {von Neumann}', "Bob O'Connor"]);
+    expect(doc.sections).toHaveLength(1);
+    expect(doc.sections[0].title).toBe('Study of Nested {Braced} Groups and $\\mathcal{O}(n^2)$');
+    expect(toc[0].title).toBe('Study of Nested {Braced} Groups and $\\mathcal{O}(n^2)$');
+  });
+
+  it('recursively expands multi-file transclusions (\\input and \\include) with cycle protection', () => {
+    const mainTex = `\\documentclass{article}
+\\begin{document}
+\\section{Main Section}
+\\input{chapters/ch1}
+\\end{document}`;
+
+    const ch1Tex = `\\subsection{Chapter 1 Subsection}
+\\input{chapters/ch2}`;
+
+    const ch2Tex = `\\subsubsection{Chapter 2 Subsubsection}
+\\input{main}`; // Circular reference
+
+    const projectFiles: ProjectFile[] = [
+      { id: '1', name: 'main.tex', content: mainTex, type: 'tex', isEntry: true },
+      { id: '2', name: 'chapters/ch1.tex', content: ch1Tex, type: 'tex' },
+      { id: '3', name: 'chapters/ch2.tex', content: ch2Tex, type: 'tex' },
+    ];
+
+    const doc = parseLatexDocument(mainTex, projectFiles);
+    expect(doc.sections).toHaveLength(3);
+    expect(doc.sections[0].title).toBe('Main Section');
+    expect(doc.sections[1].title).toBe('Chapter 1 Subsection');
+    expect(doc.sections[2].title).toBe('Chapter 2 Subsubsection');
+  });
 });

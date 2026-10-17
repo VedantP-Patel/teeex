@@ -132,6 +132,7 @@ describe('parseSyncTex', () => {
 describe('boxToRect', () => {
   it('places the rect above the baseline and spans height plus depth', () => {
     const rect = boxToRect({
+      kind: 'h',
       tag: 1,
       line: 1,
       column: 0,
@@ -150,6 +151,7 @@ describe('boxToRect', () => {
 
   it('normalises a negative width to a positive extent', () => {
     const rect = boxToRect({
+      kind: 'h',
       tag: 1,
       line: 1,
       column: 0,
@@ -166,6 +168,7 @@ describe('boxToRect', () => {
 
   it('gives a zero-height box a clickable extent', () => {
     const rect = boxToRect({
+      kind: 'h',
       tag: 1,
       line: 1,
       column: 0,

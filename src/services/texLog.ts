@@ -43,6 +43,14 @@ export type DiagnosticCode =
   | 'fatal'
   | 'other';
 
+export interface DiagnosticSuggestedFix {
+  title: string;
+  description: string;
+  replacement: string;
+  startLine: number;
+  endLine: number;
+}
+
 export interface CompileDiagnostic {
   id: string;
   severity: DiagnosticSeverity;
@@ -57,6 +65,8 @@ export interface CompileDiagnostic {
   context?: string;
   /** Actionable next step, only when one can be stated with confidence. */
   hint?: string;
+  /** Actionable 1-click code replacement when applicable. */
+  suggestedFix?: DiagnosticSuggestedFix;
   /** Verbatim log lines this diagnostic was derived from. */
   raw: string;
 }
@@ -219,9 +229,14 @@ function push(
 }
 
 /** Classifies a `! ...` error and derives an actionable hint where possible. */
-function classifyError(message: string, context: string): {
+function classifyError(
+  message: string,
+  context: string,
+  sourceLine?: number,
+): {
   code: DiagnosticCode;
   hint?: string;
+  suggestedFix?: DiagnosticSuggestedFix;
   missingPackage?: string;
   missingFile?: string;
 } {
@@ -234,6 +249,13 @@ function classifyError(message: string, context: string): {
         code: 'missing-package',
         missingPackage: name,
         hint: `Package "${name}" is not in the preloaded TeX Live set. It will be fetched on demand if the remote package endpoint is reachable.`,
+        suggestedFix: {
+          title: `Add \\usepackage{${name}}`,
+          description: `Inserts package declaration in preamble.`,
+          replacement: `\\usepackage{${name}}`,
+          startLine: 1,
+          endLine: 1,
+        },
       };
     }
     if (/\.(?:png|jpe?g|pdf|eps|svg)$/i.test(target)) {
@@ -250,32 +272,126 @@ function classifyError(message: string, context: string): {
     };
   }
 
-
   if (/^Undefined control sequence/i.test(message)) {
     // TeX may append the rest of the source line after the offending macro.
     const macro = context.match(/\\[a-zA-Z@]+/);
+    const macroName = macro ? macro[0] : '';
+    let suggestedFix: DiagnosticSuggestedFix | undefined;
+
+    if (macroName === '\\includegraphics') {
+      suggestedFix = {
+        title: 'Add \\usepackage{graphicx}',
+        description: 'Loads graphicx package required for \\includegraphics.',
+        replacement: '\\usepackage{graphicx}',
+        startLine: 1,
+        endLine: 1,
+      };
+    } else if (['\\align', '\\bmatrix', '\\pmatrix', '\\eqref', '\\DeclareMathOperator', '\\substack'].includes(macroName)) {
+      suggestedFix = {
+        title: 'Add \\usepackage{amsmath}',
+        description: 'Loads amsmath package required for advanced mathematics.',
+        replacement: '\\usepackage{amsmath}',
+        startLine: 1,
+        endLine: 1,
+      };
+    } else if (['\\url', '\\href', '\\hypersetup'].includes(macroName)) {
+      suggestedFix = {
+        title: 'Add \\usepackage{hyperref}',
+        description: 'Loads hyperref package required for hyperlinks and URLs.',
+        replacement: '\\usepackage{hyperref}',
+        startLine: 1,
+        endLine: 1,
+      };
+    } else if (['\\color', '\\textcolor', '\\colorbox', '\\definecolor'].includes(macroName)) {
+      suggestedFix = {
+        title: 'Add \\usepackage{xcolor}',
+        description: 'Loads xcolor package required for color styling.',
+        replacement: '\\usepackage{xcolor}',
+        startLine: 1,
+        endLine: 1,
+      };
+    } else if (['\\toprule', '\\midrule', '\\bottomrule'].includes(macroName)) {
+      suggestedFix = {
+        title: 'Add \\usepackage{booktabs}',
+        description: 'Loads booktabs package required for publication-quality tables.',
+        replacement: '\\usepackage{booktabs}',
+        startLine: 1,
+        endLine: 1,
+      };
+    }
+
     return {
       code: 'undefined-control-sequence',
       hint: macro
         ? `${macro[0]} is not defined. Check the spelling, or load the package that provides it.`
         : 'A command used here is not defined. Check the spelling, or load the package that provides it.',
+      suggestedFix,
     };
   }
-
 
   const unknownEnv = message.match(
     /Environment ([^\s]+) undefined|\\begin\{([^}]+)\} on input line/i,
   );
   if (unknownEnv) {
     const name = unknownEnv[1] || unknownEnv[2];
+    let suggestedFix: DiagnosticSuggestedFix | undefined;
+    if (name === 'tabularx') {
+      suggestedFix = {
+        title: 'Add \\usepackage{tabularx}',
+        description: 'Loads tabularx package required for flexible width tables.',
+        replacement: '\\usepackage{tabularx}',
+        startLine: 1,
+        endLine: 1,
+      };
+    } else if (name === 'algorithm' || name === 'algorithmic') {
+      suggestedFix = {
+        title: 'Add \\usepackage{algorithm}',
+        description: 'Loads algorithm package for typesetting algorithms.',
+        replacement: '\\usepackage{algorithm}',
+        startLine: 1,
+        endLine: 1,
+      };
+    } else if (name === 'listing' || name === 'lstlisting') {
+      suggestedFix = {
+        title: 'Add \\usepackage{listings}',
+        description: 'Loads listings package for source code formatting.',
+        replacement: '\\usepackage{listings}',
+        startLine: 1,
+        endLine: 1,
+      };
+    } else if (['align', 'gather', 'multline', 'equation*'].includes(name)) {
+      suggestedFix = {
+        title: 'Add \\usepackage{amsmath}',
+        description: 'Loads amsmath package for multi-line math environments.',
+        replacement: '\\usepackage{amsmath}',
+        startLine: 1,
+        endLine: 1,
+      };
+    }
+
     return {
       code: 'undefined-environment',
       hint: `Environment "${name}" is not defined. Load the package that provides it, or define it with \\newenvironment.`,
+      suggestedFix,
     };
   }
 
   if (/Emergency stop|Fatal error occurred|job aborted/i.test(message)) {
     return { code: 'fatal' };
+  }
+
+  if (/perhaps a missing \\item/i.test(message)) {
+    return {
+      code: 'syntax',
+      hint: 'A list environment is missing an \\item command before text.',
+      suggestedFix: sourceLine ? {
+        title: 'Insert \\item',
+        description: 'Adds missing \\item to list environment.',
+        replacement: '\\item ',
+        startLine: sourceLine,
+        endLine: sourceLine,
+      } : undefined,
+    };
   }
 
   if (
@@ -338,7 +454,7 @@ export function parseTexLog(
         if (ahead.startsWith('! ')) break;
       }
 
-      const classified = classifyError(message, context);
+      const classified = classifyError(message, context, sourceLine);
       if (classified.missingPackage) missingPackages.add(classified.missingPackage);
       if (classified.missingFile) missingFiles.add(classified.missingFile);
       if (classified.code === 'fatal') fatal = true;
@@ -351,6 +467,7 @@ export function parseTexLog(
         line: sourceLine,
         context: context.trim() || undefined,
         hint: classified.hint,
+        suggestedFix: classified.suggestedFix,
         raw: rawParts.join('\n'),
       });
 
@@ -398,6 +515,7 @@ export function parseTexLog(
 
       let code: DiagnosticCode = 'other';
       let hint: string | undefined;
+      let suggestedFix: DiagnosticSuggestedFix | undefined;
 
       if (/Citation [`'"]([^`'"]+)[`'"].*undefined/i.test(message)) {
         code = 'missing-citation';
@@ -405,9 +523,20 @@ export function parseTexLog(
       } else if (/Reference [`'"]([^`'"]+)[`'"].*undefined/i.test(message)) {
         code = 'missing-reference';
         hint = 'Check the \\label spelling, or recompile — references settle on the second pass.';
-      } else if (/Label [`'"][^`'"]+[`'"] multiply defined/i.test(message)) {
+      } else if (/Label [`'"]([^`'"]+)[`'"] multiply defined/i.test(message)) {
         code = 'duplicate-label';
         hint = 'Two \\label commands share a key. Rename one.';
+        const labelKeyMatch = message.match(/Label [`'"]([^`'"]+)[`'"] multiply defined/i);
+        const dupKey = labelKeyMatch ? labelKeyMatch[1] : '';
+        if (dupKey && sourceLine) {
+          suggestedFix = {
+            title: `Rename duplicate label '${dupKey}'`,
+            description: `Renames duplicate label to '${dupKey}-duplicate'.`,
+            replacement: `\\label{${dupKey}-duplicate}`,
+            startLine: sourceLine,
+            endLine: sourceLine,
+          };
+        }
       } else if (/Rerun|Label\(s\) may have changed/i.test(message)) {
         code = 'rerun-required';
         rerunRequired = true;
@@ -423,6 +552,7 @@ export function parseTexLog(
         file: files.current(),
         line: sourceLine,
         hint,
+        suggestedFix,
         raw: rawParts.join('\n'),
       });
       continue;

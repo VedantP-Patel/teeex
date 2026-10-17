@@ -10,7 +10,6 @@ import {
 function file(partial: Partial<ProjectFile> & { name: string }): ProjectFile {
   return {
     id: partial.id ?? partial.name,
-    name: partial.name,
     content: partial.content ?? '',
     type: partial.type ?? (partial.name.endsWith('.bib') ? 'bib' : 'tex'),
     ...partial,

@@ -284,3 +284,73 @@ describe('parseTexLog — resilience', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+describe('parseTexLog — 1-click suggestedFix generation', () => {
+  it('generates suggestedFix for missing package .sty', () => {
+    const log = "! LaTeX Error: File `tikz.sty' not found.\nl.15 \\usepackage{tikz}";
+    const { diagnostics } = parseTexLog(log);
+    const diag = diagnostics.find((d) => d.code === 'missing-package');
+
+    expect(diag).toBeDefined();
+    expect(diag!.suggestedFix).toEqual({
+      title: 'Add \\usepackage{tikz}',
+      description: 'Inserts package declaration in preamble.',
+      replacement: '\\usepackage{tikz}',
+      startLine: 1,
+      endLine: 1,
+    });
+  });
+
+  it('generates suggestedFix for undefined control sequences of standard packages', () => {
+    const log = [
+      '! Undefined control sequence.',
+      'l.55 \\includegraphics',
+      '                     {figure.png}',
+    ].join('\n');
+    const { diagnostics } = parseTexLog(log);
+    const diag = diagnostics.find((d) => d.code === 'undefined-control-sequence');
+
+    expect(diag).toBeDefined();
+    expect(diag!.suggestedFix).toEqual({
+      title: 'Add \\usepackage{graphicx}',
+      description: 'Loads graphicx package required for \\includegraphics.',
+      replacement: '\\usepackage{graphicx}',
+      startLine: 1,
+      endLine: 1,
+    });
+  });
+
+  it('generates suggestedFix for missing \\item in list environment', () => {
+    const log = [
+      "! LaTeX Error: Something's wrong--perhaps a missing \\item.",
+      'l.70 Some loose text inside itemize without item',
+    ].join('\n');
+    const { diagnostics } = parseTexLog(log);
+    const diag = diagnostics.find((d) => d.code === 'syntax');
+
+    expect(diag).toBeDefined();
+    expect(diag!.suggestedFix).toEqual({
+      title: 'Insert \\item',
+      description: 'Adds missing \\item to list environment.',
+      replacement: '\\item ',
+      startLine: 70,
+      endLine: 70,
+    });
+  });
+
+  it('generates suggestedFix for duplicate label warnings', () => {
+    const log = "LaTeX Warning: Label `sec:intro' multiply defined on input line 85.";
+    const { diagnostics } = parseTexLog(log);
+    const diag = diagnostics.find((d) => d.code === 'duplicate-label');
+
+    expect(diag).toBeDefined();
+    expect(diag!.suggestedFix).toEqual({
+      title: "Rename duplicate label 'sec:intro'",
+      description: "Renames duplicate label to 'sec:intro-duplicate'.",
+      replacement: '\\label{sec:intro-duplicate}',
+      startLine: 85,
+      endLine: 85,
+    });
+  });
+});
+

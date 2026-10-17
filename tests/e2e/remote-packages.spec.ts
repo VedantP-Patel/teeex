@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test';
-import { compileAndWaitForPreview, openWorkspace } from './fixtures';
+import { test, expect, type Page } from '@playwright/test';
+import { compileAndWaitForPreview, openWorkspace, setEditorContent } from './fixtures';
 
 const IEEE_SOURCE = String.raw`\documentclass[conference]{IEEEtran}
 \usepackage{amsmath}

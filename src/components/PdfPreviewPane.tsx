@@ -533,7 +533,8 @@ export function PdfPreviewPane({
         // PDF point space (origin at bottom-left) to CSS pixel space (origin at top-left)
         const pageHeightPt = geometry[index].height / CSS_PX_PER_PT;
         const offsetFromPageTop = Math.max(0, (pageHeightPt - yPt) * CSS_PX_PER_PT * zoom);
-        targetTop = baseTop + offsetFromPageTop;
+        const viewportHeight = container.clientHeight;
+        targetTop = Math.max(0, baseTop + offsetFromPageTop - viewportHeight / 2);
       }
 
       container.scrollTo({
@@ -562,7 +563,10 @@ export function PdfPreviewPane({
   }, [forwardTarget]);
 
   useEffect(() => {
-    if (forwardTarget) scrollToPage(forwardTarget.page);
+    if (forwardTarget) {
+      const firstRect = forwardTarget.rects?.[0];
+      scrollToPage(forwardTarget.page, firstRect?.y);
+    }
   }, [forwardTarget, scrollToPage]);
 
   const handlePointerSync = useCallback(

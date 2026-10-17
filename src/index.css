@@ -722,6 +722,22 @@ input:focus, textarea:focus, select:focus {
   border-radius: 4px;
 }
 
+/* CodeMirror 6 Ephemeral Line Flash for SyncTeX & Navigation */
+.cm-line-flash {
+  background: rgba(56, 189, 248, 0.24) !important;
+  box-shadow: inset 3px 0 0 #38bdf8;
+  animation: cm-flash-pulse 1.2s ease-out forwards;
+}
+
+@keyframes cm-flash-pulse {
+  0% {
+    background: rgba(56, 189, 248, 0.35);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
 /* Track Changes Suggestion Styles */
 .suggestion-insertion {
   background-color: rgba(16, 185, 129, 0.2);

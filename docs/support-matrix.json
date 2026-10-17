@@ -285,10 +285,90 @@
       ],
       "limitations": [],
       "overall": "verified"
+    },
+    {
+      "id": "parser.worker",
+      "capability": "Web Worker structural LaTeX AST parser offloading (C12, C13)",
+      "spec": "Dedicated Web Worker offloading heavy AST parsing, balanced-brace macro extraction, recursive multi-file transclusion (\\input, \\include, \\subfile) with cycle protection, and verbatim block shielding",
+      "stages": {
+        "workerOffload": "verified",
+        "balancedBraces": "verified",
+        "transclusion": "verified",
+        "verbatimShielding": "verified"
+      },
+      "tests": [
+        "tests/unit/latexParserWorker.test.ts",
+        "tests/e2e/pdf-differential.spec.ts"
+      ],
+      "limitations": [],
+      "overall": "verified"
+    },
+    {
+      "id": "diagnostics.quickfix",
+      "capability": "Actionable 1-click Quick Fixes for TeX compilation & syntax diagnostics",
+      "spec": "texLog.ts diagnostic classifier emitting suggestedFix objects for missing packages (\\usepackage{...}), undefined macros (graphicx, amsmath, hyperref, xcolor, booktabs), missing \\item, and duplicate labels",
+      "stages": {
+        "classification": "verified",
+        "suggestedFix": "verified",
+        "oneClickApply": "verified"
+      },
+      "tests": [
+        "tests/unit/texLog.test.ts",
+        "tests/unit/unifiedDiagnostics.test.ts"
+      ],
+      "limitations": [],
+      "overall": "verified"
+    },
+    {
+      "id": "recovery.autosave",
+      "capability": "Autosave & Crash Recovery Engine",
+      "spec": "Dual-write architecture with periodic IndexedDB project persistence, synchronous emergency draft mirror in localStorage on every edit and beforeunload, and 1-click restore banner on crash recovery",
+      "stages": {
+        "emergencyMirror": "verified",
+        "crashDetection": "verified",
+        "oneClickRestore": "verified"
+      },
+      "tests": [
+        "tests/unit/autosaveRecovery.test.ts",
+        "tests/e2e/pdf-differential.spec.ts"
+      ],
+      "limitations": [],
+      "overall": "verified"
+    },
+    {
+      "id": "navigation.synctex",
+      "capability": "High-precision bidirectional SyncTeX navigation",
+      "spec": "Gzipped SyncTeX parsing (Q2), page-absolute scaled point coordinates (Q3), viewport vertical centering with cyan pulse bounding box in PDF preview, and ephemeral .cm-line-flash in CodeMirror 6",
+      "stages": {
+        "decompression": "verified",
+        "centering": "verified",
+        "boundingBox": "verified",
+        "editorFlash": "verified"
+      },
+      "tests": [
+        "tests/unit/synctex.test.ts",
+        "tests/unit/codemirror.test.ts"
+      ],
+      "limitations": [],
+      "overall": "verified"
+    },
+    {
+      "id": "differential.perceptual",
+      "capability": "Pixelmatch perceptual differential golden verification",
+      "spec": "E2E raster snapshot validation with pixelmatch and pngjs comparing canvas render against golden target under strict 0.05 threshold",
+      "stages": {
+        "rasterization": "verified",
+        "comparison": "verified",
+        "toleranceClamp": "verified"
+      },
+      "tests": [
+        "tests/e2e/pdf-differential.spec.ts"
+      ],
+      "limitations": [],
+      "overall": "verified"
     }
   ],
   "notCovered": [
-    "In-environment pixelmatch differential between offscreen PDF raster and visible preview canvas.",
-    "Cross-browser and cross-platform validation."
+    "Cross-browser and cross-platform validation outside Chromium / WebKit / Firefox."
   ]
 }

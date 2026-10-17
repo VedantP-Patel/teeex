@@ -80,11 +80,13 @@ export const Editor: React.FC<Props> = ({
   trackedChanges = [],
   onAcceptTrackedChange,
   onRejectTrackedChange,
+  onAddTrackedChange: _onAddTrackedChange,
   onOpenSnippets,
   onFormatDocument,
   onOpenCommandPalette,
   onSaveShortcut,
   onOpenImageUpload,
+  onImportFiles: _onImportFiles,
 }) => {
   const [suggestionMode, setSuggestionMode] = useState(false);
   const [isReviewPanelOpen, setIsReviewPanelOpen] = useState(false);
@@ -465,7 +467,7 @@ export const Editor: React.FC<Props> = ({
                     const includePath = currentFile?.folder ? `${currentFile.folder}/${fileName.split('/').pop()}` : fileName;
                     const cleanLabel = (fileName.split('/').pop() || 'fig').replace(/\.[^/.]+$/, '');
                     const snippet = `\\begin{figure}[htbp]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{${includePath}}\n  \\caption{Caption}\n  \\label{fig:${cleanLabel}}\n\\end{figure}`;
-                    navigator.clipboard.writeText(snippet);
+                    navigator.clipboard?.writeText(snippet);
                     setImageCopied(true);
                     setTimeout(() => setImageCopied(false), 2000);
                   }}

@@ -135,6 +135,95 @@ export function extractOptionalBracket(str: string, startIndex: number = 0): { c
   return null;
 }
 
+/**
+ * Scans ahead in `str` from `startIndex` skipping whitespace and extracts a macro with a balanced braced group `\macro{...}`.
+ */
+export function extractMacroWithBracedArg(
+  str: string,
+  macroName: string,
+  startIndex: number = 0,
+): { content: string; startIndex: number; endIndex: number } | null {
+  const pattern = new RegExp(`\\\\${macroName}\\s*\\*?\\s*\\{`, 'g');
+  pattern.lastIndex = startIndex;
+  const match = pattern.exec(str);
+  if (!match) return null;
+
+  const braceStart = match.index + match[0].length - 1;
+  const braced = extractBalancedBracedGroup(str, braceStart);
+  if (!braced) return null;
+
+  return {
+    content: braced.content,
+    startIndex: match.index,
+    endIndex: braced.endIndex,
+  };
+}
+
+/**
+ * Recursively resolves \input{...}, \include{...}, and \subfile{...} across project files with circular reference protection.
+ */
+export function expandTransclusions(
+  code: string,
+  files?: ProjectFile[],
+  maxDepth: number = 10,
+  visited: Set<string> = new Set<string>(),
+): string {
+  if (!files || files.length === 0 || maxDepth <= 0) return code;
+
+  if (visited.size === 0) {
+    const rootFile = files.find(f => f.content === code || f.isEntry);
+    if (rootFile) visited.add(rootFile.name);
+  }
+
+  return code.replace(/\\(?:input|include|subfile)\s*\{([^}]+)\}/g, (orig, rawPath) => {
+    const targetName = rawPath.trim();
+    if (!targetName) return orig;
+
+    const baseName = targetName.endsWith('.tex') ? targetName.slice(0, -4) : targetName;
+    const candidates = [
+      targetName,
+      `${baseName}.tex`,
+      targetName.replace(/^\.\//, ''),
+      `${baseName.replace(/^\.\//, '')}.tex`,
+    ];
+
+    const target = files.find(f => {
+      const fn = f.name.replace(/\\/g, '/');
+      return candidates.some(c => fn === c || fn.endsWith(`/${c}`));
+    });
+
+    if (!target || !target.content) return orig;
+    if (visited.has(target.name)) return orig;
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(target.name);
+
+    return expandTransclusions(target.content, files, maxDepth - 1, nextVisited);
+  });
+}
+
+/**
+ * Replaces the content inside verbatim, lstlisting, minted, and inline \verb blocks with spaces
+ * while preserving newlines and delimiters. This shields comments, math, and code syntax from
+ * polluting AST section captures, table of contents, and linter diagnostics.
+ */
+export function shieldVerbatimBlocks(code: string): string {
+  if (!code) return '';
+  let result = code.replace(
+    /(\\begin\{(?:verbatim\*?|lstlisting\*?|minted\*?)\}(?:\[.*?\])?)([\s\S]*?)(\\end\{(?:verbatim\*?|lstlisting\*?|minted\*?)\})/g,
+    (_, startTag, body, endTag) => {
+      const blanked = body.replace(/[^\r\n]/g, ' ');
+      return startTag + blanked + endTag;
+    }
+  );
+
+  result = result.replace(/\\verb\*?([^\w\s])([\s\S]*?)\1/g, (match) => {
+    return ' '.repeat(match.length);
+  });
+
+  return result;
+}
+
 export function expandColSpec(spec: string): string {
   let expanded = spec;
   const repRegex = /\*\{?(\d+)\}?\{([^}]+)\}/g;
@@ -336,7 +425,9 @@ export interface TocEntry {
  * Extracts structured Table of Contents entries (data only, never HTML strings).
  */
 export function generateTableOfContents(code: string, _rawLines?: string[]): TocEntry[] {
-  const lines = code.split('\n');
+  const shielded = shieldVerbatimBlocks(code);
+  const lines = shielded.split('\n');
+  const origLines = code.split('\n');
   const items: TocEntry[] = [];
 
   let secNum = 0;
@@ -345,34 +436,38 @@ export function generateTableOfContents(code: string, _rawLines?: string[]): Toc
 
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    const match = l.match(/\\(section|subsection|subsubsection)(\*?)\{([^}]+)\}/);
-    if (match) {
-      const type = match[1];
-      const isStarred = match[2] === '*';
-      const title = cleanLatexInline(match[3]).trim();
-      let num = '';
+    const match = l.match(/\\(section|subsection|subsubsection)(\*?)\s*\{/);
+    if (match && match.index !== undefined) {
+      const braceStart = match.index + match[0].length - 1;
+      const braced = extractBalancedBracedGroup(origLines[i], braceStart);
+      if (braced) {
+        const type = match[1];
+        const isStarred = match[2] === '*';
+        const title = cleanLatexInline(braced.content).trim();
+        let num = '';
 
-      if (type === 'section') {
-        if (!isStarred) {
-          secNum++;
-          subNum = 0;
-          subSubNum = 0;
-          num = `${secNum}.`;
+        if (type === 'section') {
+          if (!isStarred) {
+            secNum++;
+            subNum = 0;
+            subSubNum = 0;
+            num = `${secNum}.`;
+          }
+          items.push({ title, level: 1, line: i + 1, num });
+        } else if (type === 'subsection') {
+          if (!isStarred) {
+            subNum++;
+            subSubNum = 0;
+            num = `${secNum}.${subNum}`;
+          }
+          items.push({ title, level: 2, line: i + 1, num });
+        } else if (type === 'subsubsection') {
+          if (!isStarred) {
+            subSubNum++;
+            num = `${secNum}.${subNum}.${subSubNum}`;
+          }
+          items.push({ title, level: 3, line: i + 1, num });
         }
-        items.push({ title, level: 1, line: i + 1, num });
-      } else if (type === 'subsection') {
-        if (!isStarred) {
-          subNum++;
-          subSubNum = 0;
-          num = `${secNum}.${subNum}`;
-        }
-        items.push({ title, level: 2, line: i + 1, num });
-      } else if (type === 'subsubsection') {
-        if (!isStarred) {
-          subSubNum++;
-          num = `${secNum}.${subNum}.${subSubNum}`;
-        }
-        items.push({ title, level: 3, line: i + 1, num });
       }
     }
   }
@@ -385,7 +480,9 @@ export function generateTableOfContents(code: string, _rawLines?: string[]): Toc
  */
 export function diagnoseLatex(code: string): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
-  const lines = code.split('\n');
+  const shieldedCode = shieldVerbatimBlocks(code);
+  const lines = shieldedCode.split('\n');
+  const rawLines = code.split('\n');
 
   const envStack: Array<{ name: string; line: number }> = [];
   const validPreamblePackages = new Set<string>();
@@ -399,11 +496,12 @@ export function diagnoseLatex(code: string): Diagnostic[] {
 
   for (let i = 0; i < lines.length; i++) {
     const lineNum = i + 1;
-    const rawLine = lines[i];
+    const rawLine = rawLines[i];
+    const shieldedLine = lines[i];
 
-    const commentIdx = rawLine.indexOf('%');
-    const hasUnescapedPercent = commentIdx > 0 && rawLine[commentIdx - 1] !== '\\';
-    const effectiveLine = hasUnescapedPercent ? rawLine.substring(0, commentIdx) : rawLine;
+    const commentIdx = shieldedLine.indexOf('%');
+    const hasUnescapedPercent = commentIdx >= 0 && (commentIdx === 0 || shieldedLine[commentIdx - 1] !== '\\');
+    const effectiveLine = hasUnescapedPercent ? shieldedLine.substring(0, commentIdx) : shieldedLine;
 
     if (effectiveLine.includes('tablular')) {
       diagnostics.push({
@@ -496,10 +594,10 @@ export function diagnoseLatex(code: string): Diagnostic[] {
       }
     }
 
-    const percentMistakeMatch = rawLine.match(/(\d+)(%)(?!\w)/);
+    const percentMistakeMatch = effectiveLine.match(/(\d+)(%)(?!\w)/);
     if (percentMistakeMatch && percentMistakeMatch.index !== undefined) {
       const idx = percentMistakeMatch.index + percentMistakeMatch[1].length;
-      if (idx === 0 || rawLine[idx - 1] !== '\\') {
+      if (idx === 0 || effectiveLine[idx - 1] !== '\\') {
         diagnostics.push({
           id: `unescaped-percent-${lineNum}`,
           line: lineNum,
@@ -551,7 +649,7 @@ export function diagnoseLatex(code: string): Diagnostic[] {
         suggestedFix: {
           title: `Add \\usepackage{graphicx}`,
           description: `Inserts package declaration in preamble.`,
-          replacement: `\\usepackage{graphicx}\n` + lines[0],
+          replacement: `\\usepackage{graphicx}\n` + rawLines[0],
           startLine: 1,
           endLine: 1,
         }
@@ -584,8 +682,8 @@ export function diagnoseLatex(code: string): Diagnostic[] {
         title: `Insert \\end{${unclosed.name}} at end`,
         description: `Appends closing tag '\\end{${unclosed.name}}' to the document.`,
         replacement: `${code.trimEnd()}\n\\end{${unclosed.name}}\n`,
-        startLine: lines.length,
-        endLine: lines.length,
+        startLine: rawLines.length,
+        endLine: rawLines.length,
       }
     });
   }
@@ -597,21 +695,10 @@ export function diagnoseLatex(code: string): Diagnostic[] {
  * Structural Parser: Extracts Title, Authors, Abstract, Sections, Math, Citations, and Layout metadata.
  */
 export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedDocument {
-  let expandedCode = code;
-  if (files && files.length > 0) {
-    expandedCode = expandedCode.replace(/\\(?:input|include)\{([^}]+)\}/g, (orig, path) => {
-      const cleanPath = path.trim();
-      const target = files.find(f =>
-        f.name === cleanPath ||
-        f.name === `${cleanPath}.tex` ||
-        f.name.endsWith(`/${cleanPath}`) ||
-        f.name.endsWith(`/${cleanPath}.tex`)
-      );
-      return target ? target.content : orig;
-    });
-  }
-
-  const lines = expandedCode.split('\n');
+  const expandedCode = expandTransclusions(code, files);
+  const shieldedCode = shieldVerbatimBlocks(expandedCode);
+  const lines = shieldedCode.split('\n');
+  const originalLines = expandedCode.split('\n');
 
   let title = 'Untitled Document';
   const authors: string[] = [];
@@ -628,12 +715,13 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
     }
   }
 
-  const titleMatch = code.match(/\\title\{([\s\S]*?)\}/);
-  if (titleMatch) {
-    title = cleanLatexInline(titleMatch[1]);
+  const titleMacro = extractMacroWithBracedArg(shieldedCode, 'title');
+  if (titleMacro) {
+    const rawBraced = extractBalancedBracedGroup(expandedCode, expandedCode.indexOf('{', titleMacro.startIndex));
+    title = cleanLatexInline(rawBraced ? rawBraced.content : titleMacro.content);
   }
 
-  const titlePageMatch = code.match(/\\begin\{(?:titlepage|title)\}([\s\S]*?)\\end\{(?:titlepage|title)\}/);
+  const titlePageMatch = expandedCode.match(/\\begin\{(?:titlepage|title)\}([\s\S]*?)\\end\{(?:titlepage|title)\}/);
   let hasTitlePage = false;
   let titlePageContent = '';
   if (titlePageMatch) {
@@ -653,21 +741,24 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
     }
   }
 
-  const authorMatch = code.match(/\\author\{([\s\S]*?)\}/);
-  if (authorMatch) {
-    const rawAuthors = authorMatch[1].split(/\\and|\s*,\s*/);
+  const authorMacro = extractMacroWithBracedArg(shieldedCode, 'author');
+  if (authorMacro) {
+    const rawBraced = extractBalancedBracedGroup(expandedCode, expandedCode.indexOf('{', authorMacro.startIndex));
+    const rawAuthorContent = rawBraced ? rawBraced.content : authorMacro.content;
+    const rawAuthors = rawAuthorContent.split(/\\and|\s*,\s*/);
     for (const a of rawAuthors) {
       const cleaned = cleanLatexInline(a).trim();
       if (cleaned) authors.push(cleaned);
     }
   }
 
-  const dateMatch = code.match(/\\date\{([\s\S]*?)\}/);
-  if (dateMatch) {
-    date = cleanLatexInline(dateMatch[1]);
+  const dateMacro = extractMacroWithBracedArg(shieldedCode, 'date');
+  if (dateMacro) {
+    const rawBraced = extractBalancedBracedGroup(expandedCode, expandedCode.indexOf('{', dateMacro.startIndex));
+    date = cleanLatexInline(rawBraced ? rawBraced.content : dateMacro.content);
   }
 
-  const abstractMatch = code.match(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/);
+  const abstractMatch = expandedCode.match(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/);
   if (abstractMatch) {
     abstract = cleanLatexInline(abstractMatch[1].trim());
   }
@@ -693,15 +784,19 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
     const lineNum = i + 1;
     const line = lines[i];
 
-    const secMatch = line.match(/\\(section|subsection|subsubsection)\*?\{([^}]+)\}/);
-    if (secMatch) {
-      const level = secMatch[1] === 'section' ? 1 : secMatch[1] === 'subsection' ? 2 : 3;
-      sections.push({
-        title: cleanLatexInline(secMatch[2]),
-        level,
-        content: '',
-        line: lineNum,
-      });
+    const secMatch = line.match(/\\(section|subsection|subsubsection)(\*?)\s*\{/);
+    if (secMatch && secMatch.index !== undefined) {
+      const braceStart = secMatch.index + secMatch[0].length - 1;
+      const braced = extractBalancedBracedGroup(originalLines[i], braceStart);
+      if (braced) {
+        const level = secMatch[1] === 'section' ? 1 : secMatch[1] === 'subsection' ? 2 : 3;
+        sections.push({
+          title: cleanLatexInline(braced.content),
+          level,
+          content: '',
+          line: lineNum,
+        });
+      }
     }
 
     const eqMatch = line.match(/\\begin\{(?:equation|align|gather|multline)\*?\}([\s\S]*?)\\end\{(?:equation|align|gather|multline)\*?\}/) || line.match(/\\\[([\s\S]*?)\\\]/);
@@ -742,22 +837,49 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
     documentClass,
     hasTitlePage,
     titlePageContent,
-    hasParskip: /\\usepackage(?:\s*\[[^\]]*\])?\s*\{parskip\}/i.test(code) || /\\setlength\s*\{\s*\\parindent\s*\}\s*\{\s*0(?:pt|mm|cm|in|px)?\s*\}/i.test(code),
+    hasParskip: /\\usepackage(?:\s*\[[^\]]*\])?\s*\{parskip\}/i.test(expandedCode) || /\\setlength\s*\{\s*\\parindent\s*\}\s*\{\s*0(?:pt|mm|cm|in|px)?\s*\}/i.test(expandedCode),
   };
 }
 
 export function cleanLatexInline(text: string): string {
-  return text
-    .replace(/\\textbf\{([^}]+)\}/g, '$1')
-    .replace(/\\textit\{([^}]+)\}/g, '$1').replace(/\\texttt\{([^}]+)\}/g, '$1')
-    .replace(/\\textsc\{([^}]+)\}/g, '$1').replace(/\\textsf\{([^}]+)\}/g, '$1')
-    .replace(/\\emph\{([^}]+)\}/g, '$1')
+  let cleaned = text;
+
+  // Protect inline math from having backslashes stripped
+  const mathSegments: string[] = [];
+  cleaned = cleaned.replace(/\$[^$]+\$/g, (m) => {
+    mathSegments.push(m);
+    return `__MATH_SEGMENT_${mathSegments.length - 1}__`;
+  });
+
+  const formatMacros = ['textbf', 'textit', 'texttt', 'textsc', 'textsf', 'emph', 'underline'];
+  let changed = true;
+  let iterations = 0;
+  while (changed && iterations < 8) {
+    changed = false;
+    iterations++;
+    for (const macro of formatMacros) {
+      const found = extractMacroWithBracedArg(cleaned, macro);
+      if (found) {
+        cleaned = cleaned.substring(0, found.startIndex) + found.content + cleaned.substring(found.endIndex);
+        changed = true;
+      }
+    }
+  }
+
+  cleaned = cleaned
     .replace(/\\(?:indent|noindent)\b/g, '')
     .replace(/\\(?:vspace|hspace)\*?\{[^}]+\}/g, '')
     .replace(/\\(?:bigskip|medskip|smallskip|vfill|hfill|quad|qquad|enspace|thinspace)\b/g, '')
     .replace(/\\\\/g, ' ')
     .replace(/\\/g, '')
     .trim();
+
+  // Restore inline math
+  cleaned = cleaned.replace(/__MATH_SEGMENT_(\d+)__/g, (_, idx) => {
+    return mathSegments[parseInt(idx, 10)] || '';
+  });
+
+  return cleaned;
 }
 
 export function extractLatexLabels(files: ProjectFile[]): LatexLabel[] {
@@ -765,39 +887,49 @@ export function extractLatexLabels(files: ProjectFile[]): LatexLabel[] {
 
   for (const file of files) {
     if (!file.content) continue;
-    const lines = file.content.split('\n');
+    const shielded = shieldVerbatimBlocks(file.content);
+    const lines = shielded.split('\n');
+    const origLines = file.content.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
       const lineText = lines[i];
-      const match = lineText.match(/\\label\{([^}]+)\}/);
-      if (match) {
-        const key = match[1].trim();
-        let type: LatexLabel['type'] = 'other';
-        if (key.startsWith('sec:') || key.startsWith('subsec:')) type = 'section';
-        else if (key.startsWith('fig:')) type = 'figure';
-        else if (key.startsWith('tab:')) type = 'table';
-        else if (key.startsWith('eq:')) type = 'equation';
-        else if (key.startsWith('thm:') || key.startsWith('lem:') || key.startsWith('def:')) type = 'theorem';
-        else if (key.startsWith('alg:')) type = 'algorithm';
+      const match = lineText.match(/\\label\s*\{/);
+      if (match && match.index !== undefined) {
+        const braceStart = match.index + match[0].length - 1;
+        const braced = extractBalancedBracedGroup(origLines[i], braceStart);
+        if (braced) {
+          const key = braced.content.trim();
+          let type: LatexLabel['type'] = 'other';
+          if (key.startsWith('sec:') || key.startsWith('subsec:')) type = 'section';
+          else if (key.startsWith('fig:')) type = 'figure';
+          else if (key.startsWith('tab:')) type = 'table';
+          else if (key.startsWith('eq:')) type = 'equation';
+          else if (key.startsWith('thm:') || key.startsWith('lem:') || key.startsWith('def:')) type = 'theorem';
+          else if (key.startsWith('alg:')) type = 'algorithm';
 
-        let caption = '';
-        const start = Math.max(0, i - 3);
-        const end = Math.min(lines.length - 1, i + 3);
-        for (let j = start; j <= end; j++) {
-          const capMatch = lines[j].match(/\\caption\{([^}]+)\}/) || lines[j].match(/\\(?:section|subsection)\*?\{([^}]+)\}/);
-          if (capMatch) {
-            caption = cleanLatexInline(capMatch[1]);
-            break;
+          let caption = '';
+          const start = Math.max(0, i - 3);
+          const end = Math.min(origLines.length - 1, i + 3);
+          for (let j = start; j <= end; j++) {
+            const capMatch = origLines[j].match(/\\caption\s*\{/) || origLines[j].match(/\\(?:section|subsection)\*?\s*\{/);
+            if (capMatch && capMatch.index !== undefined) {
+              const capBraceStart = capMatch.index + capMatch[0].length - 1;
+              const capBraced = extractBalancedBracedGroup(origLines[j], capBraceStart);
+              if (capBraced) {
+                caption = cleanLatexInline(capBraced.content);
+                break;
+              }
+            }
           }
-        }
 
-        labels.push({
-          key,
-          type,
-          caption: caption || undefined,
-          line: i + 1,
-          fileName: file.name,
-        });
+          labels.push({
+            key,
+            type,
+            caption: caption || undefined,
+            line: i + 1,
+            fileName: file.name,
+          });
+        }
       }
     }
   }

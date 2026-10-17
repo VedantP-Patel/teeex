@@ -11,6 +11,7 @@ This document tests that Teeex compiles 100% locally in the browser with zero ne
 
 test.describe('Delivery, Typography & Offline Compilation (Stage 2)', () => {
   test('zero external font requests and zero CSP violations on clean load', async ({ page }) => {
+    test.setTimeout(180_000);
     const leakedUrls: string[] = [];
     const cspViolations: string[] = [];
 

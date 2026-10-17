@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { EditorState, type Extension } from '@codemirror/state';
-import { EditorView, ViewUpdate } from '@codemirror/view';
+import { StateEffect, StateField, EditorState, type Extension } from '@codemirror/state';
+import { EditorView, ViewUpdate, Decoration, type DecorationSet } from '@codemirror/view';
 import { setDiagnostics, type Diagnostic as CMDiagnostic } from '@codemirror/lint';
 
 import type { Collaborator, Diagnostic } from '../types/latex';
@@ -8,6 +8,33 @@ import type { SyntaxTheme } from '../services/syntaxHighlighter';
 import { createEditorTheme } from '../services/codeMirrorThemes';
 import { themeCompartment, readOnlyCompartment } from './useLatexExtensions';
 import { setPeersEffect } from './usePeerDecorations';
+
+export const flashLineEffect = StateEffect.define<number>();
+export const clearFlashEffect = StateEffect.define<void>();
+
+const flashLineDecoration = Decoration.line({
+  attributes: { class: 'cm-line-flash' },
+});
+
+export const flashLineField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(decorations, tr) {
+    decorations = decorations.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (effect.is(flashLineEffect)) {
+        const lineNum = Math.max(1, Math.min(effect.value, tr.state.doc.lines));
+        const line = tr.state.doc.line(lineNum);
+        decorations = Decoration.set([flashLineDecoration.range(line.from)]);
+      } else if (effect.is(clearFlashEffect)) {
+        decorations = Decoration.none;
+      }
+    }
+    return decorations;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
 
 export interface UseCodeMirrorProps {
   code: string;
@@ -69,7 +96,7 @@ export function useCodeMirror({
 
     const state = EditorState.create({
       doc: code,
-      extensions: [...extensions, updateListener],
+      extensions: [...extensions, flashLineField, updateListener],
     });
 
     const view = new EditorView({
@@ -203,10 +230,17 @@ export function useCodeMirror({
 
     view.dispatch({
       selection: { anchor: lineInfo.from, head: lineInfo.from },
+      effects: [flashLineEffect.of(lineNum)],
       scrollIntoView: true,
     });
 
     view.focus();
+
+    setTimeout(() => {
+      if (viewRef.current) {
+        viewRef.current.dispatch({ effects: [clearFlashEffect.of()] });
+      }
+    }, 1200);
 
     if (onClearTargetLine) {
       onClearTargetLine();
@@ -270,10 +304,17 @@ export function useCodeMirror({
 
     view.dispatch({
       selection: { anchor: lineInfo.from, head: lineInfo.from },
+      effects: [flashLineEffect.of(target)],
       scrollIntoView: true,
     });
 
     view.focus();
+
+    setTimeout(() => {
+      if (viewRef.current) {
+        viewRef.current.dispatch({ effects: [clearFlashEffect.of()] });
+      }
+    }, 1200);
   }, []);
 
   return {
