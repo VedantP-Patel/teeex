@@ -2362,6 +2362,92 @@ p.latex-force-indent {
   border-top: 4px solid currentColor;
 }
 
+/* Scruff Lift & Landing Squish Physics */
+@keyframes pet-scruff-dangle {
+  0%, 100% {
+    transform: rotate(0deg) scale(0.92, 1.12);
+  }
+  50% {
+    transform: rotate(3deg) scale(0.92, 1.12);
+  }
+}
+
+.texcat-rig.state-lifted-scruff {
+  animation: pet-scruff-dangle 1.2s ease-in-out infinite;
+}
+
+@keyframes pet-land-squish {
+  0% {
+    transform: scaleX(1.22) scaleY(0.82) translateY(3px);
+  }
+  55% {
+    transform: scaleX(0.92) scaleY(1.08) translateY(-2px);
+  }
+  100% {
+    transform: scale(1) translateY(0);
+  }
+}
+
+.texcat-rig.state-landing {
+  animation: pet-land-squish 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Math Dream Thought Bubble */
+.pet-dream-bubble {
+  position: absolute;
+  top: -38px;
+  right: -8px;
+  padding: 4px 10px;
+  background-color: var(--bg-surface-elevated, #1e293b);
+  border: 1px solid var(--border-medium, #475569);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-cyan, #38bdf8);
+  white-space: nowrap;
+  animation: petDreamFloat 3s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+.pet-dream-bubble .dream-dots {
+  position: absolute;
+  bottom: -9px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pet-dream-bubble .dot {
+  background-color: var(--border-medium, #475569);
+  border-radius: 50%;
+  display: block;
+}
+
+.pet-dream-bubble .dot-1 {
+  width: 5px;
+  height: 5px;
+}
+
+.pet-dream-bubble .dot-2 {
+  width: 3px;
+  height: 3px;
+  margin-left: 2px;
+}
+
+@keyframes petDreamFloat {
+  0% {
+    transform: translateY(0) scale(0.98);
+    opacity: 0.85;
+  }
+  100% {
+    transform: translateY(-4px) scale(1.02);
+    opacity: 1;
+  }
+}
+
 /* Reduced Motion Override: Halts all translations and instant animations */
 @media (prefers-reduced-motion: reduce) {
   .desk-pet-container *,
@@ -2374,7 +2460,8 @@ p.latex-force-indent {
   .floating-heart,
   .floating-z,
   .floating-sparkle,
-  .pet-yarn-ball {
+  .pet-yarn-ball,
+  .pet-dream-bubble {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

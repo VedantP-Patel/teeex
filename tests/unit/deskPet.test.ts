@@ -189,6 +189,27 @@ describe('TeXCat Desk Companion (useDeskPet & DeskPet)', () => {
       expect(currentHook.state).toBe('idle');
     });
 
+    it('toggles sleep and awake explicitly via toggleSleep', async () => {
+      await mountHook();
+      expect(currentHook.state).toBe('idle');
+
+      await act(async () => {
+        currentHook.toggleSleep();
+      });
+      expect(currentHook.state).toBe('sleep');
+      expect(currentHook.isSleeping).toBe(true);
+
+      await act(async () => {
+        currentHook.toggleSleep();
+      });
+      expect(currentHook.state).toBe('waking-stretch');
+
+      await act(async () => {
+        vi.advanceTimersByTime(1200);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+
     it('supports interactive yarn chase action for 2.8s', async () => {
       await mountHook();
       expect(currentHook.state).toBe('idle');
@@ -314,4 +335,94 @@ describe('TeXCat Desk Companion (useDeskPet & DeskPet)', () => {
       expect(renderedHtml).not.toContain('equation');
     });
   });
+
+  describe('Coat Skin Customization & Persistence', () => {
+    it('initializes to tuxedo skin by default', async () => {
+      await mountHook();
+      expect(currentHook.skin).toBe('tuxedo');
+    });
+
+    it('cycles between the 5 procedural coat skins and persists to localStorage', async () => {
+      await mountHook();
+      expect(currentHook.skin).toBe('tuxedo');
+
+      await act(async () => {
+        currentHook.cycleSkin();
+      });
+      expect(currentHook.skin).toBe('ginger');
+      expect(localStorage.getItem('teeex_desk_pet_skin')).toBe('ginger');
+
+      await act(async () => {
+        currentHook.cycleSkin();
+      });
+      expect(currentHook.skin).toBe('calico');
+
+      await act(async () => {
+        currentHook.cycleSkin();
+      });
+      expect(currentHook.skin).toBe('siamese');
+
+      await act(async () => {
+        currentHook.cycleSkin();
+      });
+      expect(currentHook.skin).toBe('cyberpunk');
+
+      await act(async () => {
+        currentHook.cycleSkin();
+      });
+      expect(currentHook.skin).toBe('tuxedo');
+    });
+  });
+
+  describe('Web Audio Synthesizer (Zero Assets, Muted by Default)', () => {
+    it('is strictly muted by default', async () => {
+      await mountHook();
+      expect(currentHook.isSoundEnabled).toBe(false);
+      expect(localStorage.getItem('teeex_desk_pet_sound')).toBeNull();
+    });
+
+    it('toggles sound mute state and persists preference', async () => {
+      await mountHook();
+      await act(async () => {
+        currentHook.toggleSound();
+      });
+      expect(currentHook.isSoundEnabled).toBe(true);
+      expect(localStorage.getItem('teeex_desk_pet_sound')).toBe('true');
+
+      await act(async () => {
+        currentHook.toggleSound();
+      });
+      expect(currentHook.isSoundEnabled).toBe(false);
+      expect(localStorage.getItem('teeex_desk_pet_sound')).toBe('false');
+    });
+  });
+
+  describe('Mathematical Thought Dreams & Typesetting Lore', () => {
+    beforeEach(() => {
+      localStorage.setItem('teeex_desk_pet_enabled', 'true');
+    });
+
+    it('renders classic math dream thought bubble during sleep state', async () => {
+      await act(async () => {
+        root.render(
+          React.createElement(DeskPet, {
+            isEnabled: true,
+            state: 'sleep',
+            direction: 'right',
+            pacingOffset: 0,
+            isSleeping: true,
+            isReducedMotion: false,
+            isPaused: false,
+            petCount: 0,
+            currentDreamFormula: 'e^{i\\pi} + 1 = 0',
+          })
+        );
+      });
+
+      const dreamBubble = container.querySelector('.pet-dream-bubble');
+      expect(dreamBubble).not.toBeNull();
+      expect(dreamBubble?.textContent).toContain('e^{i\\pi} + 1 = 0');
+    });
+  });
 });
+

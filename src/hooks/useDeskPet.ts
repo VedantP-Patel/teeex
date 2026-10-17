@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { DeskPetAudioEngine } from '../services/deskPetAudio';
 
 export type DeskPetActionState =
   | 'idle'
@@ -9,7 +10,22 @@ export type DeskPetActionState =
   | 'compile-fail'
   | 'yarn-chase'
   | 'sleep'
-  | 'waking-stretch';
+  | 'waking-stretch'
+  | 'lifted-scruff'
+  | 'landing';
+
+export type DeskPetSkin = 'tuxedo' | 'ginger' | 'calico' | 'siamese' | 'cyberpunk';
+
+export const DESK_PET_SKINS: DeskPetSkin[] = ['tuxedo', 'ginger', 'calico', 'siamese', 'cyberpunk'];
+
+export const MATH_DREAM_FORMULAS = [
+  'e^{i\\pi} + 1 = 0',
+  '\\int_0^\\infty e^{-x^2} dx = \\frac{\\sqrt{\\pi}}{2}',
+  '\\TeX',
+  '\\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}',
+  '\\mathcal{O}(1)',
+  '\\nabla \\times \\mathbf{B} = \\mu_0 \\mathbf{J}',
+];
 
 export interface UseDeskPetOptions {
   compileStatus?: 'idle' | 'compiling' | 'success' | 'error';
@@ -30,12 +46,26 @@ export interface UseDeskPetReturn {
   isReducedMotion: boolean;
   isPaused: boolean;
   petCount: number;
+  skin: DeskPetSkin;
+  setSkin: (skin: DeskPetSkin) => void;
+  cycleSkin: () => void;
+  isSoundEnabled: boolean;
+  toggleSound: () => void;
+  perchX: number;
+  dragTilt: number;
+  isDragging: boolean;
+  startDrag: (e: React.PointerEvent) => void;
+  currentDreamFormula: string;
   triggerYarnChase: () => void;
   triggerPet: () => void;
   wakeUp: () => void;
+  toggleSleep: () => void;
 }
 
 const STORAGE_KEY = 'teeex_desk_pet_enabled';
+const SKIN_STORAGE_KEY = 'teeex_desk_pet_skin';
+const SOUND_STORAGE_KEY = 'teeex_desk_pet_sound';
+const PERCH_STORAGE_KEY = 'teeex_desk_pet_perch_x';
 
 export function useDeskPet({
   compileStatus = 'idle',
@@ -55,6 +85,127 @@ export function useDeskPet({
     }
     return false;
   });
+
+  // 2. Coat Skin customization (default: 'tuxedo')
+  const [skin, setSkinState] = useState<DeskPetSkin>(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const saved = window.localStorage.getItem(SKIN_STORAGE_KEY);
+        if (saved && DESK_PET_SKINS.includes(saved as DeskPetSkin)) {
+          return saved as DeskPetSkin;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return 'tuxedo';
+  });
+
+  const setSkin = useCallback((newSkin: DeskPetSkin) => {
+    setSkinState(newSkin);
+    try {
+      localStorage.setItem(SKIN_STORAGE_KEY, newSkin);
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  const cycleSkin = useCallback(() => {
+    setSkinState(prev => {
+      const idx = DESK_PET_SKINS.indexOf(prev);
+      const next = DESK_PET_SKINS[(idx + 1) % DESK_PET_SKINS.length];
+      try {
+        localStorage.setItem(SKIN_STORAGE_KEY, next);
+      } catch {
+        // Ignore
+      }
+      return next;
+    });
+  }, []);
+
+  // 3. Sound engine (Strictly MUTED by default)
+  const [isSoundEnabled, setIsSoundEnabledState] = useState<boolean>(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        return window.localStorage.getItem(SOUND_STORAGE_KEY) === 'true';
+      }
+    } catch {
+      // Ignore
+    }
+    return false;
+  });
+
+  const audioEngineRef = useRef<DeskPetAudioEngine | null>(null);
+  if (!audioEngineRef.current && typeof window !== 'undefined') {
+    audioEngineRef.current = new DeskPetAudioEngine(!isSoundEnabled);
+  }
+
+  const toggleSound = useCallback(() => {
+    setIsSoundEnabledState(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SOUND_STORAGE_KEY, next ? 'true' : 'false');
+      } catch {
+        // Ignore
+      }
+      if (audioEngineRef.current) {
+        audioEngineRef.current.setMuted(!next);
+      }
+      return next;
+    });
+  }, []);
+
+  // 4. Perch X Position along Dock Ledge (Default: 28px from right)
+  const [perchX, setPerchX] = useState<number>(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const saved = window.localStorage.getItem(PERCH_STORAGE_KEY);
+        if (saved !== null) {
+          const parsed = parseFloat(saved);
+          if (!isNaN(parsed) && parsed >= 10 && parsed <= 1200) {
+            return parsed;
+          }
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return 28;
+  });
+
+  // State machine values
+  const [state, setState] = useState<DeskPetActionState>('idle');
+  const [direction, setDirection] = useState<'left' | 'right'>('right');
+  const [pacingOffset, setPacingOffset] = useState<number>(0);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [isReducedMotion, setIsReducedMotion] = useState<boolean>(false);
+  const [petCount, setPetCount] = useState<number>(0);
+
+  // Dragging & Scruff Lift Physics
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [dragTilt, setDragTilt] = useState<number>(0);
+  const dragStartRef = useRef<{ clientX: number; initialPerchX: number; lastX: number; lastTime: number } | null>(null);
+
+  // Math Dream Formulas
+  const [currentDreamFormula, setCurrentDreamFormula] = useState<string>(MATH_DREAM_FORMULAS[0]);
+
+  // References for active timers
+  const stateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const walkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const typingSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dreamIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevCompileStatusRef = useRef<string>(compileStatus);
+  const prevLastCompiledAtRef = useRef<number | null | undefined>(lastCompiledAt);
+  const isTypingRef = useRef<boolean>(false);
+
+  // Clear helper
+  const clearStateTimer = useCallback(() => {
+    if (stateTimerRef.current) {
+      clearTimeout(stateTimerRef.current);
+      stateTimerRef.current = null;
+    }
+  }, []);
 
   const setIsEnabled = useCallback((enabled: boolean) => {
     setIsEnabledState(enabled);
@@ -81,32 +232,7 @@ export function useDeskPet({
     });
   }, []);
 
-  // State machine values
-  const [state, setState] = useState<DeskPetActionState>('idle');
-  const [direction, setDirection] = useState<'left' | 'right'>('right');
-  const [pacingOffset, setPacingOffset] = useState<number>(0);
-  const [isPaused, setIsPaused] = useState<boolean>(false);
-  const [isReducedMotion, setIsReducedMotion] = useState<boolean>(false);
-  const [petCount, setPetCount] = useState<number>(0);
-
-  // References for active timeouts and state management
-  const stateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const walkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const typingSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevCompileStatusRef = useRef<string>(compileStatus);
-  const prevLastCompiledAtRef = useRef<number | undefined>(lastCompiledAt);
-  const isTypingRef = useRef<boolean>(false);
-
-  // Clear helper
-  const clearStateTimer = useCallback(() => {
-    if (stateTimerRef.current) {
-      clearTimeout(stateTimerRef.current);
-      stateTimerRef.current = null;
-    }
-  }, []);
-
-  // 2. Reduced motion media query listener
+  // Reduced motion media query listener
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -116,6 +242,7 @@ export function useDeskPet({
       setIsReducedMotion(e.matches);
       if (e.matches) {
         setPacingOffset(0);
+        setDragTilt(0);
       }
     };
     media.addEventListener?.('change', handler);
@@ -124,22 +251,25 @@ export function useDeskPet({
     };
   }, []);
 
-  // 3. Document visibility change listener (Freeze timers on tab backgrounding)
+  // Document visibility change listener (Freeze timers and audio on tab backgrounding)
   useEffect(() => {
     if (typeof document === 'undefined') return;
 
     const handleVisibilityChange = () => {
-      if (document.hidden) {
+      const hidden = document.hidden;
+      if (hidden) {
         setIsPaused(true);
-        // Clear all active timers immediately so zero CPU cycles are spent while hidden
         if (walkIntervalRef.current) clearInterval(walkIntervalRef.current);
         if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
         if (stateTimerRef.current) clearTimeout(stateTimerRef.current);
         if (typingSettleTimerRef.current) clearTimeout(typingSettleTimerRef.current);
+        if (dreamIntervalRef.current) clearInterval(dreamIntervalRef.current);
       } else {
         setIsPaused(false);
-        // Reset activity when returning to tab
         resetInactivityTimer();
+      }
+      if (audioEngineRef.current) {
+        audioEngineRef.current.handleVisibilityChange(hidden);
       }
     };
 
@@ -149,7 +279,7 @@ export function useDeskPet({
     };
   }, []);
 
-  // 4. Inactivity & Wakeup handling
+  // Inactivity & Wakeup handling
   const resetInactivityTimer = useCallback(() => {
     if (!isEnabled || isPaused) return;
 
@@ -159,7 +289,6 @@ export function useDeskPet({
 
     inactivityTimerRef.current = setTimeout(() => {
       setState(current => {
-        // Only sleep if currently idle or walk
         if (current === 'idle' || current === 'walk') {
           return 'sleep';
         }
@@ -182,11 +311,54 @@ export function useDeskPet({
     });
   }, [resetInactivityTimer, clearStateTimer]);
 
-  // 5. Anonymous Keystroke activity listener (strictly records timestamp pulse, NEVER inspects keys/content)
+  const toggleSleep = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    clearStateTimer();
+    setState(current => {
+      if (current === 'sleep') {
+        stateTimerRef.current = setTimeout(() => {
+          setState('idle');
+        }, 1200);
+        return 'waking-stretch';
+      } else {
+        if (inactivityTimerRef.current) {
+          clearTimeout(inactivityTimerRef.current);
+          inactivityTimerRef.current = null;
+        }
+        return 'sleep';
+      }
+    });
+  }, [isEnabled, isPaused, clearStateTimer]);
+
+  // Dream formula cycling during sleep
+  useEffect(() => {
+    if (state === 'sleep' && !isPaused && isEnabled) {
+      dreamIntervalRef.current = setInterval(() => {
+        setCurrentDreamFormula(prev => {
+          const idx = MATH_DREAM_FORMULAS.indexOf(prev);
+          return MATH_DREAM_FORMULAS[(idx + 1) % MATH_DREAM_FORMULAS.length];
+        });
+      }, 5500);
+    } else {
+      if (dreamIntervalRef.current) {
+        clearInterval(dreamIntervalRef.current);
+        dreamIntervalRef.current = null;
+      }
+    }
+    return () => {
+      if (dreamIntervalRef.current) clearInterval(dreamIntervalRef.current);
+    };
+  }, [state, isPaused, isEnabled]);
+
+  // Anonymous Keystroke activity listener (strictly timestamp pulse, zero inspection)
   useEffect(() => {
     if (!isEnabled || isPaused) return;
 
-    const handleAnonymousActivity = () => {
+    const handleAnonymousActivity = (e: Event) => {
+      // If the event originated inside the desk pet container, ignore it so pet interaction doesn't count as editor typing
+      if (e.target && (e.target as HTMLElement).closest?.('.desk-pet-container')) {
+        return;
+      }
       if (state === 'sleep') {
         wakeUp();
       } else {
@@ -203,7 +375,7 @@ export function useDeskPet({
     };
   }, [isEnabled, isPaused, state, wakeUp, resetInactivityTimer]);
 
-  // 6. External isTypingActive pulse synchronization
+  // External isTypingActive pulse synchronization
   useEffect(() => {
     if (!isEnabled || isPaused) return;
 
@@ -230,7 +402,7 @@ export function useDeskPet({
     }
   }, [isTypingActive, isEnabled, isPaused, clearStateTimer]);
 
-  // 7. Compiler Lifecycle State Transitions
+  // Compiler Lifecycle State Transitions
   useEffect(() => {
     if (!isEnabled || isPaused) return;
 
@@ -252,6 +424,7 @@ export function useDeskPet({
       clearStateTimer();
       setState('compile-success');
       resetInactivityTimer();
+      audioEngineRef.current?.playSuccessChime();
       stateTimerRef.current = setTimeout(() => {
         setState('idle');
       }, 3500);
@@ -263,6 +436,7 @@ export function useDeskPet({
       clearStateTimer();
       setState('compile-fail');
       resetInactivityTimer();
+      audioEngineRef.current?.playAlertBoop();
       stateTimerRef.current = setTimeout(() => {
         setState('idle');
       }, 4500);
@@ -270,20 +444,18 @@ export function useDeskPet({
     }
   }, [compileStatus, lastCompiledAt, isEnabled, isPaused, clearStateTimer, resetInactivityTimer]);
 
-  // 8. Idle Pacing / Walk along dock ledge (only when not reduced motion and fully idle)
+  // Idle Pacing / Walk along dock ledge
   useEffect(() => {
     if (!isEnabled || isPaused || isReducedMotion) {
       if (walkIntervalRef.current) clearInterval(walkIntervalRef.current);
       return;
     }
 
-    // Every 24 seconds, perform a gentle pacing walk if remaining idle
     walkIntervalRef.current = setInterval(() => {
       setState(current => {
-        if (current === 'idle' && !isTypingRef.current) {
-          // Trigger a walk sequence for 3 seconds
+        if (current === 'idle' && !isTypingRef.current && !isDragging) {
           setDirection(prev => (prev === 'right' ? 'left' : 'right'));
-          setPacingOffset(prev => (prev === 0 ? 48 : 0));
+          setPacingOffset(prev => (prev === 0 ? 44 : 0));
 
           setTimeout(() => {
             setState(cur => (cur === 'walk' ? 'idle' : cur));
@@ -298,14 +470,15 @@ export function useDeskPet({
     return () => {
       if (walkIntervalRef.current) clearInterval(walkIntervalRef.current);
     };
-  }, [isEnabled, isPaused, isReducedMotion]);
+  }, [isEnabled, isPaused, isReducedMotion, isDragging]);
 
-  // 9. Interactive Actions: Yarn chase & Petting
+  // Interactive Actions: Yarn chase & Petting
   const triggerYarnChase = useCallback(() => {
     if (!isEnabled || isPaused) return;
     clearStateTimer();
     resetInactivityTimer();
     setState('yarn-chase');
+    audioEngineRef.current?.playYarnChirp();
     stateTimerRef.current = setTimeout(() => {
       setState('idle');
     }, 2800);
@@ -315,10 +488,88 @@ export function useDeskPet({
     if (!isEnabled || isPaused) return;
     setPetCount(prev => prev + 1);
     resetInactivityTimer();
+    audioEngineRef.current?.playPurr();
     if (state === 'sleep') {
       wakeUp();
     }
   }, [isEnabled, isPaused, state, wakeUp, resetInactivityTimer]);
+
+  // Pointer Scruff Drag & Drop Mechanics
+  const startDrag = useCallback((e: React.PointerEvent) => {
+    if (isReducedMotion) return;
+    // Prevent dragging from toolbar buttons
+    if ((e.target as HTMLElement).closest('button')) return;
+
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore
+    }
+
+    clearStateTimer();
+    setIsDragging(true);
+    setState('lifted-scruff');
+    dragStartRef.current = {
+      clientX: e.clientX,
+      initialPerchX: perchX,
+      lastX: e.clientX,
+      lastTime: Date.now(),
+    };
+
+    const handlePointerMove = (moveEv: PointerEvent) => {
+      if (!dragStartRef.current) return;
+      const dx = moveEv.clientX - dragStartRef.current.clientX;
+      // Invert dx because perchX is measured from the right edge
+      const newPerchX = Math.max(16, Math.min(window.innerWidth - 80, dragStartRef.current.initialPerchX - dx));
+      setPerchX(newPerchX);
+
+      // Velocity-based dynamic tilt angle
+      const now = Date.now();
+      const dt = Math.max(1, now - dragStartRef.current.lastTime);
+      const vx = (moveEv.clientX - dragStartRef.current.lastX) / dt;
+      const tilt = Math.max(-24, Math.min(24, vx * 12));
+      setDragTilt(tilt);
+
+      dragStartRef.current.lastX = moveEv.clientX;
+      dragStartRef.current.lastTime = now;
+    };
+
+    const handlePointerUp = (upEv: PointerEvent) => {
+      try {
+        (upEv.target as HTMLElement).releasePointerCapture(upEv.pointerId);
+      } catch {
+        // Ignore
+      }
+
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+
+      setIsDragging(false);
+      setDragTilt(0);
+      dragStartRef.current = null;
+
+      // Play landing squish settle
+      setState('landing');
+      stateTimerRef.current = setTimeout(() => {
+        setState('idle');
+      }, 350);
+
+      // Persist chosen perch location
+      setPerchX(cur => {
+        try {
+          localStorage.setItem(PERCH_STORAGE_KEY, cur.toString());
+        } catch {
+          // Ignore
+        }
+        return cur;
+      });
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+  }, [isReducedMotion, perchX, clearStateTimer]);
 
   // Cleanup on unmount or when disabled
   useEffect(() => {
@@ -327,8 +578,11 @@ export function useDeskPet({
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
       if (walkIntervalRef.current) clearInterval(walkIntervalRef.current);
       if (typingSettleTimerRef.current) clearTimeout(typingSettleTimerRef.current);
+      if (dreamIntervalRef.current) clearInterval(dreamIntervalRef.current);
       setState('idle');
       setPacingOffset(0);
+      setIsDragging(false);
+      setDragTilt(0);
     } else {
       resetInactivityTimer();
     }
@@ -337,6 +591,7 @@ export function useDeskPet({
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
       if (walkIntervalRef.current) clearInterval(walkIntervalRef.current);
       if (typingSettleTimerRef.current) clearTimeout(typingSettleTimerRef.current);
+      if (dreamIntervalRef.current) clearInterval(dreamIntervalRef.current);
     };
   }, [isEnabled, clearStateTimer, resetInactivityTimer]);
 
@@ -351,8 +606,19 @@ export function useDeskPet({
     isReducedMotion,
     isPaused,
     petCount,
+    skin,
+    setSkin,
+    cycleSkin,
+    isSoundEnabled,
+    toggleSound,
+    perchX,
+    dragTilt: isReducedMotion ? 0 : dragTilt,
+    isDragging,
+    startDrag,
+    currentDreamFormula,
     triggerYarnChase,
     triggerPet,
     wakeUp,
+    toggleSleep,
   };
 }

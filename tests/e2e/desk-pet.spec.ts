@@ -79,6 +79,44 @@ test.describe('Stage 6: TeXCat Desk Companion (Desk Pet)', () => {
     const yarnBall = page.locator('.pet-yarn-ball');
     await expect(yarnBall).toBeAttached();
     await expect(page.locator('.texcat-rig')).toHaveClass(/state-yarn-chase/);
+
+    // 5. Cycle coat skin from toolbar
+    const skinBtn = page.getByRole('button', { name: 'Cycle coat skin' });
+    await skinBtn.click();
+    await expect(page.locator('.desk-pet-container')).toHaveClass(/skin-ginger/);
+
+    // 6. Toggle sound effects from toolbar
+    const soundBtn = page.getByRole('button', { name: 'Toggle companion sound' });
+    await soundBtn.click();
+    await expect(soundBtn).toHaveAttribute('title', /ON/);
+  });
+
+  test('supports keyboard-first interaction shortcuts (Space, C, S, M, Y)', async ({ page }) => {
+    // 1. Enable companion via Navbar button
+    const navbarPetBtn = page.getByRole('button', { name: 'Toggle Desk Companion' });
+    await navbarPetBtn.click();
+
+    const mascot = page.getByRole('img', { name: /TeXCat Desk Companion/i });
+    await expect(mascot).toBeVisible();
+
+    // 2. Focus mascot and press Space to pet
+    await mascot.focus();
+    await page.keyboard.press('Space');
+    const hearts = page.locator('.pet-heart-particles');
+    await expect(hearts).toBeAttached();
+
+    // 3. Press 'c' to cycle skin
+    await page.keyboard.press('c');
+    await expect(page.locator('.desk-pet-container')).toHaveClass(/skin-ginger/);
+
+    // 4. Press 's' to sleep (verifying math dream thought bubble appears)
+    await page.keyboard.press('s');
+    const dreamBubble = page.locator('.pet-dream-bubble');
+    await expect(dreamBubble).toBeVisible();
+
+    // 5. Press 's' again to wake up
+    await page.keyboard.press('s');
+    await expect(dreamBubble).not.toBeVisible();
   });
 
   test('reacts to compiler lifecycle with scholar glasses and celebration leap', async ({ page }) => {
@@ -118,3 +156,4 @@ test.describe('Stage 6: TeXCat Desk Companion (Desk Pet)', () => {
     expect(transform === 'none' || transform === 'matrix(1, 0, 0, 1, 0, 0)').toBe(true);
   });
 });
+

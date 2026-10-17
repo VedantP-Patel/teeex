@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import type { DeskPetActionState } from '../hooks/useDeskPet';
-import { Heart, Sparkles, X, Moon } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import type { DeskPetActionState, DeskPetSkin } from '../hooks/useDeskPet';
+import { Heart, Sparkles, X, Moon, Palette, Volume2, VolumeX } from 'lucide-react';
 
 export interface DeskPetProps {
   isEnabled: boolean;
@@ -11,12 +11,74 @@ export interface DeskPetProps {
   isReducedMotion: boolean;
   isPaused: boolean;
   petCount: number;
+  skin?: DeskPetSkin;
+  setSkin?: (skin: DeskPetSkin) => void;
+  cycleSkin?: () => void;
+  isSoundEnabled?: boolean;
+  toggleSound?: () => void;
+  perchX?: number;
+  dragTilt?: number;
+  isDragging?: boolean;
+  startDrag?: (e: React.PointerEvent) => void;
+  currentDreamFormula?: string;
   dockCollapsed?: boolean;
   onToggleEnabled?: () => void;
   triggerYarnChase?: () => void;
   triggerPet?: () => void;
   wakeUp?: () => void;
+  toggleSleep?: () => void;
 }
+
+interface SkinPalette {
+  furFill: string;
+  furStroke: string;
+  chestFill: string;
+  eyeColor: string;
+  stripeColor?: string;
+  earPink: string;
+}
+
+const SKIN_PALETTES: Record<DeskPetSkin, SkinPalette> = {
+  tuxedo: {
+    furFill: 'var(--pet-fur-fill, #1e293b)',
+    furStroke: 'var(--pet-fur-stroke, #475569)',
+    chestFill: 'var(--pet-chest-fill, #f8fafc)',
+    eyeColor: '#38bdf8',
+    earPink: '#fb7185',
+  },
+  ginger: {
+    furFill: '#ea580c',
+    furStroke: '#9a3412',
+    chestFill: '#ffedd5',
+    eyeColor: '#f59e0b',
+    stripeColor: '#c2410c',
+    earPink: '#fda4af',
+  },
+  calico: {
+    furFill: '#f8fafc',
+    furStroke: '#cbd5e1',
+    chestFill: '#ea580c',
+    eyeColor: '#10b981',
+    stripeColor: '#1e293b',
+    earPink: '#fb7185',
+  },
+  siamese: {
+    furFill: '#fef3c7',
+    furStroke: '#d97706',
+    chestFill: '#451a03',
+    eyeColor: '#0284c7',
+    stripeColor: '#78350f',
+    earPink: '#f472b6',
+  },
+  cyberpunk: {
+    furFill: '#090d16',
+    furStroke: '#38bdf8',
+    chestFill: '#0284c7',
+    eyeColor: '#a855f7',
+    stripeColor: '#06b6d4',
+    earPink: '#ec4899',
+  },
+};
 
 export const DeskPet: React.FC<DeskPetProps> = ({
   isEnabled,
@@ -27,18 +89,70 @@ export const DeskPet: React.FC<DeskPetProps> = ({
   isReducedMotion,
   isPaused,
   petCount,
+  skin = 'tuxedo',
+  cycleSkin,
+  isSoundEnabled = false,
+  toggleSound,
+  perchX = 28,
+  dragTilt = 0,
+  isDragging = false,
+  startDrag,
+  currentDreamFormula = 'e^{i\\pi} + 1 = 0',
   dockCollapsed = true,
   onToggleEnabled,
   triggerYarnChase,
   triggerPet,
   wakeUp,
+  toggleSleep,
 }) => {
   const [showToolbar, setShowToolbar] = useState(false);
   const [showHearts, setShowHearts] = useState(false);
+  const mascotRef = useRef<HTMLDivElement>(null);
+
+  // Eye tracking pupil look-at offset (-2px to +2px)
+  const [pupilOffset, setPupilOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  useEffect(() => {
+    if (!isEnabled || isPaused || isReducedMotion || state === 'sleep' || isDragging) {
+      setPupilOffset({ x: 0, y: 0 });
+      return;
+    }
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!mascotRef.current) return;
+      const rect = mascotRef.current.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const dx = e.clientX - centerX;
+      const dy = e.clientY - centerY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      // Only track when cursor is within 140px proximity radius
+      if (distance < 140 && distance > 5) {
+        const angle = Math.atan2(dy, dx);
+        const lookRadius = Math.min(2, distance / 40);
+        setPupilOffset({
+          x: Math.cos(angle) * lookRadius,
+          y: Math.sin(angle) * lookRadius,
+        });
+      } else {
+        setPupilOffset({ x: 0, y: 0 });
+      }
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+    };
+  }, [isEnabled, isPaused, isReducedMotion, state, isDragging]);
 
   // Human-readable status label for ARIA and tooltip
   const stateLabel = useMemo(() => {
     switch (state) {
+      case 'lifted-scruff':
+        return 'Dangling playfully by the scruff';
+      case 'landing':
+        return 'Landing softly onto the dock ledge';
       case 'typing-paws':
         return 'Typing furiously alongside you';
       case 'compiling-scholar':
@@ -50,7 +164,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
       case 'yarn-chase':
         return 'Chasing the cyan yarn ball!';
       case 'sleep':
-        return 'Sleeping peacefully (Zzz)';
+        return 'Sleeping peacefully, dreaming of LaTeX equations';
       case 'waking-stretch':
         return 'Waking up with an arch-back stretch';
       case 'walk':
@@ -61,10 +175,11 @@ export const DeskPet: React.FC<DeskPetProps> = ({
     }
   }, [state]);
 
-  // If disabled, render absolutely nothing (zero DOM footprint)
-  if (!isEnabled) {
-    return null;
-  }
+  const activePalette = SKIN_PALETTES[skin] || SKIN_PALETTES.tuxedo;
+
+  // Bottom dock offset calculation
+  const dockHeight = dockCollapsed ? 32 : 180;
+  const bottomPosition = dockHeight + 4;
 
   // Handle clicking on pet
   const handleClick = (e: React.MouseEvent) => {
@@ -83,23 +198,51 @@ export const DeskPet: React.FC<DeskPetProps> = ({
     triggerYarnChase?.();
   };
 
-  // Bottom dock offset calculation
-  const dockHeight = dockCollapsed ? 32 : 180;
-  const bottomPosition = dockHeight + 4;
+  // Keyboard accessibility handler
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const key = e.key.toLowerCase();
+    if (key === ' ' || key === 'enter') {
+      e.preventDefault();
+      handleClick(e as unknown as React.MouseEvent);
+    } else if (key === 'y') {
+      e.preventDefault();
+      triggerYarnChase?.();
+    } else if (key === 's') {
+      e.preventDefault();
+      if (toggleSleep) {
+        toggleSleep();
+      } else {
+        wakeUp?.();
+      }
+    } else if (key === 'c') {
+      e.preventDefault();
+      cycleSkin?.();
+    } else if (key === 'm') {
+      e.preventDefault();
+      toggleSound?.();
+    }
+  };
+
+  // If disabled, render absolutely nothing (zero DOM footprint)
+  if (!isEnabled) {
+    return null;
+  }
 
   return (
     <div
-      className={`desk-pet-container ${isPaused ? 'is-paused' : ''}`}
+      className={`desk-pet-container skin-${skin} ${isPaused ? 'is-paused' : ''} ${isDragging ? 'is-dragging' : ''}`}
       style={{
         position: 'fixed',
-        right: 28,
+        right: perchX,
         bottom: bottomPosition,
         zIndex: 900,
         pointerEvents: 'none',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'flex-end',
-        transition: isReducedMotion ? 'none' : 'bottom 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+        transition: isReducedMotion || isDragging
+          ? 'none'
+          : 'bottom 0.25s cubic-bezier(0.16, 1, 0.3, 1), right 0.15s ease-out',
       }}
     >
       {/* Floating Action Menu on Hover */}
@@ -123,6 +266,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
           onMouseEnter={() => setShowToolbar(true)}
           onMouseLeave={() => setShowToolbar(false)}
         >
+          {/* Pet Button */}
           <button
             type="button"
             className="btn-ghost"
@@ -133,13 +277,14 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               setShowHearts(true);
               setTimeout(() => setShowHearts(false), 1400);
             }}
-            title="Pet TeXCat (Show love)"
+            title="Pet TeXCat (Show love - Space)"
             aria-label="Pet companion"
           >
             <Heart size={11} color="#f43f5e" fill="#f43f5e" />
             <span>Pet</span>
           </button>
 
+          {/* Yarn Button */}
           <button
             type="button"
             className="btn-ghost"
@@ -148,22 +293,58 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               e.stopPropagation();
               triggerYarnChase?.();
             }}
-            title="Toss cyan yarn ball for TeXCat to chase"
+            title="Toss cyan yarn ball (Y)"
             aria-label="Toss yarn ball"
           >
             <Sparkles size={11} color="#38bdf8" />
             <span>Yarn</span>
           </button>
 
+          {/* Coat Skin Switcher */}
           <button
             type="button"
             className="btn-ghost"
             style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
             onClick={(e) => {
               e.stopPropagation();
-              wakeUp?.();
+              cycleSkin?.();
             }}
-            title="Toggle sleep / wake"
+            title={`Cycle coat skin (C) • Current: ${skin.toUpperCase()}`}
+            aria-label="Cycle coat skin"
+          >
+            <Palette size={11} color="#f59e0b" />
+            <span style={{ textTransform: 'capitalize' }}>{skin}</span>
+          </button>
+
+          {/* Sound Toggle Button */}
+          <button
+            type="button"
+            className="btn-ghost"
+            style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleSound?.();
+            }}
+            title={`Sound Effects (M): ${isSoundEnabled ? 'ON (Purr & chimes active)' : 'MUTED (Zero audio)'}`}
+            aria-label="Toggle companion sound"
+          >
+            {isSoundEnabled ? <Volume2 size={11} color="#10b981" /> : <VolumeX size={11} color="var(--text-muted)" />}
+          </button>
+
+          {/* Sleep / Wake Button */}
+          <button
+            type="button"
+            className="btn-ghost"
+            style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (toggleSleep) {
+                toggleSleep();
+              } else {
+                wakeUp?.();
+              }
+            }}
+            title="Toggle sleep / wake (S)"
             aria-label="Toggle sleep"
           >
             <Moon size={11} color="#a855f7" />
@@ -171,6 +352,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
 
           <div style={{ width: 1, height: 12, backgroundColor: 'var(--border-subtle, #334155)', margin: '0 2px' }} />
 
+          {/* Disable / Close Button */}
           <button
             type="button"
             className="btn-ghost"
@@ -189,29 +371,30 @@ export const DeskPet: React.FC<DeskPetProps> = ({
 
       {/* Main Mascot Wrapper */}
       <div
+        ref={mascotRef}
         className="desk-pet-mascot-wrapper"
         style={{
           pointerEvents: 'auto',
           position: 'relative',
-          cursor: 'pointer',
+          cursor: isDragging ? 'grabbing' : 'grab',
+          touchAction: 'none',
           transform: isReducedMotion
             ? 'none'
+            : isDragging
+            ? `rotate(${dragTilt}deg) scale(0.92, 1.12)`
             : `translate3d(-${pacingOffset}px, 0, 0)`,
-          transition: isReducedMotion ? 'none' : 'transform 0.4s ease-out',
+          transition: isReducedMotion || isDragging ? 'none' : 'transform 0.4s ease-out',
         }}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
+        onPointerDown={startDrag}
         onMouseEnter={() => setShowToolbar(true)}
         onMouseLeave={() => setShowToolbar(false)}
         role="img"
         tabIndex={0}
-        aria-label={`TeXCat Desk Companion: ${stateLabel}. Pet count: ${petCount}. (Click to interact, double-click for yarn, hover for actions)`}
-        title={`TeXCat: ${stateLabel}${petCount > 0 ? ` (Loved ${petCount} times)` : ''} — Click to interact`}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            handleClick(e as unknown as React.MouseEvent);
-          }
-        }}
+        aria-label={`TeXCat Desk Companion: ${stateLabel}. Coat: ${skin}. Pet count: ${petCount}. (Drag scruff to move, click to interact, double-click for yarn, hover for actions)`}
+        title={`TeXCat: ${stateLabel}${petCount > 0 ? ` (Loved ${petCount} times)` : ''} — Drag scruff to reposition`}
+        onKeyDown={handleKeyDown}
       >
         {/* Floating Heart Particles */}
         {showHearts && (
@@ -228,6 +411,17 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             <span className="floating-z z-1">z</span>
             <span className="floating-z z-2">z</span>
             <span className="floating-z z-3">Z</span>
+          </div>
+        )}
+
+        {/* Mathematical Dream Thought Bubble during Sleep */}
+        {state === 'sleep' && (
+          <div className="pet-dream-bubble" aria-hidden="true">
+            <span className="dream-formula">${currentDreamFormula}$</span>
+            <div className="dream-dots">
+              <span className="dot dot-1" />
+              <span className="dot dot-2" />
+            </div>
           </div>
         )}
 
@@ -291,14 +485,21 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               </filter>
             </defs>
 
-            {/* Base platform shadow */}
-            <ellipse cx="32" cy="56" rx="20" ry="4" fill="rgba(0,0,0,0.25)" />
+            {/* Base platform shadow (fades when lifted by scruff) */}
+            <ellipse
+              cx="32"
+              cy="56"
+              rx={state === 'lifted-scruff' ? 12 : 20}
+              ry={state === 'lifted-scruff' ? 2 : 4}
+              fill="rgba(0,0,0,0.25)"
+              opacity={state === 'lifted-scruff' ? 0.35 : 0.8}
+            />
 
             {/* Tail Layer with Sway Animation */}
             <g className="texcat-tail" style={{ transformOrigin: '48px 50px' }}>
               <path
                 d="M44 48 C 54 44, 58 36, 56 30 C 54 26, 50 28, 51 32 C 52 38, 48 42, 42 46"
-                stroke="var(--pet-fur-stroke, #334155)"
+                stroke={activePalette.furStroke}
                 strokeWidth="4"
                 strokeLinecap="round"
                 fill="none"
@@ -313,12 +514,23 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 cy="44"
                 rx="15"
                 ry="13"
-                fill="var(--pet-fur-fill, #1e293b)"
-                stroke="var(--pet-fur-stroke, #475569)"
+                fill={activePalette.furFill}
+                stroke={activePalette.furStroke}
                 strokeWidth="2"
               />
-              {/* Soft Chest Marking */}
-              <ellipse cx="32" cy="45" rx="8" ry="9" fill="var(--pet-chest-fill, #334155)" opacity="0.6" />
+
+              {/* Tiger Stripes for Ginger or Calico */}
+              {activePalette.stripeColor && (
+                <g className="texcat-stripes" opacity="0.45">
+                  <path d="M22 41 L 28 43" stroke={activePalette.stripeColor} strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M42 41 L 36 43" stroke={activePalette.stripeColor} strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M20 46 L 26 47" stroke={activePalette.stripeColor} strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M44 46 L 38 47" stroke={activePalette.stripeColor} strokeWidth="1.5" strokeLinecap="round" />
+                </g>
+              )}
+
+              {/* Chest Marking */}
+              <ellipse cx="32" cy="45" rx="8" ry="9" fill={activePalette.chestFill} opacity="0.8" />
             </g>
 
             {/* Cat Head Layer */}
@@ -326,22 +538,22 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               {/* Left Ear */}
               <path
                 d="M19 22 L 23 10 L 31 18 Z"
-                fill="var(--pet-fur-fill, #1e293b)"
-                stroke="var(--pet-fur-stroke, #475569)"
+                fill={activePalette.furFill}
+                stroke={activePalette.furStroke}
                 strokeWidth="2"
                 strokeLinejoin="round"
               />
-              <path d="M22 19 L 24 13 L 29 18 Z" fill="#fb7185" opacity="0.8" />
+              <path d="M22 19 L 24 13 L 29 18 Z" fill={activePalette.earPink} opacity="0.8" />
 
               {/* Right Ear */}
               <path
                 d="M45 22 L 41 10 L 33 18 Z"
-                fill="var(--pet-fur-fill, #1e293b)"
-                stroke="var(--pet-fur-stroke, #475569)"
+                fill={activePalette.furFill}
+                stroke={activePalette.furStroke}
                 strokeWidth="2"
                 strokeLinejoin="round"
               />
-              <path d="M42 19 L 40 13 L 35 18 Z" fill="#fb7185" opacity="0.8" />
+              <path d="M42 19 L 40 13 L 35 18 Z" fill={activePalette.earPink} opacity="0.8" />
 
               {/* Head Circle */}
               <ellipse
@@ -349,8 +561,8 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 cy="28"
                 rx="17"
                 ry="14"
-                fill="var(--pet-fur-fill, #1e293b)"
-                stroke="var(--pet-fur-stroke, #475569)"
+                fill={activePalette.furFill}
+                stroke={activePalette.furStroke}
                 strokeWidth="2"
               />
 
@@ -359,7 +571,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               <path d="M52 28 L 42 29 M 53 32 L 43 31" stroke="var(--text-muted, #94a3b8)" strokeWidth="1.2" strokeLinecap="round" />
 
               {/* Nose */}
-              <polygon points="30,31 34,31 32,33" fill="#fb7185" />
+              <polygon points="30,31 34,31 32,33" fill={activePalette.earPink} />
 
               {/* Mouth */}
               <path
@@ -370,7 +582,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 fill="none"
               />
 
-              {/* Eyes Expression System */}
+              {/* Eyes Expression System with Dynamic Cursor Tracking */}
               {state === 'sleep' ? (
                 // Sleeping Eyes: Curved closed slits ^ ^
                 <g className="texcat-eyes-sleep">
@@ -380,8 +592,8 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               ) : state === 'compile-success' ? (
                 // Celebratory Happy Eyes
                 <g className="texcat-eyes-happy">
-                  <path d="M22 28 Q 26 24 29 28" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-                  <path d="M35 28 Q 38 24 42 28" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+                  <path d="M22 28 Q 26 24 29 28" stroke={activePalette.eyeColor} strokeWidth="2.5" strokeLinecap="round" fill="none" />
+                  <path d="M35 28 Q 38 24 42 28" stroke={activePalette.eyeColor} strokeWidth="2.5" strokeLinecap="round" fill="none" />
                 </g>
               ) : state === 'compile-fail' ? (
                 // Puzzled / Diagnostic Alert Eyes
@@ -394,12 +606,26 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   <path d="M43 18 C 43 18 45 22 43 23 C 41 23 41 21 43 18 Z" fill="#38bdf8" opacity="0.9" />
                 </g>
               ) : (
-                // Normal / Attentive Eyes with Procedural CSS Blink
+                // Normal / Attentive Eyes with Procedural CSS Blink & Cursor Look-At
                 <g className="texcat-eyes-normal">
-                  <ellipse cx="25" cy="26" rx="3.5" ry="4" fill="#38bdf8" className="texcat-eye-pupil" />
-                  <circle cx="26" cy="24.5" r="1.2" fill="#fff" />
-                  <ellipse cx="39" cy="26" rx="3.5" ry="4" fill="#38bdf8" className="texcat-eye-pupil" />
-                  <circle cx="40" cy="24.5" r="1.2" fill="#fff" />
+                  <ellipse
+                    cx={25 + pupilOffset.x}
+                    cy={26 + pupilOffset.y}
+                    rx="3.5"
+                    ry="4"
+                    fill={activePalette.eyeColor}
+                    className="texcat-eye-pupil"
+                  />
+                  <circle cx={26 + pupilOffset.x} cy={24.5 + pupilOffset.y} r="1.2" fill="#fff" />
+                  <ellipse
+                    cx={39 + pupilOffset.x}
+                    cy={26 + pupilOffset.y}
+                    rx="3.5"
+                    ry="4"
+                    fill={activePalette.eyeColor}
+                    className="texcat-eye-pupil"
+                  />
+                  <circle cx={40 + pupilOffset.x} cy={24.5 + pupilOffset.y} r="1.2" fill="#fff" />
                 </g>
               )}
 
@@ -427,16 +653,14 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             {state === 'typing-paws' ? (
               // Bongo Cat Drumming Paws & Mini Keyboard Desk
               <g className="texcat-bongo-rig">
-                {/* Mini Keyboard Desk */}
                 <rect x="14" y="49" width="36" height="6" rx="2" fill="#0f172a" stroke="#334155" strokeWidth="1" />
                 <line x1="18" y1="52" x2="46" y2="52" stroke="#38bdf8" strokeWidth="1" strokeDasharray="3 2" />
 
-                {/* Alternating Paws */}
                 <g className="texcat-paw-left">
-                  <ellipse cx="23" cy="48" rx="4.5" ry="3.5" fill="var(--pet-fur-fill, #1e293b)" stroke="#475569" strokeWidth="1.5" />
+                  <ellipse cx="23" cy="48" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 </g>
                 <g className="texcat-paw-right">
-                  <ellipse cx="41" cy="48" rx="4.5" ry="3.5" fill="var(--pet-fur-fill, #1e293b)" stroke="#475569" strokeWidth="1.5" />
+                  <ellipse cx="41" cy="48" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 </g>
               </g>
             ) : state === 'compiling-scholar' ? (
@@ -446,15 +670,20 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 <line x1="25" y1="47" x2="39" y2="47" stroke="#0284c7" strokeWidth="1" />
                 <line x1="25" y1="50" x2="36" y2="50" stroke="#64748b" strokeWidth="1" />
                 <line x1="25" y1="53" x2="38" y2="53" stroke="#64748b" strokeWidth="1" />
-                {/* Paws holding sides */}
-                <ellipse cx="22" cy="49" rx="3.5" ry="4" fill="var(--pet-fur-fill, #1e293b)" stroke="#475569" strokeWidth="1.2" />
-                <ellipse cx="42" cy="49" rx="3.5" ry="4" fill="var(--pet-fur-fill, #1e293b)" stroke="#475569" strokeWidth="1.2" />
+                <ellipse cx="22" cy="49" rx="3.5" ry="4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.2" />
+                <ellipse cx="42" cy="49" rx="3.5" ry="4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.2" />
+              </g>
+            ) : state === 'lifted-scruff' ? (
+              // Dangling Paws when lifted by the scruff
+              <g className="texcat-paws-dangling">
+                <ellipse cx="25" cy="54" rx="3.5" ry="5.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+                <ellipse cx="39" cy="54" rx="3.5" ry="5.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
               </g>
             ) : (
               // Resting Front Paws
               <g className="texcat-paws-resting">
-                <ellipse cx="24" cy="52" rx="4.5" ry="3.5" fill="var(--pet-fur-fill, #1e293b)" stroke="#475569" strokeWidth="1.5" />
-                <ellipse cx="40" cy="52" rx="4.5" ry="3.5" fill="var(--pet-fur-fill, #1e293b)" stroke="#475569" strokeWidth="1.5" />
+                <ellipse cx="24" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+                <ellipse cx="40" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
               </g>
             )}
           </svg>
