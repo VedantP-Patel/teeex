@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { Project, ProjectRole, UserProfile } from '../../types/latex';
 import { STARTER_TEMPLATES } from '../../services/templates';
+import { resolveUserProjectRole, formatRelativeTime } from '../../services/projectsService';
 
 interface Props {
   isOpen: boolean;
@@ -44,7 +45,7 @@ export const ProjectsDashboardModal: React.FC<Props> = ({
   onDuplicateProject,
   onToggleArchiveProject,
   onDeleteProject,
-  currentUser: _currentUser,
+  currentUser,
 }) => {
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -55,9 +56,10 @@ export const ProjectsDashboardModal: React.FC<Props> = ({
   const filteredProjects = useMemo(() => {
     return (projects || []).filter(p => {
       if (!p) return false;
+      const role = resolveUserProjectRole(p, currentUser);
       // Tab filter
-      if (filterTab === 'owner' && p.role !== 'owner') return false;
-      if (filterTab === 'shared' && p.role === 'owner') return false;
+      if (filterTab === 'owner' && role !== 'owner') return false;
+      if (filterTab === 'shared' && role === 'owner') return false;
       if (filterTab === 'archived' && !p.isArchived) return false;
       if (filterTab !== 'archived' && p.isArchived) return false;
 
@@ -68,7 +70,7 @@ export const ProjectsDashboardModal: React.FC<Props> = ({
       const matchTags = Array.isArray(p.tags) && p.tags.some(t => t.toLowerCase().includes(q));
       return matchTitle || matchTags;
     });
-  }, [projects, filterTab, searchQuery]);
+  }, [projects, filterTab, searchQuery, currentUser]);
 
   if (!isOpen) return null;
 
@@ -78,6 +80,7 @@ export const ProjectsDashboardModal: React.FC<Props> = ({
     onCreateProject(newTitle.trim(), selectedTemplateId);
     setNewTitle('');
     setIsCreating(false);
+    onClose();
   };
 
   const getRoleBadge = (role: ProjectRole) => {
@@ -149,13 +152,13 @@ export const ProjectsDashboardModal: React.FC<Props> = ({
               onClick={() => setFilterTab('owner')}
               style={{ ...tabBtnStyle, ...(filterTab === 'owner' ? activeTabBtnStyle : {}) }}
             >
-              My Papers ({(projects || []).filter(p => p && p.role === 'owner' && !p.isArchived).length})
+              My Papers ({(projects || []).filter(p => p && resolveUserProjectRole(p, currentUser) === 'owner' && !p.isArchived).length})
             </button>
             <button
               onClick={() => setFilterTab('shared')}
               style={{ ...tabBtnStyle, ...(filterTab === 'shared' ? activeTabBtnStyle : {}) }}
             >
-              Shared with Me ({(projects || []).filter(p => p && p.role !== 'owner' && !p.isArchived).length})
+              Shared with Me ({(projects || []).filter(p => p && resolveUserProjectRole(p, currentUser) !== 'owner' && !p.isArchived).length})
             </button>
             <button
               onClick={() => setFilterTab('archived')}
@@ -261,6 +264,8 @@ export const ProjectsDashboardModal: React.FC<Props> = ({
           ) : (
             filteredProjects.map(proj => {
               const isActive = proj.id === activeProjectId;
+              const userRole = resolveUserProjectRole(proj, currentUser);
+              const isOwner = userRole === 'owner';
               return (
                 <div
                   key={proj.id}
@@ -273,10 +278,15 @@ export const ProjectsDashboardModal: React.FC<Props> = ({
                   {/* Top line: Role badge + status */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {getRoleBadge(proj.role)}
+                      {getRoleBadge(userRole)}
                       {isActive && (
                         <span className="badge badge-emerald" style={{ fontSize: 10 }}>
                           Currently Active
+                        </span>
+                      )}
+                      {!isOwner && (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          by {proj.ownerEmail ? proj.ownerEmail.split('@')[0] : 'Author'}
                         </span>
                       )}
                     </div>
@@ -302,8 +312,8 @@ export const ProjectsDashboardModal: React.FC<Props> = ({
                         <Archive size={13} />
                       </button>
 
-                      {/* Delete */}
-                      {proj.role === 'owner' && (
+                      {/* Delete strictly for owner */}
+                      {isOwner && (
                         <button
                           onClick={() => {
                             if (window.confirm(`Delete project "${proj.title}"?`)) {
@@ -345,7 +355,7 @@ export const ProjectsDashboardModal: React.FC<Props> = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <span>{(proj.files || []).length} file{(proj.files || []).length === 1 ? '' : 's'}</span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Clock size={11} /> {proj.updatedAt || 'Recently'}
+                        <Clock size={11} /> {formatRelativeTime(proj.updatedAt)}
                       </span>
                     </div>
 
@@ -551,6 +561,7 @@ const cardStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   transition: 'all 0.15s ease',
+  contain: 'content',
 };
 
 const cardActionBtnStyle: React.CSSProperties = {

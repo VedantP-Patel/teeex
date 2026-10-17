@@ -1391,8 +1391,12 @@ export function App() {
       setActiveFileId(firstId);
       setOpenFileIds([firstId]);
       setProjectTitle(proj.title);
+      setPeers([]);
+      setIsProjectsHubOpen(false);
+      setTimeout(() => triggerCompile(), 60);
+      setToast(`Created and opened project "${title}"`);
     }
-  }, [currentUser, flushCurrentProjectSave]);
+  }, [currentUser, flushCurrentProjectSave, triggerCompile]);
 
   const handleDuplicateProject = useCallback((projId: string) => {
     flushCurrentProjectSave();
@@ -1405,9 +1409,16 @@ export function App() {
       setActiveProjectIdState(cloned.id);
       setFiles(cloned.files);
       setFolders(cloned.folders || ['sections', 'figures']);
+      const firstId = cloned.files[0]?.id || 'main.tex';
+      setActiveFileId(firstId);
+      setOpenFileIds([firstId]);
       setProjectTitle(cloned.title);
+      setPeers([]);
+      setIsProjectsHubOpen(false);
+      setTimeout(() => triggerCompile(), 60);
+      setToast(`Duplicated project "${cloned.title}"`);
     }
-  }, [currentUser, flushCurrentProjectSave]);
+  }, [currentUser, flushCurrentProjectSave, triggerCompile]);
 
   const handleToggleArchiveProject = useCallback((projId: string) => {
     const updated = toggleArchiveProject(projId);
@@ -1423,9 +1434,15 @@ export function App() {
       setActiveProjectIdState(next.id);
       setFiles(next.files);
       setFolders(next.folders || ['sections', 'figures']);
+      const firstId = next.files[0]?.id || 'main.tex';
+      setActiveFileId(firstId);
+      setOpenFileIds([firstId]);
       setProjectTitle(next.title);
+      setPeers([]);
+      setTimeout(() => triggerCompile(), 60);
     }
-  }, []);
+    setToast('Project deleted.');
+  }, [triggerCompile]);
 
   const handleInviteMember = useCallback((email: string, role: ProjectRole) => {
     const newMember: ProjectMember = {

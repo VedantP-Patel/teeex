@@ -32,6 +32,7 @@ import type { CompileState, CompileMode, Collaborator, Project, ProjectRole, Use
 import type { EngineStatus } from '../services/latexCompiler';
 import { usePwaInstall } from '../hooks/usePwaInstall';
 import { EngineWarmupBadge } from './EngineWarmupBadge';
+import { resolveUserProjectRole } from '../services/projectsService';
 
 interface Props {
   projectTitle: string;
@@ -226,9 +227,14 @@ export const Navbar: React.FC<Props> = ({
                           {proj.title}
                         </span>
                       </div>
-                      <span className={`badge ${getRoleBadgeClass(proj.role)}`} style={{ fontSize: 9.5, padding: '1px 5px', flexShrink: 0 }}>
-                        {proj.role}
-                      </span>
+                      {(() => {
+                        const itemRole = resolveUserProjectRole(proj, currentUser);
+                        return (
+                          <span className={`badge ${getRoleBadgeClass(itemRole)}`} style={{ fontSize: 9.5, padding: '1px 5px', flexShrink: 0 }}>
+                            {itemRole}
+                          </span>
+                        );
+                      })()}
                     </button>
                   );
                 })}

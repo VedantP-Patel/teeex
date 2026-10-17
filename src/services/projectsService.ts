@@ -1,7 +1,9 @@
-import type { Project } from '../types/latex';
+import type { Project, ProjectRole, UserProfile } from '../types/latex';
 import { STARTER_TEMPLATES } from './templates';
 import { getAuthUid, getSupabaseClient } from './supabaseClient';
 import { getStoredSession } from './authService';
+import { verifyShareKey } from './shareSecurityService';
+import { safePostTask } from '../utils/scheduler';
 
 const PROJECTS_STORAGE_KEY = 'teeex_saved_projects';
 const ACTIVE_PROJECT_ID_KEY = 'teeex_active_project_id';
@@ -24,6 +26,69 @@ function newProjectId(): string {
   return `proj-${Array.from(entropy, (b) => b.toString(16).padStart(2, '0')).join('')}`;
 }
 
+export function formatRelativeTime(isoOrText?: string): string {
+  if (!isoOrText) return 'Recently';
+  const trimmed = isoOrText.trim();
+  if (trimmed.toLowerCase().includes('just now')) return 'Just now';
+  if (trimmed.toLowerCase().includes('ago') || trimmed.toLowerCase().includes('yesterday')) return trimmed;
+
+  const date = new Date(trimmed);
+  if (isNaN(date.getTime())) return trimmed;
+
+  const now = Date.now();
+  const diffSec = Math.floor((now - date.getTime()) / 1000);
+
+  if (diffSec < 45) return 'Just now';
+  if (diffSec < 3600) return `${Math.max(1, Math.floor(diffSec / 60))}m ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  if (diffSec < 172800) return 'Yesterday';
+  if (diffSec < 604800) return `${Math.floor(diffSec / 86400)}d ago`;
+
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+export function resolveUserProjectRole(
+  project: Project,
+  currentUser: UserProfile | null,
+  sharedRoomContext?: { roomId: string; key?: string | null }
+): ProjectRole {
+  if (sharedRoomContext?.key) {
+    const verified = verifyShareKey(sharedRoomContext.roomId, sharedRoomContext.key);
+    if (verified) return verified;
+  }
+
+  if (currentUser?.email) {
+    const email = currentUser.email.toLowerCase().trim();
+    const uid = currentUser.id;
+    if (
+      (project.ownerEmail && project.ownerEmail.toLowerCase().trim() === email) ||
+      (uid && project.ownerId === uid)
+    ) {
+      return 'owner';
+    }
+    const member = project.members?.find(
+      m => (m.email && m.email.toLowerCase().trim() === email) || (uid && m.id === uid)
+    );
+    if (member?.role) return member.role;
+    return 'viewer';
+  }
+
+  // Guest / unauthenticated mode:
+  const isLocal =
+    project.ownerId === 'usr-local' ||
+    project.ownerEmail === 'you@teeex.local' ||
+    project.ownerEmail === 'anonymous@teeex.io';
+
+  if (isLocal) return 'owner';
+
+  const member = project.members?.find(
+    m => m.id === 'usr-local' || m.email === 'you@teeex.local' || m.email === 'anonymous@teeex.io'
+  );
+  if (member?.role) return member.role;
+
+  return project.role === 'owner' ? 'viewer' : (project.role || 'viewer');
+}
+
 const INITIAL_PROJECTS: Project[] = [
   {
     id: 'proj-starter',
@@ -33,8 +98,9 @@ const INITIAL_PROJECTS: Project[] = [
     role: 'owner',
     createdAt: new Date().toISOString(),
     updatedAt: 'Just now',
-    files: STARTER_TEMPLATES[0].files, // IEEE paper, as an editable example
-    tags: [],
+    files: STARTER_TEMPLATES[0].files, // IEEE paper example
+    folders: ['sections', 'figures'],
+    tags: ['#research', '#draft'],
     members: [
       {
         id: 'usr-local',
@@ -44,6 +110,39 @@ const INITIAL_PROJECTS: Project[] = [
         avatarColor: '#38bdf8',
         role: 'owner',
         joinedAt: new Date().toISOString().slice(0, 10),
+      },
+    ],
+    isArchived: false,
+  },
+  {
+    id: 'proj-neural-quantum',
+    title: 'Neural Quantum State Tomography',
+    ownerId: 'usr-elena-rostova',
+    ownerEmail: 'elena.rostova@mit.edu',
+    role: 'editor', // Viewing user is editor
+    createdAt: new Date(Date.now() - 7200000).toISOString(),
+    updatedAt: '2h ago',
+    files: STARTER_TEMPLATES[1] ? STARTER_TEMPLATES[1].files : STARTER_TEMPLATES[0].files,
+    folders: ['sections', 'figures'],
+    tags: ['#quantum', '#collab', '#attention'],
+    members: [
+      {
+        id: 'usr-elena-rostova',
+        email: 'elena.rostova@mit.edu',
+        name: 'Dr. Elena Rostova',
+        avatar: 'ER',
+        avatarColor: '#a855f7',
+        role: 'owner',
+        joinedAt: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
+      },
+      {
+        id: 'usr-local',
+        email: 'you@teeex.local',
+        name: 'You',
+        avatar: 'ME',
+        avatarColor: '#38bdf8',
+        role: 'editor',
+        joinedAt: new Date(Date.now() - 7200000).toISOString().slice(0, 10),
       },
     ],
     isArchived: false,
@@ -100,6 +199,8 @@ export function loadProjects(userEmail?: string, userName?: string): Project[] {
   const targetEmail = (userEmail || sessionUser?.email || '').toLowerCase().trim();
   const targetName = userName || sessionUser?.fullName || (targetEmail ? targetEmail.split('@')[0] : 'Author');
 
+  let baseList: Project[];
+
   if (targetEmail) {
     const filtered = allProjects.filter(p =>
       (p.ownerEmail || '').toLowerCase() === targetEmail ||
@@ -113,46 +214,62 @@ export function loadProjects(userEmail?: string, userName?: string): Project[] {
         targetEmail,
         targetName
       );
-      return [defaultProj];
-    }
-
-    // Auto-sync existing projects if userName differs from raw email prefix
-    if (targetName && targetName.trim()) {
-      let anyChanged = false;
-      const updatedAll = allProjects.map(p => {
-        let pChanged = false;
-        const newMembers = (p.members || []).map(m => {
-          if (m.email.toLowerCase() === targetEmail && m.name !== targetName) {
-            pChanged = true;
-            return {
-              ...m,
-              name: targetName,
-              avatar: targetName.substring(0, 2).toUpperCase() || m.avatar,
-            };
+      baseList = [defaultProj];
+    } else {
+      // Auto-sync existing projects if userName differs from raw email prefix
+      if (targetName && targetName.trim()) {
+        let anyChanged = false;
+        const updatedAll = allProjects.map(p => {
+          let pChanged = false;
+          const newMembers = (p.members || []).map(m => {
+            if (m.email.toLowerCase() === targetEmail && m.name !== targetName) {
+              pChanged = true;
+              return {
+                ...m,
+                name: targetName,
+                avatar: targetName.substring(0, 2).toUpperCase() || m.avatar,
+              };
+            }
+            return m;
+          });
+          if (pChanged) {
+            anyChanged = true;
+            return { ...p, members: newMembers };
           }
-          return m;
+          return p;
         });
-        if (pChanged) {
-          anyChanged = true;
-          return { ...p, members: newMembers };
-        }
-        return p;
-      });
 
-      if (anyChanged) {
-        saveProjects(updatedAll);
-        return updatedAll.filter(p =>
-          (p.ownerEmail || '').toLowerCase() === targetEmail ||
-          p.members?.some(m => (m.email || '').toLowerCase() === targetEmail)
-        );
+        if (anyChanged) {
+          saveProjects(updatedAll);
+          baseList = updatedAll.filter(p =>
+            (p.ownerEmail || '').toLowerCase() === targetEmail ||
+            p.members?.some(m => (m.email || '').toLowerCase() === targetEmail)
+          );
+        } else {
+          baseList = filtered;
+        }
+      } else {
+        baseList = filtered;
       }
     }
-
-    return filtered;
+  } else {
+    // Guest / unauthenticated state: return all projects so they can explore
+    baseList = allProjects;
   }
 
-  // Guest / unauthenticated state: return all projects so they can explore
-  return allProjects;
+  const inspectingUser: UserProfile | null = targetEmail
+    ? {
+        id: sessionUser?.id || `usr-${targetEmail.replace(/[^a-zA-Z0-9]/g, '')}`,
+        email: targetEmail,
+        fullName: targetName,
+      }
+    : sessionUser;
+
+  // Resolve dynamic role relative to inspecting user
+  return baseList.map(p => ({
+    ...p,
+    role: resolveUserProjectRole(p, inspectingUser),
+  }));
 }
 
 export function saveProjects(projects: Project[]): void {
@@ -211,7 +328,7 @@ export function createProject(
   setActiveProjectId(newId);
 
   // Background sync if connected
-  pushProjectToCloud(newProject).catch(() => { });
+  safePostTask(() => pushProjectToCloud(newProject), { priority: 'background' }).catch(() => { });
 
   return newProject;
 }
@@ -236,7 +353,7 @@ export function duplicateProject(projectId: string): Project | null {
   saveProjects(updated);
 
   // Background sync if connected
-  pushProjectToCloud(cloned).catch(() => { });
+  safePostTask(() => pushProjectToCloud(cloned), { priority: 'background' }).catch(() => { });
 
   return cloned;
 }
@@ -249,9 +366,11 @@ export function toggleArchiveProject(projectId: string): Project[] {
   saveProjects(updated);
 
   const target = updated.find(p => p.id === projectId);
-  if (target) pushProjectToCloud(target).catch(() => { });
+  if (target) {
+    safePostTask(() => pushProjectToCloud(target), { priority: 'background' }).catch(() => { });
+  }
 
-  return updated;
+  return loadProjects();
 }
 
 export function deleteProject(projectId: string): Project[] {
@@ -262,14 +381,14 @@ export function deleteProject(projectId: string): Project[] {
   // Background delete from Supabase if connected
   const supabase = getSupabaseClient();
   if (supabase) {
-    (async () => {
+    safePostTask(async () => {
       try {
         await supabase.from('projects').delete().eq('id', projectId);
       } catch { }
-    })();
+    }, { priority: 'background' }).catch(() => { });
   }
 
-  return filtered;
+  return loadProjects();
 }
 
 export function updateProject(
@@ -290,9 +409,11 @@ export function updateProject(
   saveProjects(updated);
 
   const target = updated.find(p => p.id === projectId);
-  if (target) pushProjectToCloud(target).catch(() => { });
+  if (target) {
+    safePostTask(() => pushProjectToCloud(target), { priority: 'background' }).catch(() => { });
+  }
 
-  return updated;
+  return loadProjects();
 }
 
 // ==============================================================================
