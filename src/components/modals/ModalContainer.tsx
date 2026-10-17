@@ -143,6 +143,8 @@ export interface ModalContainerProps {
   onToggleSidebar?: () => void;
   onSaveProject?: () => void;
   onForwardSync?: () => void;
+  isDeskPetEnabled?: boolean;
+  onToggleDeskPet?: () => void;
 }
 
 export const ModalContainer: React.FC<ModalContainerProps> = ({
@@ -224,6 +226,8 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
   onToggleSidebar,
   onSaveProject,
   onForwardSync,
+  isDeskPetEnabled,
+  onToggleDeskPet,
 }) => {
   const isAnyModalOpen =
     isImageUploadOpen ||
@@ -412,6 +416,8 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
           sections={parsedDoc.sections}
           onJumpToLine={(line) => setTargetLine(line)}
           initialMode={commandPaletteInitialMode}
+          isDeskPetEnabled={isDeskPetEnabled}
+          onToggleDeskPet={onToggleDeskPet}
         />
       )}
     </Suspense>

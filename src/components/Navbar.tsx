@@ -24,7 +24,8 @@ import {
   Plus,
   WifiOff,
   ShieldCheck,
-  Search
+  Search,
+  Cat
 } from 'lucide-react';
 import type { CompileState, Collaborator, Project, ProjectRole, UserProfile } from '../types/latex';
 
@@ -58,6 +59,8 @@ interface Props {
   currentRole: ProjectRole;
   isEncrypted?: boolean;
   isOffline?: boolean;
+  isDeskPetEnabled?: boolean;
+  onToggleDeskPet?: () => void;
 }
 
 export const Navbar: React.FC<Props> = ({
@@ -70,6 +73,8 @@ export const Navbar: React.FC<Props> = ({
   selfUser: _selfUser,
   theme,
   onToggleTheme,
+  isDeskPetEnabled = false,
+  onToggleDeskPet,
   onOpenShare,
   onOpenTableBuilder,
   onOpenSymbols,
@@ -468,6 +473,25 @@ export const Navbar: React.FC<Props> = ({
           title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
         >
           {theme === 'dark' ? <Sun size={13} color="#f59e0b" /> : <Moon size={13} color="#38bdf8" />}
+        </button>
+
+        {/* Desk Companion (TeXCat) Toggle */}
+        <button
+          type="button"
+          onClick={onToggleDeskPet}
+          aria-label="Toggle Desk Companion"
+          aria-pressed={isDeskPetEnabled}
+          className="btn-ghost"
+          style={{
+            padding: 4,
+            borderRadius: 'var(--radius-sm)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            backgroundColor: isDeskPetEnabled ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+          }}
+          title={`Desk Companion: ${isDeskPetEnabled ? 'Active (Click to disable)' : 'Off (Click to enable)'}`}
+        >
+          <Cat size={13} color={isDeskPetEnabled ? '#38bdf8' : 'var(--text-muted)'} />
         </button>
 
         <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />

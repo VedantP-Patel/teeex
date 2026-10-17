@@ -1994,3 +1994,390 @@ p.latex-force-indent {
     display: none !important;
   }
 }
+
+/* ==============================================================================
+   STAGE 6: TEXCAT DESK COMPANION (STATE-DRIVEN GPU KEYFRAMES & PARTICLES)
+   ============================================================================== */
+
+:root {
+  --pet-fur-fill: #1e293b;
+  --pet-fur-stroke: #475569;
+  --pet-chest-fill: #334155;
+}
+
+[data-theme="light"],
+.light {
+  --pet-fur-fill: #f1f5f9;
+  --pet-fur-stroke: #94a3b8;
+  --pet-chest-fill: #e2e8f0;
+}
+
+/* Paused state when document.hidden is active */
+.desk-pet-container.is-paused,
+.desk-pet-container.is-paused * {
+  animation-play-state: paused !important;
+}
+
+/* Base Mascot Hover & Focus */
+.desk-pet-mascot-wrapper:focus-visible {
+  outline: 2px solid var(--accent-cyan, #38bdf8);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm, 6px);
+}
+
+.desk-pet-mascot-wrapper:hover .texcat-rig {
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.4));
+}
+
+/* 1. Idle Attentive Breathing & Blinking */
+.texcat-rig.state-idle {
+  animation: pet-breathe 2.8s ease-in-out infinite;
+}
+
+.texcat-tail {
+  animation: pet-tail-sway 3.2s ease-in-out infinite;
+}
+
+.texcat-eye-pupil {
+  animation: pet-eye-blink 4.8s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes pet-breathe {
+  0%, 100% {
+    transform: scaleY(1) translateY(0);
+  }
+  50% {
+    transform: scaleY(1.03) translateY(-1px);
+  }
+}
+
+@keyframes pet-tail-sway {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(14deg);
+  }
+}
+
+@keyframes pet-eye-blink {
+  0%, 94%, 100% {
+    transform: scaleY(1);
+  }
+  96%, 98% {
+    transform: scaleY(0.1);
+  }
+}
+
+/* 2. Walk & Pacing on Dock Ledge */
+.texcat-rig.state-walk {
+  animation: pet-walk-bob 0.35s ease-in-out infinite alternate;
+}
+
+.texcat-rig.facing-left {
+  transform: scaleX(-1);
+}
+
+@keyframes pet-walk-bob {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-2px);
+  }
+}
+
+/* 3. Bongo Cat Typing Paws */
+.texcat-rig.state-typing-paws {
+  animation: pet-bongo-groove 0.36s ease-in-out infinite alternate;
+}
+
+.texcat-rig.state-typing-paws .texcat-paw-left {
+  animation: pet-paw-tap-left 0.18s ease-in-out infinite alternate;
+  transform-origin: 23px 45px;
+}
+
+.texcat-rig.state-typing-paws .texcat-paw-right {
+  animation: pet-paw-tap-right 0.18s ease-in-out infinite alternate;
+  transform-origin: 41px 45px;
+}
+
+@keyframes pet-bongo-groove {
+  0% {
+    transform: translateY(0) scaleY(1);
+  }
+  100% {
+    transform: translateY(1px) scaleY(0.97);
+  }
+}
+
+@keyframes pet-paw-tap-left {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  100% {
+    transform: translateY(3.5px) rotate(6deg);
+  }
+}
+
+@keyframes pet-paw-tap-right {
+  0% {
+    transform: translateY(3.5px) rotate(-6deg);
+  }
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+}
+
+/* 4. Compiling: Scholar Mode */
+.texcat-rig.state-compiling-scholar {
+  animation: pet-scholar-study 2s ease-in-out infinite;
+}
+
+@keyframes pet-scholar-study {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-1px) rotate(-2deg);
+  }
+  75% {
+    transform: translateY(-1px) rotate(2deg);
+  }
+}
+
+/* 5. Compile Success Celebration Leap */
+.texcat-rig.state-compile-success {
+  animation: pet-leap 0.8s cubic-bezier(0.16, 1, 0.3, 1) infinite alternate;
+}
+
+@keyframes pet-leap {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  60% {
+    transform: translateY(-14px) scale(1.08);
+  }
+  100% {
+    transform: translateY(-16px) scale(1.05);
+  }
+}
+
+/* 6. Compile Fail Detective Mode */
+.texcat-rig.state-compile-fail {
+  animation: pet-confused-tilt 2.4s ease-in-out infinite;
+}
+
+.texcat-rig.state-compile-fail .texcat-magnifier {
+  animation: pet-magnify-glance 2.4s ease-in-out infinite;
+}
+
+@keyframes pet-confused-tilt {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  30% {
+    transform: rotate(7deg) translateY(1px);
+  }
+  70% {
+    transform: rotate(-5deg) translateY(1px);
+  }
+}
+
+@keyframes pet-magnify-glance {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(2px) rotate(-12deg);
+  }
+}
+
+/* 7. Waking Arch-Stretch */
+.texcat-rig.state-waking-stretch {
+  animation: pet-stretch 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pet-stretch {
+  0% {
+    transform: scale(1) translateY(0);
+  }
+  35% {
+    transform: scaleX(1.18) scaleY(0.85) translateY(2px);
+  }
+  70% {
+    transform: scaleX(0.88) scaleY(1.15) translateY(-5px);
+  }
+  100% {
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Floating Hearts on Petting */
+.pet-heart-particles {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 48px;
+  height: 28px;
+  pointer-events: none;
+}
+
+.floating-heart {
+  position: absolute;
+  color: #f43f5e;
+  font-size: 14px;
+  animation: floatHeart 1.2s ease-out forwards;
+}
+
+.heart-1 { left: 4px; animation-delay: 0s; }
+.heart-2 { left: 18px; animation-delay: 0.15s; font-size: 16px; }
+.heart-3 { left: 32px; animation-delay: 0.3s; }
+
+@keyframes floatHeart {
+  0% { transform: translateY(0) scale(0.6); opacity: 0; }
+  30% { opacity: 1; }
+  100% { transform: translateY(-28px) scale(1.2); opacity: 0; }
+}
+
+/* Floating Zzz during Sleep */
+.pet-sleep-particles {
+  position: absolute;
+  top: -6px;
+  right: 6px;
+  width: 32px;
+  height: 28px;
+  pointer-events: none;
+}
+
+.floating-z {
+  position: absolute;
+  color: #a855f7;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  animation: floatZ 2.4s ease-in-out infinite;
+}
+
+.z-1 { font-size: 11px; top: 0; right: 0; animation-delay: 0s; }
+.z-2 { font-size: 14px; top: -10px; right: 8px; animation-delay: 0.8s; }
+.z-3 { font-size: 17px; top: -20px; right: 16px; animation-delay: 1.6s; }
+
+@keyframes floatZ {
+  0% { transform: translateY(0) scale(0.7); opacity: 0; }
+  35% { opacity: 0.9; }
+  100% { transform: translateY(-22px) translateX(-8px) scale(1.15); opacity: 0; }
+}
+
+/* Floating Sparkles on Compile Success */
+.pet-sparkle-particles {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 48px;
+  height: 28px;
+  pointer-events: none;
+}
+
+.floating-sparkle {
+  position: absolute;
+  color: #38bdf8;
+  animation: floatSparkle 1.8s ease-out infinite;
+}
+
+.sparkle-1 { left: -16px; font-size: 14px; animation-delay: 0s; color: #38bdf8; }
+.sparkle-2 { left: 0px; font-size: 16px; animation-delay: 0.4s; color: #f59e0b; }
+.sparkle-3 { left: 16px; font-size: 12px; animation-delay: 0.8s; color: #38bdf8; }
+
+@keyframes floatSparkle {
+  0% { transform: translateY(0) scale(0.5) rotate(0deg); opacity: 0; }
+  40% { opacity: 1; }
+  100% { transform: translateY(-24px) scale(1.1) rotate(90deg); opacity: 0; }
+}
+
+/* Rolling Cyan Yarn Ball */
+.pet-yarn-ball {
+  position: absolute;
+  bottom: 0px;
+  right: -50px;
+  animation: yarnRollAcross 2.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes yarnRollAcross {
+  0% {
+    transform: translateX(0) rotate(0deg);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  80% {
+    transform: translateX(-65px) rotate(-720deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(-70px) rotate(-840deg);
+    opacity: 0;
+  }
+}
+
+/* Reaction Speech Bubbles */
+.pet-reaction-bubble {
+  position: absolute;
+  top: -24px;
+  right: 0;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: var(--radius-sm, 6px);
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  animation: fadeIn 0.15s ease-out;
+  pointer-events: none;
+}
+
+.reaction-fail {
+  background-color: var(--color-error-bg, #450a0a);
+  color: var(--color-error, #f87171);
+  border: 1px solid var(--color-error-border, #7f1d1d);
+}
+
+.reaction-success {
+  background-color: var(--color-success-bg, #064e3b);
+  color: var(--color-success, #34d399);
+  border: 1px solid var(--color-success-border, #065f46);
+}
+
+.bubble-arrow {
+  position: absolute;
+  bottom: -4px;
+  right: 18px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid currentColor;
+}
+
+/* Reduced Motion Override: Halts all translations and instant animations */
+@media (prefers-reduced-motion: reduce) {
+  .desk-pet-container *,
+  .desk-pet-container,
+  .texcat-rig,
+  .texcat-tail,
+  .texcat-eye-pupil,
+  .texcat-paw-left,
+  .texcat-paw-right,
+  .floating-heart,
+  .floating-z,
+  .floating-sparkle,
+  .pet-yarn-ball {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transform: none !important;
+  }
+}

@@ -18,7 +18,8 @@ import {
   FolderKanban,
   PanelLeft,
   ArrowRight,
-  Save
+  Save,
+  Cat
 } from 'lucide-react';
 import type { Project, ProjectFile } from '../../types/latex';
 import { PAPER_FORMATS, type PaperFormatId } from '../../services/paperFormats';
@@ -62,6 +63,8 @@ interface Props {
   sections?: Array<{ title: string; line: number; level: number }>;
   onJumpToLine: (line: number) => void;
   initialMode?: 'all' | 'files';
+  isDeskPetEnabled?: boolean;
+  onToggleDeskPet?: () => void;
 }
 
 export const CommandPaletteModal: React.FC<Props> = ({
@@ -93,6 +96,8 @@ export const CommandPaletteModal: React.FC<Props> = ({
   sections = [],
   onJumpToLine,
   initialMode = 'all',
+  isDeskPetEnabled = false,
+  onToggleDeskPet,
 }) => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -186,6 +191,15 @@ export const CommandPaletteModal: React.FC<Props> = ({
       subtitle: 'Switch application color theme',
       icon: theme === 'dark' ? <Sun size={13} color="#f59e0b" /> : <Moon size={13} color="#38bdf8" />,
       onExecute: () => { onToggleTheme(); onClose(); },
+    });
+
+    list.push({
+      id: 'action-toggle-desk-pet',
+      category: 'Commands',
+      title: `Toggle Desk Companion (${isDeskPetEnabled ? 'Active / Disable' : 'Off / Enable'})`,
+      subtitle: 'Accessible state-driven typesetter companion (TeXCat)',
+      icon: <Cat size={13} color="#38bdf8" />,
+      onExecute: () => { onToggleDeskPet?.(); onClose(); },
     });
 
     list.push({

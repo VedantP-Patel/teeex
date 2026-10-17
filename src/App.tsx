@@ -49,6 +49,8 @@ import { useAutosaveRecovery } from './hooks/useAutosaveRecovery';
 import { parseBibtex } from './services/bibtexParser';
 import { STARTER_TEMPLATES } from './services/templates';
 import { exportProjectAsZip } from './services/zipExporter';
+import { useDeskPet } from './hooks/useDeskPet';
+import { DeskPet } from './components/DeskPet';
 import {
   CollaborationHub,
 } from './services/collaboration';
@@ -450,6 +452,24 @@ export function App() {
 
   const texEngineView = useTexEngine({ files });
 
+  // Desk Pet Companion State & Anonymized Typing Pulse
+  const [isTypingActive, setIsTypingActive] = useState(false);
+  const typingPulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pulseTyping = useCallback(() => {
+    setIsTypingActive(true);
+    if (typingPulseTimerRef.current) clearTimeout(typingPulseTimerRef.current);
+    typingPulseTimerRef.current = setTimeout(() => {
+      setIsTypingActive(false);
+    }, 450);
+  }, []);
+
+  const deskPet = useDeskPet({
+    compileStatus: compileState.status,
+    lastCompiledAt: texEngineView.lastCompiledAt,
+    errorCount: compileState.errorCount,
+    isTypingActive,
+  });
+
   const [syncTexIndex, setSyncTexIndex] = useState<SyncTexIndex | null>(null);
 
   useEffect(() => {
@@ -776,11 +796,12 @@ export function App() {
 
   // Fast, non-blocking file content update
   const handleCodeChange = useCallback((newCode: string) => {
+    pulseTyping();
     const currentId = activeFileIdRef.current;
     setFiles(prev => prev.map(f => f.id === currentId ? { ...f, content: newCode } : f));
     hub.broadcastFileUpdate(currentId, newCode);
     markDirty();
-  }, [hub, markDirty]);
+  }, [hub, markDirty, pulseTyping]);
 
   // Cursor change: Broadcasts immediately to peers, throttles local UI outline update to 200ms
   const handleCursorChange = useCallback((line: number, col: number) => {
@@ -1274,7 +1295,7 @@ export function App() {
     const newMember: ProjectMember = {
       id: `usr-${Date.now().toString(36)}`,
       email,
-      name: email.split('@')[0].replace(/[\._]/g, ' '),
+      name: email.split('@')[0].replace(/[._]/g, ' '),
       avatar: email.substring(0, 2).toUpperCase(),
       avatarColor: role === 'owner' ? '#38bdf8' : role === 'editor' ? '#10b981' : '#f59e0b',
       role,
@@ -1569,6 +1590,8 @@ export function App() {
         currentRole={currentRole}
         isEncrypted={!!activeProject?.isEncrypted}
         isOffline={isOffline}
+        isDeskPetEnabled={deskPet.isEnabled}
+        onToggleDeskPet={deskPet.toggleEnabled}
       />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -1703,6 +1726,14 @@ export function App() {
         onJumpToLine={setTargetLine}
         rawLogs={compileState.rawLogs}
       />
+
+      {deskPet.isEnabled && (
+        <DeskPet
+          {...deskPet}
+          dockCollapsed={diagnostics.length === 0}
+          onToggleEnabled={deskPet.toggleEnabled}
+        />
+      )}
 
       {toast && (
         <div className="app-toast" role="status" aria-live="polite">
@@ -1859,6 +1890,8 @@ export function App() {
         onForwardSync={() => {
           if (activeCursorLine) setForwardTargetLine(activeCursorLine);
         }}
+        isDeskPetEnabled={deskPet.isEnabled}
+        onToggleDeskPet={deskPet.toggleEnabled}
       />
     </>
   );
