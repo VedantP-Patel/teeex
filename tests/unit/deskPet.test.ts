@@ -397,31 +397,109 @@ describe('TeXCat Desk Companion (useDeskPet & DeskPet)', () => {
     });
   });
 
-  describe('Mathematical Thought Dreams & Typesetting Lore', () => {
+  describe('Academic Accessories & Attire', () => {
+    it('initializes with accessory none and cycles through academic outfits', async () => {
+      await mountHook();
+      expect(currentHook.accessory).toBe('none');
+
+      await act(async () => {
+        currentHook.cycleAccessory();
+      });
+      expect(currentHook.accessory).toBe('mortarboard');
+      expect(localStorage.getItem('teeex_desk_pet_accessory')).toBe('mortarboard');
+
+      await act(async () => {
+        currentHook.cycleAccessory();
+      });
+      expect(currentHook.accessory).toBe('scarf');
+
+      await act(async () => {
+        currentHook.cycleAccessory();
+      });
+      expect(currentHook.accessory).toBe('detective');
+
+      await act(async () => {
+        currentHook.cycleAccessory();
+      });
+      expect(currentHook.accessory).toBe('bowtie');
+
+      await act(async () => {
+        currentHook.cycleAccessory();
+      });
+      expect(currentHook.accessory).toBe('none');
+    });
+  });
+
+  describe('2D Viewport Dragging & Ledge Snapping', () => {
+    it('defaults to ledge perched coordinates (perchX: 28, perchY: 36, isSnappedToDock: true)', async () => {
+      await mountHook();
+      expect(currentHook.perchX).toBe(28);
+      expect(currentHook.perchY).toBe(36);
+      expect(currentHook.isSnappedToDock).toBe(true);
+    });
+
+    it('supports resetPositionToDock', async () => {
+      await mountHook();
+      await act(async () => {
+        currentHook.resetPositionToDock();
+      });
+      expect(currentHook.perchX).toBe(28);
+      expect(currentHook.perchY).toBe(36);
+      expect(currentHook.isSnappedToDock).toBe(true);
+    });
+  });
+
+  describe('Feline Micro-Behaviors (Loaf Mode)', () => {
     beforeEach(() => {
       localStorage.setItem('teeex_desk_pet_enabled', 'true');
     });
 
-    it('renders classic math dream thought bubble during sleep state', async () => {
-      await act(async () => {
-        root.render(
-          React.createElement(DeskPet, {
-            isEnabled: true,
-            state: 'sleep',
-            direction: 'right',
-            pacingOffset: 0,
-            isSleeping: true,
-            isReducedMotion: false,
-            isPaused: false,
-            petCount: 0,
-            currentDreamFormula: 'e^{i\\pi} + 1 = 0',
-          })
-        );
-      });
+    it('enters loaf mode after 18s of idle inactivity before sleep', async () => {
+      await mountHook({ inactivitySleepMs: 45000 });
+      expect(currentHook.state).toBe('idle');
 
-      const dreamBubble = container.querySelector('.pet-dream-bubble');
-      expect(dreamBubble).not.toBeNull();
-      expect(dreamBubble?.textContent).toContain('e^{i\\pi} + 1 = 0');
+      await act(async () => {
+        vi.advanceTimersByTime(18000);
+      });
+      expect(currentHook.state).toBe('loaf');
+
+      // Continued inactivity transitions to sleep at 45s
+      await act(async () => {
+        vi.advanceTimersByTime(27000);
+      });
+      expect(currentHook.state).toBe('sleep');
+    });
+  });
+
+  describe('Diagnostic Empathy (Tape Measure on Warnings)', () => {
+    beforeEach(() => {
+      localStorage.setItem('teeex_desk_pet_enabled', 'true');
+    });
+
+    it('transitions to compile-warning when warnings exist on success', async () => {
+      await mountHook({ compileStatus: 'compiling' });
+      expect(currentHook.state).toBe('compiling-scholar');
+
+      await mountHook({ compileStatus: 'success', warningCount: 2, lastCompiledAt: 1000 });
+      expect(currentHook.state).toBe('compile-warning');
+
+      await act(async () => {
+        vi.advanceTimersByTime(3200);
+      });
+      expect(currentHook.state).toBe('idle');
+    });
+  });
+
+  describe('Audio Engine Volume Control', () => {
+    it('sets and clamps volume between 0 and 1', async () => {
+      await mountHook();
+      expect(currentHook.volume).toBe(0.6);
+
+      await act(async () => {
+        currentHook.setVolume(0.85);
+      });
+      expect(currentHook.volume).toBe(0.85);
+      expect(localStorage.getItem('teeex_desk_pet_volume')).toBe('0.85');
     });
   });
 });

@@ -1,9 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import type { DeskPetActionState, DeskPetSkin } from '../hooks/useDeskPet';
-import { Heart, Sparkles, X, Moon, Palette, Volume2, VolumeX } from 'lucide-react';
+import katex from 'katex';
+import type { DeskPetActionState, DeskPetSkin, DeskPetAccessory, DeskPetEntryVariant, DeskPetExitVariant } from '../hooks/useDeskPet';
+import { Heart, Sparkles, X, Moon, Palette, Volume2, VolumeX, GraduationCap, Pin } from 'lucide-react';
 
 export interface DeskPetProps {
   isEnabled: boolean;
+  isExiting?: boolean;
+  entryVariant?: DeskPetEntryVariant;
+  exitVariant?: DeskPetExitVariant;
   state: DeskPetActionState;
   direction: 'left' | 'right';
   pacingOffset: number;
@@ -14,9 +18,17 @@ export interface DeskPetProps {
   skin?: DeskPetSkin;
   setSkin?: (skin: DeskPetSkin) => void;
   cycleSkin?: () => void;
+  accessory?: DeskPetAccessory;
+  setAccessory?: (acc: DeskPetAccessory) => void;
+  cycleAccessory?: () => void;
   isSoundEnabled?: boolean;
   toggleSound?: () => void;
+  volume?: number;
+  setVolume?: (vol: number) => void;
   perchX?: number;
+  perchY?: number;
+  isSnappedToDock?: boolean;
+  resetPositionToDock?: () => void;
   dragTilt?: number;
   isDragging?: boolean;
   startDrag?: (e: React.PointerEvent) => void;
@@ -82,6 +94,9 @@ const SKIN_PALETTES: Record<DeskPetSkin, SkinPalette> = {
 
 export const DeskPet: React.FC<DeskPetProps> = ({
   isEnabled,
+  isExiting = false,
+  entryVariant = 'box',
+  exitVariant = 'smoke',
   state,
   direction,
   pacingOffset,
@@ -91,9 +106,14 @@ export const DeskPet: React.FC<DeskPetProps> = ({
   petCount,
   skin = 'tuxedo',
   cycleSkin,
+  accessory = 'none',
+  cycleAccessory,
   isSoundEnabled = false,
   toggleSound,
   perchX = 28,
+  perchY = 36,
+  isSnappedToDock = true,
+  resetPositionToDock,
   dragTilt = 0,
   isDragging = false,
   startDrag,
@@ -107,13 +127,15 @@ export const DeskPet: React.FC<DeskPetProps> = ({
 }) => {
   const [showToolbar, setShowToolbar] = useState(false);
   const [showHearts, setShowHearts] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const mascotRef = useRef<HTMLDivElement>(null);
+  const clickTimestampsRef = useRef<number[]>([]);
 
   // Eye tracking pupil look-at offset (-2px to +2px)
   const [pupilOffset, setPupilOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   useEffect(() => {
-    if (!isEnabled || isPaused || isReducedMotion || state === 'sleep' || isDragging) {
+    if (!isEnabled || isPaused || isReducedMotion || state === 'sleep' || state === 'loaf' || isDragging) {
       setPupilOffset({ x: 0, y: 0 });
       return;
     }
@@ -127,7 +149,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
       const dy = e.clientY - centerY;
       const distance = Math.sqrt(dx * dx + dy * dy);
 
-      // Only track when cursor is within 140px proximity radius
+      // Proximity cursor look-at within 140px
       if (distance < 140 && distance > 5) {
         const angle = Math.atan2(dy, dx);
         const lookRadius = Math.min(2, distance / 40);
@@ -146,45 +168,81 @@ export const DeskPet: React.FC<DeskPetProps> = ({
     };
   }, [isEnabled, isPaused, isReducedMotion, state, isDragging]);
 
+  // Click outside to dismiss toolbar
+  useEffect(() => {
+    if (!showToolbar) return;
+    const handleGlobalClick = (e: PointerEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setShowToolbar(false);
+      }
+    };
+    window.addEventListener('pointerdown', handleGlobalClick);
+    return () => window.removeEventListener('pointerdown', handleGlobalClick);
+  }, [showToolbar]);
+
   // Human-readable status label for ARIA and tooltip
   const stateLabel = useMemo(() => {
     switch (state) {
       case 'lifted-scruff':
         return 'Dangling playfully by the scruff';
+      case 'fling-air':
+        return 'Gliding through the air with feline acrobatics!';
       case 'landing':
-        return 'Landing softly onto the dock ledge';
+        return 'Landing softly onto the ledge';
       case 'typing-paws':
-        return 'Typing furiously alongside you';
+        return 'Typing furiously on RGB mechanical keyboard alongside you';
       case 'compiling-scholar':
         return 'Analyzing LaTeX manuscript with scholar glasses';
       case 'compile-success':
         return 'Celebrating successful PDF compilation! (Q.E.D.)';
+      case 'compile-warning':
+        return 'Inspecting document margins with typesetter tape measure';
       case 'compile-fail':
         return 'Investigating compile error diagnostics with magnifying glass';
+      case 'knuth-texbook':
+        return 'Honoring Donald Knuth with The TeXbook celebration!';
       case 'yarn-chase':
-        return 'Chasing the cyan yarn ball!';
+        return 'Chasing the bouncy cyan yarn ball!';
+      case 'loaf':
+        return 'Resting peacefully in tucked-paw loaf pose';
+      case 'yoga-stretch':
+        return 'Doing a refreshing yoga arch-back paw stretch';
+      case 'butterfly-bat':
+        return 'Playfully batting at a glowing pixel moth';
+      case 'face-wash':
+        return 'Washing whiskers and paws attentively';
       case 'sleep':
-        return 'Sleeping peacefully, dreaming of LaTeX equations';
+        return 'Sleeping peacefully, dreaming of LaTeX formulas';
       case 'waking-stretch':
         return 'Waking up with an arch-back stretch';
       case 'walk':
-        return 'Pacing along the dock ledge';
+        return 'Pacing along the ledge';
       case 'idle':
       default:
-        return 'Sitting attentively on the dock ledge';
+        return 'Sitting attentively on the ledge';
     }
   }, [state]);
 
   const activePalette = SKIN_PALETTES[skin] || SKIN_PALETTES.tuxedo;
 
-  // Bottom dock offset calculation
+  // 2D Coordinates & Dock Elevation Calculation
   const dockHeight = dockCollapsed ? 32 : 180;
-  const bottomPosition = dockHeight + 4;
+  const bottomPosition = isSnappedToDock ? dockHeight + 4 : perchY;
 
-  // Handle clicking on pet
+  // Snappy Triple-Click Trigger (e.detail >= 3 or 3 consecutive clicks in 1200ms)
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (state === 'sleep') {
+    const now = Date.now();
+    clickTimestampsRef.current = [...clickTimestampsRef.current.filter(t => now - t < 1200), now];
+
+    // Triple click (e.detail >= 3) or 3 rapid clicks toggles options menu
+    if (e.detail >= 3 || clickTimestampsRef.current.length >= 3) {
+      clickTimestampsRef.current = [];
+      setShowToolbar(prev => !prev);
+      return;
+    }
+
+    if (state === 'sleep' || state === 'loaf') {
       wakeUp?.();
     } else {
       triggerPet?.();
@@ -217,20 +275,38 @@ export const DeskPet: React.FC<DeskPetProps> = ({
     } else if (key === 'c') {
       e.preventDefault();
       cycleSkin?.();
+    } else if (key === 'a') {
+      e.preventDefault();
+      cycleAccessory?.();
     } else if (key === 'm') {
       e.preventDefault();
       toggleSound?.();
+    } else if (key === 'o') {
+      e.preventDefault();
+      setShowToolbar(prev => !prev);
+    } else if (key === 'escape') {
+      setShowToolbar(false);
     }
   };
 
-  // If disabled, render absolutely nothing (zero DOM footprint)
-  if (!isEnabled) {
+  // KaTeX Mathematical Dream Formula Rendering
+  const renderedDreamHtml = useMemo(() => {
+    try {
+      return katex.renderToString(currentDreamFormula, { displayMode: false, throwOnError: false });
+    } catch {
+      return currentDreamFormula;
+    }
+  }, [currentDreamFormula]);
+
+  // If disabled and not mid-exit animation, render zero DOM elements
+  if (!isEnabled && !isExiting) {
     return null;
   }
 
   return (
     <div
-      className={`desk-pet-container skin-${skin} ${isPaused ? 'is-paused' : ''} ${isDragging ? 'is-dragging' : ''}`}
+      ref={containerRef}
+      className={`desk-pet-container skin-${skin} ${isPaused ? 'is-paused' : ''} ${isDragging ? 'is-dragging' : ''} entry-${entryVariant} ${isExiting ? `exit-${exitVariant}` : ''}`}
       style={{
         position: 'fixed',
         right: perchX,
@@ -245,7 +321,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
           : 'bottom 0.25s cubic-bezier(0.16, 1, 0.3, 1), right 0.15s ease-out',
       }}
     >
-      {/* Floating Action Menu on Hover */}
+      {/* Floating Action Menu (Opened via Snappy 3 Clicks or Shortcut O) */}
       {showToolbar && (
         <div
           role="toolbar"
@@ -260,11 +336,9 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             backgroundColor: 'var(--bg-surface-elevated, #1e293b)',
             border: '1px solid var(--border-subtle, #334155)',
             borderRadius: 'var(--radius-sm, 6px)',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
             animation: 'fadeIn 0.15s ease-out',
           }}
-          onMouseEnter={() => setShowToolbar(true)}
-          onMouseLeave={() => setShowToolbar(false)}
         >
           {/* Pet Button */}
           <button
@@ -293,7 +367,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               e.stopPropagation();
               triggerYarnChase?.();
             }}
-            title="Toss cyan yarn ball (Y)"
+            title="Toss bouncy yarn ball (Y)"
             aria-label="Toss yarn ball"
           >
             <Sparkles size={11} color="#38bdf8" />
@@ -316,6 +390,22 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             <span style={{ textTransform: 'capitalize' }}>{skin}</span>
           </button>
 
+          {/* Academic Outfit Switcher */}
+          <button
+            type="button"
+            className="btn-ghost"
+            style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              cycleAccessory?.();
+            }}
+            title={`Cycle academic attire (A) • Current: ${accessory.toUpperCase()}`}
+            aria-label="Cycle academic attire"
+          >
+            <GraduationCap size={11} color="#38bdf8" />
+            <span style={{ textTransform: 'capitalize' }}>{accessory === 'none' ? 'No outfit' : accessory}</span>
+          </button>
+
           {/* Sound Toggle Button */}
           <button
             type="button"
@@ -325,7 +415,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               e.stopPropagation();
               toggleSound?.();
             }}
-            title={`Sound Effects (M): ${isSoundEnabled ? 'ON (Purr & chimes active)' : 'MUTED (Zero audio)'}`}
+            title={`Sound Effects (M): ${isSoundEnabled ? 'ON (Purr, chimes & typing thocks active)' : 'MUTED (Zero audio)'}`}
             aria-label="Toggle companion sound"
           >
             {isSoundEnabled ? <Volume2 size={11} color="#10b981" /> : <VolumeX size={11} color="var(--text-muted)" />}
@@ -350,9 +440,26 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             <Moon size={11} color="#a855f7" />
           </button>
 
+          {/* Dock Snap / Reset Button */}
+          {!isSnappedToDock && (
+            <button
+              type="button"
+              className="btn-ghost"
+              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                resetPositionToDock?.();
+              }}
+              title="Reset position back to dock ledge"
+              aria-label="Reset position to dock"
+            >
+              <Pin size={11} color="#38bdf8" />
+            </button>
+          )}
+
           <div style={{ width: 1, height: 12, backgroundColor: 'var(--border-subtle, #334155)', margin: '0 2px' }} />
 
-          {/* Disable / Close Button */}
+          {/* Turn Off / Disable Companion Button */}
           <button
             type="button"
             className="btn-ghost"
@@ -361,7 +468,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               e.stopPropagation();
               onToggleEnabled?.();
             }}
-            title="Dismiss / Disable Desk Companion"
+            title="Disable / Turn off Desk Companion"
             aria-label="Disable companion"
           >
             <X size={11} />
@@ -369,7 +476,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
         </div>
       )}
 
-      {/* Main Mascot Wrapper */}
+      {/* Main Mascot Wrapper with 2D Drag & Fling Physics */}
       <div
         ref={mascotRef}
         className="desk-pet-mascot-wrapper"
@@ -382,18 +489,18 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             ? 'none'
             : isDragging
             ? `rotate(${dragTilt}deg) scale(0.92, 1.12)`
+            : state === 'fling-air'
+            ? 'rotate(25deg) scale(0.95)'
             : `translate3d(-${pacingOffset}px, 0, 0)`,
           transition: isReducedMotion || isDragging ? 'none' : 'transform 0.4s ease-out',
         }}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onPointerDown={startDrag}
-        onMouseEnter={() => setShowToolbar(true)}
-        onMouseLeave={() => setShowToolbar(false)}
         role="img"
         tabIndex={0}
-        aria-label={`TeXCat Desk Companion: ${stateLabel}. Coat: ${skin}. Pet count: ${petCount}. (Drag scruff to move, click to interact, double-click for yarn, hover for actions)`}
-        title={`TeXCat: ${stateLabel}${petCount > 0 ? ` (Loved ${petCount} times)` : ''} — Drag scruff to reposition`}
+        aria-label={`TeXCat Desk Companion: ${stateLabel}. Coat: ${skin}. Outfit: ${accessory}. Pet count: ${petCount}. (Triple-click for menu, drag anywhere in 2D, double-click for yarn)`}
+        title={`TeXCat: ${stateLabel}${petCount > 0 ? ` (Loved ${petCount} times)` : ''} — 3 quick clicks for options`}
         onKeyDown={handleKeyDown}
       >
         {/* Floating Heart Particles */}
@@ -414,10 +521,10 @@ export const DeskPet: React.FC<DeskPetProps> = ({
           </div>
         )}
 
-        {/* Mathematical Dream Thought Bubble during Sleep */}
+        {/* High-DPI KaTeX Mathematical Dream Thought Bubble during Sleep */}
         {state === 'sleep' && (
           <div className="pet-dream-bubble" aria-hidden="true">
-            <span className="dream-formula">${currentDreamFormula}$</span>
+            <span className="dream-formula" dangerouslySetInnerHTML={{ __html: renderedDreamHtml }} />
             <div className="dream-dots">
               <span className="dot dot-1" />
               <span className="dot dot-2" />
@@ -425,8 +532,8 @@ export const DeskPet: React.FC<DeskPetProps> = ({
           </div>
         )}
 
-        {/* Floating Sparkles on Compile Success */}
-        {state === 'compile-success' && (
+        {/* Floating Sparkles on Compile Success / Knuth Celebration */}
+        {(state === 'compile-success' || state === 'knuth-texbook') && (
           <div className="pet-sparkle-particles" aria-hidden="true">
             <span className="floating-sparkle sparkle-1">✦</span>
             <span className="floating-sparkle sparkle-2">✧</span>
@@ -434,22 +541,39 @@ export const DeskPet: React.FC<DeskPetProps> = ({
           </div>
         )}
 
-        {/* Rolling Cyan Yarn Ball during Yarn Chase */}
+        {/* Interactive Bouncy Yarn Ball with Physics Bounce Arc */}
         {state === 'yarn-chase' && (
-          <div className="pet-yarn-ball" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <div className="pet-yarn-ball pet-bouncy-ball" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="12" r="9" fill="#0284c7" stroke="#38bdf8" strokeWidth="2" />
               <path d="M6 12C9 8 15 8 18 12" stroke="#bae6fd" strokeWidth="1.5" strokeLinecap="round" />
               <path d="M12 6C8 9 8 15 12 18" stroke="#bae6fd" strokeWidth="1.5" strokeLinecap="round" />
               <path d="M18 15C19.5 17 21 19 23 18" stroke="#38bdf8" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
+            <div className="ball-bounce-trail" />
           </div>
         )}
 
-        {/* Reaction Speech Bubble for Diagnostics or Status */}
+        {/* Pixel Butterfly for Idle Butterfly Batting */}
+        {state === 'butterfly-bat' && (
+          <div className="pet-pixel-butterfly" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M4 4 Q 1 1 2 7 Q 5 6 6 8 Q 7 6 10 7 Q 11 1 8 4 Z" fill="#38bdf8" opacity="0.9" />
+              <circle cx="8" cy="8" r="1.5" fill="#f8fafc" />
+            </svg>
+          </div>
+        )}
+
+        {/* Status Speech Bubbles */}
         {state === 'compile-fail' && (
           <div className="pet-reaction-bubble reaction-fail" aria-hidden="true">
             <span>❓ Log alert</span>
+            <div className="bubble-arrow" />
+          </div>
+        )}
+        {state === 'compile-warning' && (
+          <div className="pet-reaction-bubble reaction-warning" aria-hidden="true">
+            <span>📏 Margins ok</span>
             <div className="bubble-arrow" />
           </div>
         )}
@@ -459,8 +583,14 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             <div className="bubble-arrow" />
           </div>
         )}
+        {state === 'knuth-texbook' && (
+          <div className="pet-reaction-bubble reaction-knuth" aria-hidden="true">
+            <span>📖 The TeXbook</span>
+            <div className="bubble-arrow" />
+          </div>
+        )}
 
-        {/* Procedural High-DPI Vector Mascot (TeXCat) */}
+        {/* Procedural High-DPI Vector Mascot Rig */}
         <div
           className={`texcat-rig state-${state} ${state === 'walk' && direction === 'left' ? 'facing-left' : ''}`}
           style={{
@@ -478,27 +608,26 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             xmlns="http://www.w3.org/2000/svg"
             style={{ overflow: 'visible' }}
           >
-            {/* Filter for subtle mascot drop shadow */}
             <defs>
               <filter id="texcat-shadow" x="-20%" y="-20%" width="140%" height="140%">
                 <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.35" />
               </filter>
             </defs>
 
-            {/* Base platform shadow (fades when lifted by scruff) */}
+            {/* Base platform shadow */}
             <ellipse
               cx="32"
               cy="56"
-              rx={state === 'lifted-scruff' ? 12 : 20}
+              rx={state === 'lifted-scruff' ? 12 : state === 'loaf' ? 24 : 20}
               ry={state === 'lifted-scruff' ? 2 : 4}
               fill="rgba(0,0,0,0.25)"
               opacity={state === 'lifted-scruff' ? 0.35 : 0.8}
             />
 
             {/* Tail Layer with Sway Animation */}
-            <g className="texcat-tail" style={{ transformOrigin: '48px 50px' }}>
+            <g className={`texcat-tail ${state === 'loaf' ? 'tail-tucked' : ''}`} style={{ transformOrigin: '48px 50px' }}>
               <path
-                d="M44 48 C 54 44, 58 36, 56 30 C 54 26, 50 28, 51 32 C 52 38, 48 42, 42 46"
+                d={state === 'loaf' ? 'M42 48 C 48 52, 36 56, 26 55' : 'M44 48 C 54 44, 58 36, 56 30 C 54 26, 50 28, 51 32 C 52 38, 48 42, 42 46'}
                 stroke={activePalette.furStroke}
                 strokeWidth="4"
                 strokeLinecap="round"
@@ -507,13 +636,12 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             </g>
 
             {/* Cat Body */}
-            <g className="texcat-body" filter="url(#texcat-shadow)">
-              {/* Back / Torso */}
+            <g className={`texcat-body ${state === 'loaf' ? 'body-loaf' : ''}`} filter="url(#texcat-shadow)">
               <ellipse
                 cx="32"
-                cy="44"
-                rx="15"
-                ry="13"
+                cy={state === 'loaf' ? 46 : 44}
+                rx={state === 'loaf' ? 18 : 15}
+                ry={state === 'loaf' ? 11 : 13}
                 fill={activePalette.furFill}
                 stroke={activePalette.furStroke}
                 strokeWidth="2"
@@ -530,8 +658,28 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               )}
 
               {/* Chest Marking */}
-              <ellipse cx="32" cy="45" rx="8" ry="9" fill={activePalette.chestFill} opacity="0.8" />
+              <ellipse cx="32" cy={state === 'loaf' ? 47 : 45} rx={state === 'loaf' ? 10 : 8} ry={state === 'loaf' ? 7 : 9} fill={activePalette.chestFill} opacity="0.8" />
             </g>
+
+            {/* Academic Accessory: Professor Bowtie */}
+            {accessory === 'bowtie' && (
+              <g className="texcat-accessory-bowtie" aria-hidden="true">
+                <polygon points="26,38 32,41 26,44" fill="#dc2626" />
+                <polygon points="38,38 32,41 38,44" fill="#dc2626" />
+                <circle cx="32" cy="41" r="2.2" fill="#b91c1c" />
+              </g>
+            )}
+
+            {/* Academic Accessory: Knitted Scholar Scarf */}
+            {accessory === 'scarf' && (
+              <g className="texcat-accessory-scarf" aria-hidden="true">
+                <ellipse cx="32" cy="38" rx="14" ry="4.5" fill="#b91c1c" stroke="#7f1d1d" strokeWidth="1" />
+                <line x1="22" y1="38" x2="42" y2="38" stroke="#fbbf24" strokeWidth="1.5" strokeDasharray="3 2" />
+                {/* Flowing scarf tail with tassel fringe */}
+                <path d="M38 40 Q 42 48 40 54" stroke="#b91c1c" strokeWidth="4.5" strokeLinecap="round" fill="none" className="scarf-flutter" />
+                <line x1="38" y1="54" x2="42" y2="54" stroke="#fbbf24" strokeWidth="1.5" />
+              </g>
+            )}
 
             {/* Cat Head Layer */}
             <g className="texcat-head" style={{ transformOrigin: '32px 30px' }}>
@@ -542,6 +690,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 stroke={activePalette.furStroke}
                 strokeWidth="2"
                 strokeLinejoin="round"
+                className="texcat-ear-left"
               />
               <path d="M22 19 L 24 13 L 29 18 Z" fill={activePalette.earPink} opacity="0.8" />
 
@@ -552,6 +701,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 stroke={activePalette.furStroke}
                 strokeWidth="2"
                 strokeLinejoin="round"
+                className="texcat-ear-right"
               />
               <path d="M42 19 L 40 13 L 35 18 Z" fill={activePalette.earPink} opacity="0.8" />
 
@@ -582,31 +732,32 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 fill="none"
               />
 
-              {/* Eyes Expression System with Dynamic Cursor Tracking */}
+              {/* Eyes Expression System */}
               {state === 'sleep' ? (
-                // Sleeping Eyes: Curved closed slits ^ ^
                 <g className="texcat-eyes-sleep">
                   <path d="M22 27 Q 26 23 29 27" stroke="var(--text-primary, #f8fafc)" strokeWidth="2" strokeLinecap="round" fill="none" />
                   <path d="M35 27 Q 38 23 42 27" stroke="var(--text-primary, #f8fafc)" strokeWidth="2" strokeLinecap="round" fill="none" />
                 </g>
-              ) : state === 'compile-success' ? (
-                // Celebratory Happy Eyes
+              ) : state === 'loaf' ? (
+                // Relaxed half-closed loaf eyes
+                <g className="texcat-eyes-loaf">
+                  <path d="M22 27 Q 26 25 29 27" stroke={activePalette.eyeColor} strokeWidth="2.2" strokeLinecap="round" fill="none" />
+                  <path d="M35 27 Q 38 25 42 27" stroke={activePalette.eyeColor} strokeWidth="2.2" strokeLinecap="round" fill="none" />
+                </g>
+              ) : state === 'compile-success' || state === 'knuth-texbook' ? (
                 <g className="texcat-eyes-happy">
                   <path d="M22 28 Q 26 24 29 28" stroke={activePalette.eyeColor} strokeWidth="2.5" strokeLinecap="round" fill="none" />
                   <path d="M35 28 Q 38 24 42 28" stroke={activePalette.eyeColor} strokeWidth="2.5" strokeLinecap="round" fill="none" />
                 </g>
               ) : state === 'compile-fail' ? (
-                // Puzzled / Diagnostic Alert Eyes
                 <g className="texcat-eyes-fail">
                   <ellipse cx="25" cy="26" rx="3.5" ry="4" fill="#f59e0b" />
                   <ellipse cx="38" cy="27" rx="4" ry="2.5" fill="#f59e0b" />
                   <circle cx="26" cy="25" r="1.5" fill="#000" />
                   <circle cx="38" cy="27" r="1" fill="#000" />
-                  {/* Sweat drop on brow */}
                   <path d="M43 18 C 43 18 45 22 43 23 C 41 23 41 21 43 18 Z" fill="#38bdf8" opacity="0.9" />
                 </g>
               ) : (
-                // Normal / Attentive Eyes with Procedural CSS Blink & Cursor Look-At
                 <g className="texcat-eyes-normal">
                   <ellipse
                     cx={25 + pupilOffset.x}
@@ -629,8 +780,8 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 </g>
               )}
 
-              {/* Scholar Mode: Gold Reading Glasses */}
-              {state === 'compiling-scholar' && (
+              {/* Scholar Mode / Knuth Glasses */}
+              {(state === 'compiling-scholar' || state === 'knuth-texbook') && (
                 <g className="texcat-glasses" aria-hidden="true">
                   <circle cx="25" cy="26" r="5" stroke="#f59e0b" strokeWidth="1.5" fill="rgba(245,158,11,0.15)" />
                   <circle cx="39" cy="26" r="5" stroke="#f59e0b" strokeWidth="1.5" fill="rgba(245,158,11,0.15)" />
@@ -640,31 +791,78 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 </g>
               )}
 
-              {/* Detective Mode: Handheld Magnifying Glass */}
+              {/* Detective Mode: Magnifying Glass */}
               {state === 'compile-fail' && (
                 <g className="texcat-magnifier" aria-hidden="true" style={{ transformOrigin: '40px 38px' }}>
                   <circle cx="44" cy="38" r="6" stroke="#38bdf8" strokeWidth="2" fill="rgba(56,189,248,0.2)" />
                   <path d="M48 42 L 54 48" stroke="#94a3b8" strokeWidth="2.5" strokeLinecap="round" />
                 </g>
               )}
+
+              {/* Warning Mode: Typesetter Tape Measure */}
+              {state === 'compile-warning' && (
+                <g className="texcat-tape-measure" aria-hidden="true">
+                  <rect x="18" y="46" width="28" height="5" rx="1" fill="#facc15" stroke="#ca8a04" strokeWidth="1" />
+                  <line x1="22" y1="46" x2="22" y2="49" stroke="#713f12" strokeWidth="0.8" />
+                  <line x1="26" y1="46" x2="26" y2="50" stroke="#713f12" strokeWidth="0.8" />
+                  <line x1="30" y1="46" x2="30" y2="49" stroke="#713f12" strokeWidth="0.8" />
+                  <line x1="34" y1="46" x2="34" y2="50" stroke="#713f12" strokeWidth="0.8" />
+                  <line x1="38" y1="46" x2="38" y2="49" stroke="#713f12" strokeWidth="0.8" />
+                  <line x1="42" y1="46" x2="42" y2="50" stroke="#713f12" strokeWidth="0.8" />
+                </g>
+              )}
+
+              {/* Academic Accessory: Graduate Mortarboard Cap */}
+              {accessory === 'mortarboard' && (
+                <g className="texcat-accessory-mortarboard" aria-hidden="true" style={{ transformOrigin: '32px 14px' }}>
+                  {/* Cap Skull Base */}
+                  <ellipse cx="32" cy="16" rx="9" ry="3" fill="#0f172a" />
+                  {/* Diamond Board */}
+                  <polygon points="32,7 48,13 32,19 16,13" fill="#1e293b" stroke="#0f172a" strokeWidth="1.2" />
+                  {/* Center Gold Button */}
+                  <circle cx="32" cy="13" r="1.5" fill="#f59e0b" />
+                  {/* Gold Tassel with Sway Keyframe */}
+                  <path d="M32 13 Q 42 16 41 23" stroke="#f59e0b" strokeWidth="1.5" fill="none" className="tassel-sway" />
+                  <circle cx="41" cy="23.5" r="1.5" fill="#f59e0b" />
+                </g>
+              )}
+
+              {/* Academic Accessory: Detective Deerstalker Cap */}
+              {accessory === 'detective' && (
+                <g className="texcat-accessory-detective" aria-hidden="true">
+                  <path d="M18 16 C 18 8, 46 8, 46 16 Z" fill="#78350f" stroke="#451a03" strokeWidth="1.2" />
+                  <path d="M14 17 Q 32 12 50 17" stroke="#451a03" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+                  <circle cx="32" cy="8" r="2" fill="#451a03" />
+                  <path d="M30 8 L 34 8" stroke="#fbbf24" strokeWidth="1.5" />
+                </g>
+              )}
             </g>
 
-            {/* Front Paws & Desk / Keyboard Layer */}
+            {/* Front Paws & Activity Layers */}
             {state === 'typing-paws' ? (
-              // Bongo Cat Drumming Paws & Mini Keyboard Desk
+              // Bongo Cat Drumming Paws & RGB Mechanical Keyboard
               <g className="texcat-bongo-rig">
-                <rect x="14" y="49" width="36" height="6" rx="2" fill="#0f172a" stroke="#334155" strokeWidth="1" />
-                <line x1="18" y1="52" x2="46" y2="52" stroke="#38bdf8" strokeWidth="1" strokeDasharray="3 2" />
+                <rect x="12" y="48" width="40" height="7" rx="2" fill="#0f172a" stroke="#38bdf8" strokeWidth="1" />
+                <line x1="16" y1="51.5" x2="48" y2="51.5" stroke="#a855f7" strokeWidth="1.5" strokeDasharray="3 2" />
 
                 <g className="texcat-paw-left">
-                  <ellipse cx="23" cy="48" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+                  <ellipse cx="23" cy="47" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 </g>
                 <g className="texcat-paw-right">
-                  <ellipse cx="41" cy="48" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+                  <ellipse cx="41" cy="47" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 </g>
               </g>
+            ) : state === 'knuth-texbook' ? (
+              // Donald Knuth Easter Egg: Holding The TeXbook
+              <g className="texcat-knuth-book">
+                <rect x="23" y="42" width="18" height="14" rx="1.5" fill="#451a03" stroke="#f59e0b" strokeWidth="1" />
+                <rect x="25" y="44" width="14" height="10" fill="#78350f" />
+                <text x="32" y="50" fontSize="4.5" fill="#fbbf24" fontWeight="bold" textAnchor="middle">TeX</text>
+                <ellipse cx="22" cy="49" rx="3" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.2" />
+                <ellipse cx="42" cy="49" rx="3" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.2" />
+              </g>
             ) : state === 'compiling-scholar' ? (
-              // Scholar Holding Miniature Manuscript
+              // Scholar Manuscript
               <g className="texcat-scholar-props">
                 <rect x="22" y="44" width="20" height="12" rx="1" fill="#f8fafc" stroke="#94a3b8" strokeWidth="1" />
                 <line x1="25" y1="47" x2="39" y2="47" stroke="#0284c7" strokeWidth="1" />
@@ -673,14 +871,33 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 <ellipse cx="22" cy="49" rx="3.5" ry="4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.2" />
                 <ellipse cx="42" cy="49" rx="3.5" ry="4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.2" />
               </g>
+            ) : state === 'face-wash' ? (
+              // Face Washing Paw Lick
+              <g className="texcat-paw-wash">
+                <ellipse cx="24" cy="29" rx="4" ry="4.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+                <ellipse cx="40" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+              </g>
+            ) : state === 'butterfly-bat' ? (
+              // Paw Batting Upwards
+              <g className="texcat-paw-bat">
+                <ellipse cx="30" cy="38" rx="4" ry="4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+                <ellipse cx="40" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+              </g>
+            ) : state === 'yoga-stretch' ? (
+              // Extended Front Paws
+              <g className="texcat-paws-extended">
+                <ellipse cx="18" cy="54" rx="5" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+                <ellipse cx="46" cy="54" rx="5" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+              </g>
+            ) : state === 'loaf' ? (
+              // Loaf: Front paws completely tucked underneath
+              <g className="texcat-paws-loaf" />
             ) : state === 'lifted-scruff' ? (
-              // Dangling Paws when lifted by the scruff
               <g className="texcat-paws-dangling">
                 <ellipse cx="25" cy="54" rx="3.5" ry="5.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 <ellipse cx="39" cy="54" rx="3.5" ry="5.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
               </g>
             ) : (
-              // Resting Front Paws
               <g className="texcat-paws-resting">
                 <ellipse cx="24" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 <ellipse cx="40" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />

@@ -50,7 +50,7 @@ test.describe('Stage 6: TeXCat Desk Companion (Desk Pet)', () => {
     await expect(navbarPetBtn).toHaveAttribute('aria-pressed', 'true');
   });
 
-  test('supports interactive hover action menu, petting, and yarn chase', async ({ page }) => {
+  test('supports interactive 3-click action menu, petting, academic attire, and yarn chase', async ({ page }) => {
     // 1. Enable companion via Navbar button
     const navbarPetBtn = page.getByRole('button', { name: 'Toggle Desk Companion' });
     await navbarPetBtn.click();
@@ -58,8 +58,8 @@ test.describe('Stage 6: TeXCat Desk Companion (Desk Pet)', () => {
     const mascot = page.getByRole('img', { name: /TeXCat Desk Companion/i });
     await expect(mascot).toBeVisible();
 
-    // 2. Hover mascot to reveal quick action toolbar
-    await mascot.hover();
+    // 2. Triple-click mascot to reveal quick action toolbar
+    await mascot.click({ clickCount: 3 });
     const toolbar = page.getByRole('toolbar', { name: 'Desk companion quick actions' });
     await expect(toolbar).toBeVisible();
 
@@ -75,7 +75,7 @@ test.describe('Stage 6: TeXCat Desk Companion (Desk Pet)', () => {
     const yarnBtn = page.getByRole('button', { name: 'Toss yarn ball' });
     await yarnBtn.click();
 
-    // Rolling yarn ball appears
+    // Bouncy yarn ball appears
     const yarnBall = page.locator('.pet-yarn-ball');
     await expect(yarnBall).toBeAttached();
     await expect(page.locator('.texcat-rig')).toHaveClass(/state-yarn-chase/);
@@ -85,13 +85,18 @@ test.describe('Stage 6: TeXCat Desk Companion (Desk Pet)', () => {
     await skinBtn.click();
     await expect(page.locator('.desk-pet-container')).toHaveClass(/skin-ginger/);
 
-    // 6. Toggle sound effects from toolbar
+    // 6. Cycle academic attire from toolbar (equips mortarboard graduate cap)
+    const attireBtn = page.getByRole('button', { name: 'Cycle academic attire' });
+    await attireBtn.click();
+    await expect(page.locator('.texcat-accessory-mortarboard')).toBeAttached();
+
+    // 7. Toggle sound effects from toolbar
     const soundBtn = page.getByRole('button', { name: 'Toggle companion sound' });
     await soundBtn.click();
     await expect(soundBtn).toHaveAttribute('title', /ON/);
   });
 
-  test('supports keyboard-first interaction shortcuts (Space, C, S, M, Y)', async ({ page }) => {
+  test('supports keyboard-first interaction shortcuts (Space, C, A, S, M, Y)', async ({ page }) => {
     // 1. Enable companion via Navbar button
     const navbarPetBtn = page.getByRole('button', { name: 'Toggle Desk Companion' });
     await navbarPetBtn.click();
@@ -109,12 +114,17 @@ test.describe('Stage 6: TeXCat Desk Companion (Desk Pet)', () => {
     await page.keyboard.press('c');
     await expect(page.locator('.desk-pet-container')).toHaveClass(/skin-ginger/);
 
-    // 4. Press 's' to sleep (verifying math dream thought bubble appears)
+    // 4. Press 'a' to cycle academic accessory (equips mortarboard)
+    await page.keyboard.press('a');
+    await expect(page.locator('.texcat-accessory-mortarboard')).toBeAttached();
+
+    // 5. Press 's' to sleep (verifying math dream thought bubble appears with KaTeX)
     await page.keyboard.press('s');
     const dreamBubble = page.locator('.pet-dream-bubble');
     await expect(dreamBubble).toBeVisible();
+    await expect(dreamBubble.locator('.katex')).toBeAttached();
 
-    // 5. Press 's' again to wake up
+    // 6. Press 's' again to wake up
     await page.keyboard.press('s');
     await expect(dreamBubble).not.toBeVisible();
   });
@@ -131,13 +141,10 @@ test.describe('Stage 6: TeXCat Desk Companion (Desk Pet)', () => {
     const compileBtn = page.getByRole('button', { name: /Compile/i }).first();
     await compileBtn.click();
 
-    // Companion transitions to celebratory leap with Q.E.D. reaction bubble on compile success
-    const celebrationBubble = page.locator('.pet-reaction-bubble.reaction-success');
-    await expect(celebrationBubble).toBeVisible({ timeout: 35_000 });
-    await expect(celebrationBubble).toContainText('Q.E.D.');
-
-    const sparkles = page.locator('.pet-sparkle-particles');
-    await expect(sparkles).toBeAttached();
+    // Companion transitions to celebratory or diagnostic reaction bubble on compile completion
+    const reactionBubble = page.locator('.pet-reaction-bubble');
+    await expect(reactionBubble).toBeVisible({ timeout: 35_000 });
+    await expect(reactionBubble).toHaveText(/(Q\.E\.D\.|Margins ok)/);
   });
 
   test('respects prefers-reduced-motion media query', async ({ page }) => {

@@ -2448,6 +2448,241 @@ p.latex-force-indent {
   }
 }
 
+.pet-dream-bubble .katex {
+  font-size: 11px;
+  color: var(--accent-cyan, #38bdf8);
+  text-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+}
+
+/* Academic Accessories Keyframes */
+@keyframes pet-tassel-sway {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(18deg);
+  }
+}
+
+.tassel-sway {
+  transform-origin: 32px 13px;
+  animation: pet-tassel-sway 1.8s ease-in-out infinite;
+}
+
+@keyframes pet-scarf-flutter {
+  0%, 100% {
+    transform: rotate(0deg) scaleX(1);
+  }
+  50% {
+    transform: rotate(-6deg) scaleX(1.08);
+  }
+}
+
+.scarf-flutter {
+  transform-origin: 38px 40px;
+  animation: pet-scarf-flutter 2.4s ease-in-out infinite;
+}
+
+/* Organic Ear Twitch */
+@keyframes pet-ear-twitch {
+  0%, 90%, 100% {
+    transform: rotate(0deg);
+  }
+  93% {
+    transform: rotate(-10deg);
+  }
+  96% {
+    transform: rotate(6deg);
+  }
+}
+
+.texcat-ear-left {
+  transform-origin: 23px 20px;
+  animation: pet-ear-twitch 11s ease-in-out infinite;
+}
+
+/* Loaf & Yoga Poses */
+@keyframes pet-loaf-breathe {
+  0%, 100% {
+    transform: scale(1, 1);
+  }
+  50% {
+    transform: scale(1.02, 0.98);
+  }
+}
+
+.texcat-rig.state-loaf {
+  animation: pet-loaf-breathe 4s ease-in-out infinite;
+}
+
+/* Bouncy Yarn Ball Simulation */
+@keyframes pet-bouncy-arc {
+  0% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  25% {
+    transform: translate(-30px, -28px) scale(1.05) rotate(-90deg);
+  }
+  50% {
+    transform: translate(-60px, -2px) scale(1.15, 0.85) rotate(-180deg);
+  }
+  75% {
+    transform: translate(-80px, -18px) scale(1) rotate(-270deg);
+  }
+  100% {
+    transform: translate(-95px, 0) scale(1) rotate(-360deg);
+  }
+}
+
+.pet-bouncy-ball {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  animation: pet-bouncy-arc 2.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+/* Pixel Butterfly */
+@keyframes pet-butterfly-flight {
+  0% {
+    transform: translate(25px, -10px) rotate(-10deg);
+    opacity: 0;
+  }
+  20% {
+    transform: translate(12px, -28px) rotate(15deg);
+    opacity: 1;
+  }
+  50% {
+    transform: translate(-5px, -20px) rotate(-8deg);
+  }
+  80% {
+    transform: translate(8px, -35px) rotate(20deg);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate(30px, -45px) rotate(0deg);
+    opacity: 0;
+  }
+}
+
+.pet-pixel-butterfly {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  pointer-events: none;
+  animation: pet-butterfly-flight 2.4s ease-in-out forwards;
+}
+
+/* Entry & Exit Sequences */
+.desk-pet-container.entry-box {
+  animation: pet-entry-box 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pet-entry-box {
+  0% {
+    transform: translateY(20px) scale(0.6);
+    opacity: 0;
+  }
+  70% {
+    transform: translateY(-4px) scale(1.06);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.desk-pet-container.entry-portal {
+  animation: pet-entry-portal 0.6s ease-out forwards;
+}
+
+@keyframes pet-entry-portal {
+  0% {
+    transform: scale(0.2) rotate(-30deg);
+    opacity: 0;
+    filter: drop-shadow(0 0 16px #a855f7);
+  }
+  65% {
+    transform: scale(1.08) rotate(5deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+    filter: none;
+  }
+}
+
+.desk-pet-container.entry-jump {
+  animation: pet-entry-jump 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes pet-entry-jump {
+  0% {
+    transform: translateY(-45px) scale(0.85);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.desk-pet-container.exit-smoke {
+  animation: pet-exit-smoke 0.55s ease-in forwards;
+}
+
+@keyframes pet-exit-smoke {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  40% {
+    transform: scale(1.12);
+    filter: blur(1px) drop-shadow(0 0 12px #a855f7);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(0.4);
+    filter: blur(4px);
+    opacity: 0;
+  }
+}
+
+.desk-pet-container.exit-box {
+  animation: pet-exit-box 0.55s ease-in forwards;
+}
+
+@keyframes pet-exit-box {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-6px) scale(0.9);
+  }
+  100% {
+    transform: translateY(25px) scale(0.4);
+    opacity: 0;
+  }
+}
+
+.desk-pet-container.exit-portal {
+  animation: pet-exit-portal 0.55s ease-in forwards;
+}
+
+@keyframes pet-exit-portal {
+  0% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.1) rotate(45deg);
+    filter: drop-shadow(0 0 20px #38bdf8);
+    opacity: 0;
+  }
+}
+
 /* Reduced Motion Override: Halts all translations and instant animations */
 @media (prefers-reduced-motion: reduce) {
   .desk-pet-container *,
@@ -2461,6 +2696,11 @@ p.latex-force-indent {
   .floating-z,
   .floating-sparkle,
   .pet-yarn-ball,
+  .pet-bouncy-ball,
+  .pet-pixel-butterfly,
+  .tassel-sway,
+  .scarf-flutter,
+  .texcat-ear-left,
   .pet-dream-bubble {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;

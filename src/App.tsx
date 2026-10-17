@@ -467,6 +467,7 @@ export function App() {
     compileStatus: compileState.status,
     lastCompiledAt: texEngineView.lastCompiledAt,
     errorCount: compileState.errorCount,
+    warningCount: compileState.warningCount,
     isTypingActive,
   });
 
@@ -1727,7 +1728,7 @@ export function App() {
         rawLogs={compileState.rawLogs}
       />
 
-      {deskPet.isEnabled && (
+      {(deskPet.isEnabled || deskPet.isExiting) && (
         <DeskPet
           {...deskPet}
           dockCollapsed={diagnostics.length === 0}

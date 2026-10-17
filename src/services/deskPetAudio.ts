@@ -1,17 +1,21 @@
 /**
  * Procedural Web Audio Engine for TeXCat Desk Companion.
- * Generates synthetic purr rumble, success chimes, and tactile audio.
- * Zero external audio files / MP3s required (< 1 KB footprint).
+ * Generates synthetic purr rumble, success chimes, warning chimes,
+ * mechanical switch typing thocks, and playful sound effects.
+ * Zero external audio files / MP3s required (< 2 KB footprint).
  * Strictly MUTED by default.
  */
 
 export class DeskPetAudioEngine {
   private ctx: AudioContext | null = null;
   private isMuted: boolean = true;
+  private volume: number = 0.6;
+  private masterGain: GainNode | null = null;
   private activePurrStop: (() => void) | null = null;
 
-  constructor(isMuted: boolean = true) {
+  constructor(isMuted: boolean = true, volume: number = 0.6) {
     this.isMuted = isMuted;
+    this.volume = Math.max(0, Math.min(1, volume));
   }
 
   public setMuted(muted: boolean): void {
@@ -32,6 +36,17 @@ export class DeskPetAudioEngine {
     return this.isMuted;
   }
 
+  public setVolume(volume: number): void {
+    this.volume = Math.max(0, Math.min(1, volume));
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+    }
+  }
+
+  public getVolume(): number {
+    return this.volume;
+  }
+
   private ensureContext(): AudioContext | null {
     if (this.isMuted || typeof window === 'undefined') return null;
     try {
@@ -39,6 +54,9 @@ export class DeskPetAudioEngine {
         const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
         if (AudioCtx) {
           this.ctx = new AudioCtx();
+          this.masterGain = this.ctx.createGain();
+          this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+          this.masterGain.connect(this.ctx.destination);
         }
       }
       if (this.ctx && this.ctx.state === 'suspended') {
@@ -50,8 +68,15 @@ export class DeskPetAudioEngine {
     }
   }
 
+  private getDestination(ctx: AudioContext): AudioNode {
+    if (this.masterGain) {
+      return this.masterGain;
+    }
+    return ctx.destination;
+  }
+
   /**
-   * Cat Purr: Generates a deep 28Hz modulated filtered white noise rumble.
+   * Cat Purr: Generates a deep 28Hz modulated filtered white noise rumble with harmonic chest resonance.
    */
   public playPurr(durationMs = 1400): void {
     if (this.isMuted) return;
@@ -78,7 +103,7 @@ export class DeskPetAudioEngine {
       const noiseSource = ctx.createBufferSource();
       noiseSource.buffer = noiseBuffer;
 
-      // Heavy low-pass filter (chest resonance around 80Hz)
+      // Heavy low-pass filter (chest resonance around 75Hz)
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
       filter.frequency.setValueAtTime(75, ctx.currentTime);
@@ -102,7 +127,7 @@ export class DeskPetAudioEngine {
 
       noiseSource.connect(filter);
       filter.connect(gainNode);
-      gainNode.connect(ctx.destination);
+      gainNode.connect(this.getDestination(ctx));
 
       noiseSource.start(now);
       lfo.start(now);
@@ -158,7 +183,44 @@ export class DeskPetAudioEngine {
         gain.gain.exponentialRampToValueAtTime(0.001, endTime);
 
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(this.getDestination(ctx));
+
+        osc.start(startTime);
+        osc.stop(endTime);
+      });
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Warning Chime: Soft two-tone marimba chime (D5 587Hz -> A4 440Hz) for warning-only builds.
+   */
+  public playWarningChime(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const notes = [587.33, 440.00]; // D5, A4
+
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = idx === 0 ? 'sine' : 'triangle';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.12);
+
+        const startTime = now + idx * 0.12;
+        const endTime = startTime + 0.45;
+
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.16, startTime + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.001, endTime);
+
+        osc.connect(gain);
+        gain.connect(this.getDestination(ctx));
 
         osc.start(startTime);
         osc.stop(endTime);
@@ -189,10 +251,42 @@ export class DeskPetAudioEngine {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.getDestination(ctx));
 
       osc.start(now);
       osc.stop(now + 0.25);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Mechanical Keyboard Switch Thock / Clack for Bongo Cat typing mode.
+   */
+  public playKeyClick(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      // Mechanical switch thock pitch contour
+      const randomPitch = 240 + Math.random() * 60;
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(randomPitch, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.045);
+
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+
+      osc.connect(gain);
+      gain.connect(this.getDestination(ctx));
+
+      osc.start(now);
+      osc.stop(now + 0.05);
     } catch {
       // Ignore
     }
@@ -220,10 +314,40 @@ export class DeskPetAudioEngine {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.getDestination(ctx));
 
       osc.start(now);
       osc.stop(now + 0.22);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Soft yarn bounce tap when physics yarn ball hits the ledge.
+   */
+  public playYarnBounce(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(380, now);
+      osc.frequency.exponentialRampToValueAtTime(140, now + 0.06);
+
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+      osc.connect(gain);
+      gain.connect(this.getDestination(ctx));
+
+      osc.start(now);
+      osc.stop(now + 0.07);
     } catch {
       // Ignore
     }
