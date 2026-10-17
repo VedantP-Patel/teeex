@@ -802,5 +802,139 @@ describe('TeXCat Desk Companion (useDeskPet & DeskPet)', () => {
       expect(mockToggleRoam).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('Stage 16: Non-Intrusive UX, Tooltip Elimination & Compact Companion Card', () => {
+    it('strictly omits native title attribute to prevent blocking PDF equations and text', async () => {
+      await act(async () => {
+        root.render(
+          React.createElement(DeskPet, {
+            isEnabled: true,
+            state: 'idle',
+            direction: 'right',
+            pacingOffset: 0,
+            isSleeping: false,
+            isReducedMotion: false,
+            isPaused: false,
+            petCount: 5,
+          })
+        );
+      });
+
+      const mascot = container.querySelector('[role="img"]') as HTMLElement;
+      expect(mascot).not.toBeNull();
+      // Verifies native title is null (zero obstructive OS tooltips)
+      expect(mascot.getAttribute('title')).toBeNull();
+      // Verifies screen reader aria-label remains accessible
+      expect(mascot.getAttribute('aria-label')).toContain('TeXCat Desk Companion');
+    });
+
+    it('opens compact companion card on "o" key and navigates tabs', async () => {
+      const mockResetToDock = vi.fn();
+
+      await act(async () => {
+        root.render(
+          React.createElement(DeskPet, {
+            isEnabled: true,
+            state: 'idle',
+            direction: 'right',
+            pacingOffset: 0,
+            isSleeping: false,
+            isReducedMotion: false,
+            isPaused: false,
+            petCount: 3,
+            resetPositionToDock: mockResetToDock,
+          })
+        );
+      });
+
+      const mascot = container.querySelector('[role="img"]') as HTMLElement;
+      expect(container.querySelector('[role="dialog"]')).toBeNull();
+
+      // Open companion menu with 'o'
+      await act(async () => {
+        mascot.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', bubbles: true }));
+      });
+
+      const dialog = container.querySelector('[role="dialog"]');
+      expect(dialog).not.toBeNull();
+      expect(dialog?.classList.contains('texcat-companion-card')).toBe(true);
+
+      // Verify Play tab is active by default
+      const playTabBtn = container.querySelectorAll('.companion-tab-btn')[0];
+      const wardrobeTabBtn = container.querySelectorAll('.companion-tab-btn')[1];
+      const settingsTabBtn = container.querySelectorAll('.companion-tab-btn')[2];
+
+      expect(playTabBtn.classList.contains('is-active')).toBe(true);
+      expect(container.querySelectorAll('.companion-toy-chip').length).toBe(8);
+
+      // Switch to Wardrobe tab
+      await act(async () => {
+        wardrobeTabBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(wardrobeTabBtn.classList.contains('is-active')).toBe(true);
+      expect(container.querySelectorAll('.coat-swatch-circle').length).toBe(5);
+
+      // Switch to Settings tab
+      await act(async () => {
+        settingsTabBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(settingsTabBtn.classList.contains('is-active')).toBe(true);
+
+      // Click "Return to Ledge" button
+      const returnBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+        b.textContent?.includes('Return to Ledge')
+      );
+      expect(returnBtn).toBeDefined();
+
+      await act(async () => {
+        returnBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(mockResetToDock).toHaveBeenCalledTimes(1);
+    });
+
+    it('corrects vertical drag physics to move UP when pointer moves up', async () => {
+      localStorage.setItem('teeex_desk_pet_enabled', 'true');
+      await mountHook();
+
+      expect(currentHook.perchY).toBe(36);
+
+      // Simulate pointer down to begin drag
+      const mockElement = document.createElement('div');
+      await act(async () => {
+        currentHook.startDrag({
+          clientX: 500,
+          clientY: 400,
+          pointerId: 1,
+          target: mockElement,
+        } as unknown as React.PointerEvent);
+      });
+
+      expect(currentHook.isDragging).toBe(true);
+
+      // Simulate pointer moving UP (clientY moves from 400 down to 300, dy = -100)
+      await act(async () => {
+        window.dispatchEvent(
+          new PointerEvent('pointermove', {
+            clientX: 500,
+            clientY: 300,
+          })
+        );
+      });
+
+      // Upwards pointer motion (dy < 0) MUST increase perchY (moving UP away from bottom)
+      expect(currentHook.perchY).toBe(136); // 36 - (-100) = 136
+
+      // Release drag
+      await act(async () => {
+        window.dispatchEvent(
+          new PointerEvent('pointerup', {
+            clientX: 500,
+            clientY: 300,
+          })
+        );
+      });
+      expect(currentHook.isDragging).toBe(false);
+    });
+  });
 });
 

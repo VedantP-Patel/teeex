@@ -345,6 +345,7 @@ export function useDeskPet({
   const resetPositionToDock = useCallback(() => {
     setPerchX(28);
     setPerchY(36);
+    setPacingOffset(0);
     setIsSnappedToDock(true);
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
@@ -781,8 +782,8 @@ export function useDeskPet({
     if (!isEnabled || isPaused || isReducedMotion || isTypingRef.current || isDragging) return;
 
     if (roamMode === 'dock') {
-      // Dock Patrol Mode: Choose dynamic offset along status ledge
-      const maxLedgeOffset = typeof window !== 'undefined' ? Math.min(window.innerWidth - 140, 360) : 300;
+      // Dock Patrol Mode: Choose dynamic offset along status ledge, safely clamped away from sidebar & diagnostics
+      const maxLedgeOffset = typeof window !== 'undefined' ? Math.min(window.innerWidth - 220, 360) : 300;
       const targetOffset = Math.round(Math.random() * maxLedgeOffset);
       const isMovingLeft = targetOffset > pacingOffset;
       setDirection(isMovingLeft ? 'left' : 'right');
@@ -797,12 +798,26 @@ export function useDeskPet({
       });
       setPacingOffset(targetOffset);
     } else {
-      // Free Roam Desktop Mode: Choose safe 2D coordinates across screen
+      // Safe Perch Roam Mode: Choose among structural architectural perches
+      // STRICTLY AVOIDS the central Monaco code editor lines and central PDF text!
       const maxW = typeof window !== 'undefined' ? window.innerWidth : 1200;
       const maxH = typeof window !== 'undefined' ? window.innerHeight : 800;
 
-      const targetX = Math.round(Math.max(28, Math.min(maxW - 80, Math.random() * (maxW - 120))));
-      const targetY = Math.round(Math.max(36, Math.min(maxH - 100, Math.random() * (maxH - 140))));
+      // 4 Designated Safe Perches:
+      // Perch 1: Bottom Status Dock Ledge (safe right margin)
+      // Perch 2: Top Navbar Margin Ledge (safe top margin)
+      // Perch 3: Vertical Split Pane Divider Line (between editor and PDF)
+      // Perch 4: PDF Top-Right Whitespace Margin
+      const perchOptions = [
+        { x: Math.round(Math.random() * 240 + 28), y: 36, snapped: true },
+        { x: Math.round(Math.random() * 200 + 40), y: Math.max(36, maxH - 80), snapped: false },
+        { x: Math.round(maxW * 0.5), y: Math.round(Math.random() * (maxH - 240) + 60), snapped: false },
+        { x: 36, y: Math.max(36, maxH - 110), snapped: false },
+      ];
+
+      const chosen = perchOptions[Math.floor(Math.random() * perchOptions.length)];
+      const targetX = chosen.x;
+      const targetY = chosen.y;
 
       setDirection(targetX > perchX ? 'left' : 'right');
       const dx = targetX - perchX;
@@ -818,7 +833,7 @@ export function useDeskPet({
 
       setPerchX(targetX);
       setPerchY(targetY);
-      setIsSnappedToDock(targetY <= 68);
+      setIsSnappedToDock(chosen.snapped);
     }
   }, [isEnabled, isPaused, isReducedMotion, isDragging, roamMode, pacingOffset, perchX, perchY, transitionTo]);
 
@@ -1027,7 +1042,7 @@ export function useDeskPet({
       clientX: e.clientX,
       clientY: e.clientY,
       initialPerchX: perchX,
-      initialPerchY: perchY,
+      initialPerchY: isSnappedToDock ? 36 : perchY,
       lastX: e.clientX,
       lastY: e.clientY,
       lastTime: Date.now(),
@@ -1040,9 +1055,9 @@ export function useDeskPet({
       const dx = moveEv.clientX - dragStartRef.current.clientX;
       const dy = moveEv.clientY - dragStartRef.current.clientY;
 
-      // Invert dx because perchX is measured from right edge; invert dy because perchY is from bottom
+      // Invert dx because perchX is measured from right edge; subtract dy because bottom position increases as cursor moves up (dy < 0)
       const newPerchX = Math.max(16, Math.min(window.innerWidth - 80, dragStartRef.current.initialPerchX - dx));
-      const newPerchY = Math.max(16, Math.min(window.innerHeight - 80, dragStartRef.current.initialPerchY + dy));
+      const newPerchY = Math.max(16, Math.min(window.innerHeight - 80, dragStartRef.current.initialPerchY - dy));
 
       setPerchX(newPerchX);
       setPerchY(newPerchY);

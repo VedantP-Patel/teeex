@@ -13,10 +13,8 @@ import {
   Sparkles,
   X,
   Moon,
-  Palette,
   Volume2,
   VolumeX,
-  GraduationCap,
   Pin,
   Eye,
   Target,
@@ -149,11 +147,15 @@ export const DeskPet: React.FC<DeskPetProps> = ({
   isPaused,
   petCount,
   skin = 'tuxedo',
+  setSkin,
   cycleSkin,
   accessory = 'none',
+  setAccessory,
   cycleAccessory,
   isSoundEnabled = false,
   toggleSound,
+  volume = 0.6,
+  setVolume,
   perchX = 28,
   perchY = 36,
   isSnappedToDock = true,
@@ -186,6 +188,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
   triggerRoam,
 }) => {
   const [showToolbar, setShowToolbar] = useState(false);
+  const [companionTab, setCompanionTab] = useState<'play' | 'wardrobe' | 'settings'>('play');
   const [showHearts, setShowHearts] = useState(false);
   const [hasCopiedFormula, setHasCopiedFormula] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -474,313 +477,352 @@ export const DeskPet: React.FC<DeskPetProps> = ({
           pointerEvents: 'none',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'flex-end',
+          alignItems: typeof window !== 'undefined' && perchX > window.innerWidth * 0.45 ? 'flex-start' : 'flex-end',
           transition: isReducedMotion || isDragging
             ? 'none'
             : 'bottom 0.28s cubic-bezier(0.16, 1, 0.3, 1), right 0.28s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
-        {/* Floating Quick Action Toolbar (Opened via 3 clicks or 'O') */}
+        {/* Compact Glassmorphic Companion Card Popover (Opened via 3 clicks or 'O') */}
         {showToolbar && (
           <div
-            role="toolbar"
-            aria-label="Desk companion quick actions"
-            style={{
-              pointerEvents: 'auto',
-              marginBottom: 6,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '3px 6px',
-              backgroundColor: 'var(--bg-surface-elevated, #1e293b)',
-              border: '1px solid var(--border-subtle, #334155)',
-              borderRadius: 'var(--radius-sm, 6px)',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
-              animation: 'fadeIn 0.15s ease-out',
-            }}
+            role="dialog"
+            aria-label="TeXCat Desk Companion Menu"
+            className="texcat-companion-card"
           >
-            {/* Pet Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerPet?.();
-                setShowHearts(true);
-                setTimeout(() => setShowHearts(false), 1400);
-              }}
-              title="Pet TeXCat (Show love - Space)"
-              aria-label="Pet companion"
-            >
-              <Heart size={11} color="#f43f5e" fill="#f43f5e" />
-              <span>Pet</span>
-            </button>
+            {/* Header: Avatar, title, state badge, pet count, and close button */}
+            <div className="companion-card-header">
+              <div className="companion-header-title">
+                <span style={{ fontSize: 13 }}>🐱</span>
+                <span>TeXCat</span>
+                <span className="companion-state-badge">{state.replace('-', ' ')}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, color: '#f43f5e', display: 'inline-flex', alignItems: 'center', gap: 2, fontWeight: 600 }}>
+                  <Heart size={10} fill="#f43f5e" /> {petCount}
+                </span>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ padding: '2px 4px', fontSize: 11, color: 'var(--text-muted)' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowToolbar(false);
+                  }}
+                  aria-label="Close menu"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
 
-            {/* Peek-a-Boo Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerPeekABoo?.();
-              }}
-              title="Peek-a-Boo hiding behind dock (P)"
-              aria-label="Peek-a-Boo hiding"
-            >
-              <Eye size={11} color="#38bdf8" />
-              <span>Peek</span>
-            </button>
-
-            {/* Laser Pointer Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{
-                padding: '2px 5px',
-                fontSize: 11,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 3,
-                color: isLaserActive ? '#ef4444' : 'inherit',
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerLaser?.();
-              }}
-              title={`Red laser pointer chase (L) • ${isLaserActive ? 'ACTIVE' : 'OFF'}`}
-              aria-label="Toggle laser pointer chase"
-            >
-              <Target size={11} color={isLaserActive ? '#ef4444' : '#f87171'} />
-              <span>Laser</span>
-            </button>
-
-            {/* Box Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerBox?.();
-              }}
-              title="Cozy \hbox{\TeX} cardboard box (B)"
-              aria-label="Cardboard box"
-            >
-              <Box size={11} color="#f59e0b" />
-              <span>Box</span>
-            </button>
-
-            {/* Fish Treat Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerFish?.();
-              }}
-              title="Feed crunchy fish treat (F)"
-              aria-label="Fish treat"
-            >
-              <Fish size={11} color="#10b981" />
-              <span>Fish</span>
-            </button>
-
-            {/* Knuth TeXbook / Check Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerKnuthCelebration?.();
-              }}
-              title="Donald Knuth TeXbook & $2.56 check celebration (K)"
-              aria-label="Knuth celebration"
-            >
-              <BookOpen size={11} color="#a855f7" />
-              <span>Knuth</span>
-            </button>
-
-            {/* Mug Knock Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerKnockMug?.();
-              }}
-              title="Playfully knock TeX mug off ledge (U)"
-              aria-label="Knock mug"
-            >
-              <Coffee size={11} color="#f97316" />
-              <span>Mug</span>
-            </button>
-
-            {/* Belly Flop Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerBellyFlop?.();
-              }}
-              title="Playful belly-up flop (G)"
-              aria-label="Belly flop"
-            >
-              <Smile size={11} color="#ec4899" />
-              <span>Flop</span>
-            </button>
-
-            {/* Roam Mode Toggle Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{
-                padding: '2px 5px',
-                fontSize: 11,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 3,
-                color: roamMode === 'free' ? '#38bdf8' : 'inherit',
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRoamMode?.();
-              }}
-              title={`Toggle roam mode (R) • Current: ${roamMode === 'dock' ? 'Dock Patrol' : 'Free Roam Desktop'}`}
-              aria-label="Toggle roam mode"
-            >
-              <Compass size={11} color={roamMode === 'free' ? '#38bdf8' : '#94a3b8'} />
-              <span>{roamMode === 'dock' ? 'Patrol' : 'Free Roam'}</span>
-            </button>
-
-            {/* Yarn Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerYarnChase?.();
-              }}
-              title="Toss bouncy yarn ball (Y)"
-              aria-label="Toss yarn ball"
-            >
-              <Sparkles size={11} color="#38bdf8" />
-              <span>Yarn</span>
-            </button>
-
-            {/* Coat Skin Switcher */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                cycleSkin?.();
-              }}
-              title={`Cycle coat skin (C) • Current: ${skin.toUpperCase()}`}
-              aria-label="Cycle coat skin"
-            >
-              <Palette size={11} color="#f59e0b" />
-              <span style={{ textTransform: 'capitalize' }}>{skin}</span>
-            </button>
-
-            {/* Academic Outfit Switcher */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                cycleAccessory?.();
-              }}
-              title={`Cycle academic attire (A) • Current: ${accessory.toUpperCase()}`}
-              aria-label="Cycle academic attire"
-            >
-              <GraduationCap size={11} color="#38bdf8" />
-              <span style={{ textTransform: 'capitalize' }}>{accessory === 'none' ? 'No outfit' : accessory}</span>
-            </button>
-
-            {/* Sound Toggle Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleSound?.();
-              }}
-              title={`Sound Effects (M): ${isSoundEnabled ? 'ON (Purr, meow, chimes & typing thocks active)' : 'MUTED (Zero audio)'}`}
-              aria-label="Toggle companion sound"
-            >
-              {isSoundEnabled ? <Volume2 size={11} color="#10b981" /> : <VolumeX size={11} color="var(--text-muted)" />}
-            </button>
-
-            {/* Sleep / Wake Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (toggleSleep) {
-                  toggleSleep();
-                } else {
-                  wakeUp?.();
-                }
-              }}
-              title="Toggle sleep / wake (S)"
-              aria-label="Toggle sleep"
-            >
-              <Moon size={11} color="#a855f7" />
-            </button>
-
-            {/* Dock Snap / Reset Button */}
-            {!isSnappedToDock && (
+            {/* Segmented Tabs: Play, Wardrobe, Settings */}
+            <div className="companion-tabs">
               <button
                 type="button"
-                className="btn-ghost"
-                style={{ padding: '2px 5px', fontSize: 11, display: 'inline-flex', alignItems: 'center' }}
+                className={`companion-tab-btn ${companionTab === 'play' ? 'is-active' : ''}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  resetPositionToDock?.();
+                  setCompanionTab('play');
                 }}
-                title="Reset position back to dock ledge"
-                aria-label="Reset position to dock"
               >
-                <Pin size={11} color="#38bdf8" />
+                Play & Toys
               </button>
+              <button
+                type="button"
+                className={`companion-tab-btn ${companionTab === 'wardrobe' ? 'is-active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCompanionTab('wardrobe');
+                }}
+              >
+                Wardrobe
+              </button>
+              <button
+                type="button"
+                className={`companion-tab-btn ${companionTab === 'settings' ? 'is-active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCompanionTab('settings');
+                }}
+              >
+                Settings
+              </button>
+            </div>
+
+            {/* Tab 1: Play & Tricks (2-column compact grid of 8 toys) */}
+            {companionTab === 'play' && (
+              <div className="companion-toy-grid">
+                <button
+                  type="button"
+                  className={`companion-toy-chip ${isLaserActive ? 'is-active' : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerLaser?.();
+                  }}
+                  title="Toggle red laser pointer chase (L)"
+                >
+                  <Target size={12} color={isLaserActive ? '#ef4444' : '#f87171'} />
+                  <span>Laser</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="companion-toy-chip"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerBox?.();
+                  }}
+                  title="Rest in cozy \\hbox cardboard box (B)"
+                >
+                  <Box size={12} color="#f59e0b" />
+                  <span>Box</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="companion-toy-chip"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerFish?.();
+                  }}
+                  title="Crunchy golden fish treat (F)"
+                >
+                  <Fish size={12} color="#10b981" />
+                  <span>Fish Snack</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="companion-toy-chip"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerYarnChase?.();
+                  }}
+                  title="Toss bouncy yarn ball (Y)"
+                >
+                  <Sparkles size={12} color="#38bdf8" />
+                  <span>Yarn Ball</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="companion-toy-chip"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerKnockMug?.();
+                  }}
+                  title="Playfully knock TeX mug off ledge (U)"
+                >
+                  <Coffee size={12} color="#f97316" />
+                  <span>Knock Mug</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="companion-toy-chip"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerPeekABoo?.();
+                  }}
+                  title="Peek-a-boo hiding behind dock (P)"
+                >
+                  <Eye size={12} color="#38bdf8" />
+                  <span>Peek-a-Boo</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="companion-toy-chip"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerBellyFlop?.();
+                  }}
+                  title="Playful belly-up flop (G)"
+                >
+                  <Smile size={12} color="#ec4899" />
+                  <span>Belly Flop</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="companion-toy-chip"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerKnuthCelebration?.();
+                  }}
+                  title="Donald Knuth $2.56 reward check celebration (K)"
+                >
+                  <BookOpen size={12} color="#a855f7" />
+                  <span>Knuth Check</span>
+                </button>
+              </div>
             )}
 
-            <div style={{ width: 1, height: 12, backgroundColor: 'var(--border-subtle, #334155)', margin: '0 2px' }} />
+            {/* Tab 2: Wardrobe & Skins */}
+            {companionTab === 'wardrobe' && (
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Coat Skin ({skin})
+                </div>
+                <div className="companion-swatches-row">
+                  {(['tuxedo', 'ginger', 'calico', 'siamese', 'cyberpunk'] as DeskPetSkin[]).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`coat-swatch-circle ${skin === s ? 'is-active' : ''}`}
+                      style={{
+                        backgroundColor:
+                          s === 'tuxedo' ? '#1e293b' : s === 'ginger' ? '#ea580c' : s === 'calico' ? '#f8fafc' : s === 'siamese' ? '#fef3c7' : '#090d16',
+                        border: s === 'calico' ? '1px solid #94a3b8' : 'none',
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSkin?.(s);
+                      }}
+                      title={`Switch coat to ${s}`}
+                      aria-label={`${s} skin`}
+                    >
+                      {skin === s && <Check size={11} color={s === 'calico' || s === 'siamese' ? '#0f172a' : '#ffffff'} />}
+                    </button>
+                  ))}
+                </div>
 
-            {/* Turn Off / Disable Companion Button */}
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '2px 4px', fontSize: 11, color: 'var(--text-muted)' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleEnabled?.();
-              }}
-              title="Disable / Turn off Desk Companion"
-              aria-label="Disable companion"
-            >
-              <X size={11} />
-            </button>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', margin: '6px 0 4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Academic Attire ({accessory})
+                </div>
+                <div className="outfit-chips-grid">
+                  {(['none', 'mortarboard', 'scarf', 'detective', 'bowtie'] as DeskPetAccessory[]).map((acc) => (
+                    <button
+                      key={acc}
+                      type="button"
+                      className={`outfit-chip ${accessory === acc ? 'is-active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAccessory?.(acc);
+                      }}
+                    >
+                      {acc === 'none' ? 'No Outfit' : acc}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tab 3: Perch & Settings */}
+            {companionTab === 'settings' && (
+              <div className="companion-settings-group">
+                {/* Roam Mode Toggle */}
+                <div className="companion-settings-row">
+                  <span>Navigation:</span>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ padding: '2px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleRoamMode?.();
+                    }}
+                  >
+                    <Compass size={11} color={roamMode === 'free' ? '#38bdf8' : '#94a3b8'} />
+                    <span>{roamMode === 'dock' ? 'Dock Patrol' : 'Safe Perches'}</span>
+                  </button>
+                </div>
+
+                {/* Return to Ledge Button */}
+                <div className="companion-settings-row">
+                  <span>Dock Ledge:</span>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ padding: '2px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4, color: '#38bdf8' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      resetPositionToDock?.();
+                    }}
+                    title="Return position to bottom status dock ledge"
+                  >
+                    <Pin size={11} color="#38bdf8" />
+                    <span>Return to Ledge</span>
+                  </button>
+                </div>
+
+                {/* Sound & Volume */}
+                <div className="companion-settings-row">
+                  <span>Sound ({Math.round((volume || 0.6) * 100)}%):</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      style={{ padding: '2px 4px' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSound?.();
+                      }}
+                      title="Toggle sound"
+                    >
+                      {isSoundEnabled ? <Volume2 size={12} color="#10b981" /> : <VolumeX size={12} color="var(--text-muted)" />}
+                    </button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={volume ?? 0.6}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        setVolume?.(parseFloat(e.target.value));
+                      }}
+                      style={{ width: 60, height: 4, cursor: 'pointer' }}
+                    />
+                  </div>
+                </div>
+
+                {/* Sleep / Wake */}
+                <div className="companion-settings-row">
+                  <span>Power State:</span>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ padding: '2px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (toggleSleep) {
+                        toggleSleep();
+                      } else {
+                        wakeUp?.();
+                      }
+                    }}
+                  >
+                    <Moon size={11} color="#a855f7" />
+                    <span>{state === 'sleep' ? 'Wake Up (S)' : 'Sleep (S)'}</span>
+                  </button>
+                </div>
+
+                <div style={{ width: '100%', height: 1, backgroundColor: 'var(--border-subtle, rgba(255,255,255,0.08))', margin: '2px 0' }} />
+
+                {/* Disable Companion */}
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ width: '100%', padding: '3px 0', fontSize: 10.5, color: '#f87171', justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 4 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleEnabled?.();
+                  }}
+                >
+                  <X size={11} />
+                  <span>Turn Off Companion</span>
+                </button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Main Mascot Wrapper with 2D Drag & Fling Physics */}
+        {/* Main Mascot Wrapper with 2D Drag & Fling Physics (zero native title tooltip to prevent covering PDF) */}
         <div
           ref={mascotRef}
-          className="desk-pet-mascot-wrapper"
+          className="desk-pet-mascot-wrapper ghost-hover"
           style={{
             pointerEvents: 'auto',
             position: 'relative',
@@ -801,7 +843,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
           role="img"
           tabIndex={0}
           aria-label={`TeXCat Desk Companion: ${stateLabel}. Coat: ${skin}. Outfit: ${accessory}. Pet count: ${petCount}. (Triple-click for menu, drag anywhere in 2D, double-click for yarn)`}
-          title={`TeXCat: ${stateLabel}${petCount > 0 ? ` (Loved ${petCount} times)` : ''} — 3 quick clicks for options`}
           onKeyDown={handleKeyDown}
         >
           {/* Floating Heart Particles */}

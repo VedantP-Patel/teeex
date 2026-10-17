@@ -2076,6 +2076,201 @@ p.latex-force-indent {
   filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.4));
 }
 
+/* Subtle hover ghost transparency so underlying text is never blocked */
+.desk-pet-mascot-wrapper.ghost-hover:hover {
+  opacity: 0.35;
+  transition: opacity 0.2s ease;
+}
+
+/* Compact Companion Card Popover */
+.texcat-companion-card {
+  width: 252px;
+  max-width: 90vw;
+  background: var(--bg-surface-elevated, rgba(22, 28, 45, 0.94));
+  border: 1px solid var(--border-subtle, rgba(56, 189, 248, 0.25));
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 16px rgba(56, 189, 248, 0.12);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  padding: 10px;
+  margin-bottom: 8px;
+  animation: companionCardFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: auto;
+  user-select: none;
+  font-family: inherit;
+  color: var(--text-primary, #f8fafc);
+}
+
+@keyframes companionCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.companion-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.companion-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary, #f8fafc);
+}
+
+.companion-state-badge {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--accent-cyan, #38bdf8);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  text-transform: capitalize;
+}
+
+.companion-tabs {
+  display: flex;
+  gap: 3px;
+  background: rgba(15, 23, 42, 0.65);
+  padding: 2px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.companion-tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
+  padding: 4px 0;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.companion-tab-btn.is-active {
+  background: rgba(56, 189, 248, 0.18);
+  color: var(--accent-cyan, #38bdf8);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.companion-tab-btn:hover:not(.is-active) {
+  color: var(--text-primary, #f8fafc);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.companion-toy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.companion-toy-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 6px;
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.07));
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-secondary, #cbd5e1);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.companion-toy-chip:hover {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: var(--accent-cyan, #38bdf8);
+  transform: translateY(-1px);
+}
+
+.companion-toy-chip.is-active {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.companion-swatches-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  margin-bottom: 6px;
+}
+
+.coat-swatch-circle {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.coat-swatch-circle.is-active {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 2px var(--accent-cyan, #38bdf8);
+}
+
+.outfit-chips-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.outfit-chip {
+  padding: 3px 6px;
+  font-size: 10.5px;
+  border-radius: 5px;
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.07));
+  color: var(--text-secondary, #cbd5e1);
+  cursor: pointer;
+  text-transform: capitalize;
+  transition: all 0.15s ease;
+}
+
+.outfit-chip.is-active {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: var(--accent-cyan, #38bdf8);
+  color: var(--accent-cyan, #38bdf8);
+}
+
+.companion-settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.companion-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary, #cbd5e1);
+}
+
 /* 1. Idle Attentive Breathing & Blinking */
 .texcat-rig.state-idle {
   animation: pet-breathe 2.8s ease-in-out infinite;
