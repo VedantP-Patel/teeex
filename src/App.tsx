@@ -51,9 +51,7 @@ import { STARTER_TEMPLATES } from './services/templates';
 import { exportProjectAsZip } from './services/zipExporter';
 import { useDeskPet } from './hooks/useDeskPet';
 import { DeskPet } from './components/DeskPet';
-import {
-  CollaborationHub,
-} from './services/collaboration';
+import { SupabaseYjsProvider } from './services/yjsProvider';
 import { isSupabaseConnected } from './services/supabaseClient';
 import { getStoredSession, signOutUser, verifyActiveSupabaseSession } from './services/authService';
 import {
@@ -188,6 +186,17 @@ export function App() {
       setFiles(draft.files);
       if (draft.folders) setFolders(draft.folders);
       if (draft.title) setProjectTitle(draft.title);
+      if (providerRef.current && draft.files) {
+        draft.files.forEach(f => {
+          const yText = providerRef.current!.getText(f.id);
+          if (yText.toString() !== f.content) {
+            providerRef.current!.getDoc().transact(() => {
+              yText.delete(0, yText.length);
+              yText.insert(0, f.content);
+            }, 'local-editor');
+          }
+        });
+      }
       setToast('Restored uncommitted session from crash recovery.');
     },
   });
@@ -294,7 +303,16 @@ export function App() {
       return 'viewer';
     }
 
-    if (currentUser && activeProject?.ownerEmail === currentUser.email) return 'owner';
+    if (currentUser && activeProject) {
+      if (activeProject.ownerEmail === currentUser.email || activeProject.ownerId === currentUser.id) {
+        return 'owner';
+      }
+      const member = activeProject.members?.find(
+        m => m.email?.toLowerCase() === currentUser.email?.toLowerCase() || m.id === currentUser.id
+      );
+      if (member) return member.role;
+    }
+
     return activeProject?.role || 'owner';
   }, [activeProject, currentUser, roomId]);
 
@@ -307,36 +325,47 @@ export function App() {
   // env alone — there is no in-app "connect to Supabase" flow to change it.
   const isCloudConnected = isSupabaseConnected();
 
-  const [hub] = useState<CollaborationHub>(() => new CollaborationHub(roomId));
   const [selfUser, setSelfUser] = useState<Collaborator>(() => {
-    const initial = hub.selfUser;
+    const savedName = localStorage.getItem('teeex_user_name') || 'Guest Author';
+    const userId = 'usr_' + Math.random().toString(36).substring(2, 9);
+    const color = '#38bdf8';
     if (currentUser) {
       return {
-        ...initial,
+        id: currentUser.id || userId,
         name: currentUser.fullName,
         avatar: currentUser.fullName.substring(0, 2).toUpperCase(),
-        color: currentUser.avatarColor || '#38bdf8',
+        color: currentUser.avatarColor || color,
+        role: currentRole,
+        cursorLine: 1,
+        cursorCol: 1,
+        activeFile: 'main.tex',
+        status: 'active',
+        isSelf: true,
       };
     }
     return {
-      ...initial,
-      name: 'Guest Author',
-      avatar: 'GA',
-      color: '#38bdf8',
+      id: userId,
+      name: savedName,
+      avatar: savedName.substring(0, 2).toUpperCase(),
+      color,
+      role: currentRole || 'owner',
+      cursorLine: 1,
+      cursorCol: 1,
+      activeFile: 'main.tex',
+      status: 'active',
+      isSelf: true,
     };
   });
+
+  // Stage 7: Real Yjs CRDT Collaboration Provider
+  const [provider, setProvider] = useState<SupabaseYjsProvider | null>(null);
+  const providerRef = useRef<SupabaseYjsProvider | null>(null);
 
   // Cursor line tracked separately with throttling for Sidebar outline highlight
   const [activeCursorLine, setActiveCursorLine] = useState<number>(1);
   const cursorThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /**
-   * Peer presence. `CollaborationHub` is BroadcastChannel-based, so this only
-   * ever shows other tabs of this browser — there is no cross-user transport
-   * yet. It used to be seeded from `DEFAULT_PEERS`, two invented co-authors
-   * ("Dr. Elena Rostova", "Marcus Chen") that appeared with cursor positions in
-   * a document they had never opened.
-   */
+  // Real-time peer presence driven by Yjs awareness and Supabase Realtime
   const [peers, setPeers] = useState<Collaborator[]>([]);
 
   // Keep checkpoints in sync whenever activeProjectId changes, and pull from Supabase Cloud
@@ -639,39 +668,66 @@ export function App() {
     texEngineView.compile();
   }, [texEngineView]);
 
-  // Real-time Collaboration sync listener
+  // Stage 7: Real Yjs CRDT Collaboration Provider (over Supabase Realtime + local BroadcastChannel fallback)
   useEffect(() => {
-    const unsubscribe = hub.onMessage(msg => {
-      if (msg.type === 'FILE_UPDATE' && msg.fileId && msg.content !== undefined) {
-        setFiles(prev => prev.map(f => f.id === msg.fileId ? { ...f, content: msg.content! } : f));
-      } else if (msg.type === 'CURSOR_MOVE') {
-        setPeers(prev => {
-          const existing = prev.find(p => p.id === msg.senderId);
-          if (existing) {
-            return prev.map(p => p.id === msg.senderId ? {
-              ...p,
-              cursorLine: msg.cursorLine || p.cursorLine,
-              cursorCol: msg.cursorCol || p.cursorCol,
-              activeFile: msg.fileId || p.activeFile,
-            } : p);
-          } else {
-            return [...prev, {
-              id: msg.senderId,
-              name: msg.senderName,
-              color: msg.senderColor,
-              avatar: msg.senderName.substring(0, 2).toUpperCase(),
-              cursorLine: msg.cursorLine || 1,
-              cursorCol: msg.cursorCol || 1,
-              activeFile: msg.fileId || 'main.tex',
-              status: 'active',
-            }];
-          }
-        });
-      }
+    let p = providerRef.current;
+    if (!p || p.projectId !== activeProjectId || p.isDestroyed) {
+      if (p && !p.isDestroyed) p.destroy();
+      p = new SupabaseYjsProvider(
+        activeProjectId,
+        selfUser,
+        filesRef.current,
+        (updatedFiles) => {
+          setFiles(prev => {
+            const map = new Map(updatedFiles.map(f => [f.id, f.content]));
+            return prev.map(f => map.has(f.id) ? { ...f, content: map.get(f.id)! } : f);
+          });
+          updateProject(activeProjectIdRef.current, { files: filesRef.current });
+        }
+      );
+      providerRef.current = p;
+      setProvider(p);
+    }
+
+    // Load cloud snapshot if available
+    p.loadSnapshotFromCloud().catch(() => {});
+
+    // Listen to live peer presence from Yjs awareness + Supabase presence
+    const unsubPeers = p.onPeersChange((livePeers) => {
+      setPeers(livePeers);
     });
 
-    return () => unsubscribe();
-  }, [hub]);
+    // Synchronize review comments array from Yjs
+    const yComments = p.getCommentsArray();
+    const updateComments = () => {
+      const arr = yComments.toArray();
+      if (arr.length > 0) setComments(arr);
+    };
+    yComments.observe(updateComments);
+
+    // Synchronize tracked changes array from Yjs
+    const yTracked = p.getTrackedChangesArray();
+    const updateTracked = () => {
+      const arr = yTracked.toArray();
+      if (arr.length > 0) setTrackedChanges(arr);
+    };
+    yTracked.observe(updateTracked);
+
+    return () => {
+      unsubPeers();
+      yComments.unobserve(updateComments);
+      yTracked.unobserve(updateTracked);
+    };
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    return () => {
+      if (providerRef.current) {
+        providerRef.current.destroy();
+        providerRef.current = null;
+      }
+    };
+  }, []);
 
 
 
@@ -800,18 +856,26 @@ export function App() {
     pulseTyping();
     const currentId = activeFileIdRef.current;
     setFiles(prev => prev.map(f => f.id === currentId ? { ...f, content: newCode } : f));
-    hub.broadcastFileUpdate(currentId, newCode);
+    if (providerRef.current) {
+      const yText = providerRef.current.getText(currentId);
+      if (yText.toString() !== newCode) {
+        providerRef.current.getDoc().transact(() => {
+          yText.delete(0, yText.length);
+          yText.insert(0, newCode);
+        }, 'local-editor');
+      }
+    }
     markDirty();
-  }, [hub, markDirty, pulseTyping]);
+  }, [markDirty, pulseTyping]);
 
-  // Cursor change: Broadcasts immediately to peers, throttles local UI outline update to 200ms
+  // Cursor change: Broadcasts via throttled awareness to peers, throttles local UI outline update to 200ms
   const handleCursorChange = useCallback((line: number, col: number) => {
-    hub.broadcastCursor(activeFileIdRef.current, line, col);
+    provider?.setLocalCursor(activeFileIdRef.current, line, col);
     if (cursorThrottleRef.current) clearTimeout(cursorThrottleRef.current);
     cursorThrottleRef.current = setTimeout(() => {
       setActiveCursorLine(prev => (prev !== line ? line : prev));
     }, 200);
-  }, [hub]);
+  }, [provider]);
 
   // Apply Quick Fix action safely across single or multiple lines
   const handleApplyFix = useCallback((fix: SuggestedFix) => {
@@ -932,11 +996,31 @@ export function App() {
       resolved: false,
     };
     setComments(prev => [...prev, newComment]);
-  }, [selfUser]);
+    provider?.getCommentsArray().push([newComment]);
+  }, [selfUser, provider]);
 
   const handleResolveComment = useCallback((commentId: string) => {
     setComments(prev => prev.map(c => c.id === commentId ? { ...c, resolved: true } : c));
-  }, []);
+    if (provider) {
+      const yArr = provider.getCommentsArray();
+      const idx = yArr.toArray().findIndex(c => c.id === commentId);
+      if (idx >= 0) {
+        const item = yArr.get(idx);
+        yArr.delete(idx, 1);
+        yArr.insert(idx, [{ ...item, resolved: true }]);
+      }
+    }
+  }, [provider]);
+
+  const handleFollowPeer = useCallback((peer: Collaborator) => {
+    if (peer.activeFile && peer.activeFile !== activeFileIdRef.current) {
+      handleSelectFile(peer.activeFile);
+    }
+    if (peer.cursorLine) {
+      setTargetLine(peer.cursorLine);
+    }
+    setToast(`Following ${peer.name}`);
+  }, [handleSelectFile]);
 
   const handleCreateCheckpoint = useCallback((name: string) => {
     const newCp = createCheckpoint(
@@ -1625,6 +1709,7 @@ export function App() {
             onCollapse={() => setIsSidebarOpen(false)}
             onImportFiles={handleImportFiles}
             onOpenImageUpload={() => setIsImageUploadOpen(true)}
+            peers={peers}
           />
         </div>
 
@@ -1668,6 +1753,10 @@ export function App() {
               onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
               onOpenImageUpload={() => setIsImageUploadOpen(true)}
               onImportFiles={handleImportFiles}
+              ytext={provider ? provider.getText(activeFileId) : null}
+              awareness={provider ? provider.awareness : null}
+              undoManager={provider ? provider.getUndoManager(activeFileId) : null}
+              onFollowPeer={handleFollowPeer}
             />
           </div>
 

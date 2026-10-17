@@ -62,6 +62,7 @@ export interface EditorToolbarProps {
   isMinimapOpen: boolean;
   setIsMinimapOpen: (val: boolean) => void;
   onAddCommentClick: () => void;
+  onFollowPeer?: (peer: Collaborator) => void;
 }
 
 export const EditorToolbar: React.FC<EditorToolbarProps> = React.memo(({
@@ -71,6 +72,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = React.memo(({
   fileName,
   lineCount,
   peers,
+  onFollowPeer,
   suggestionMode,
   setSuggestionMode,
   role = 'owner',
@@ -225,6 +227,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = React.memo(({
                 .map((p, idx) => (
                   <div
                     key={p.id}
+                    onClick={() => onFollowPeer && onFollowPeer(p)}
                     style={{
                       width: 20,
                       height: 20,
@@ -240,9 +243,16 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = React.memo(({
                       marginLeft: idx > 0 ? -6 : 0,
                       position: 'relative',
                       boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
-                      cursor: 'default',
+                      cursor: onFollowPeer ? 'pointer' : 'default',
+                      transition: 'transform 0.15s ease',
                     }}
-                    title={`${p.name} (Line ${p.cursorLine} • ${p.status === 'typing' ? 'Typing...' : 'Active'})`}
+                    onMouseEnter={(e) => {
+                      if (onFollowPeer) (e.currentTarget as HTMLElement).style.transform = 'scale(1.15)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (onFollowPeer) (e.currentTarget as HTMLElement).style.transform = 'scale(1)';
+                    }}
+                    title={`${p.name} (Line ${p.cursorLine} • ${p.status === 'typing' ? 'Typing...' : 'Active'})${onFollowPeer ? ' — Click to follow' : ''}`}
                   >
                     {p.avatar || p.name.substring(0, 2).toUpperCase()}
                   </div>

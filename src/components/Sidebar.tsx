@@ -22,7 +22,7 @@ import {
   UploadCloud,
   ImagePlus
 } from 'lucide-react';
-import type { ProjectFile, ParsedDocument, ProjectRole } from '../types/latex';
+import type { ProjectFile, ParsedDocument, ProjectRole, Collaborator } from '../types/latex';
 import { extractLatexLabels } from '../services/latexParser';
 
 interface Props {
@@ -46,6 +46,7 @@ interface Props {
   parsedDoc?: ParsedDocument;
   onImportFiles?: (files: FileList | File[], targetFolder?: string) => void;
   onOpenImageUpload?: () => void;
+  peers?: Collaborator[];
 }
 
 export const Sidebar: React.FC<Props> = ({
@@ -69,6 +70,7 @@ export const Sidebar: React.FC<Props> = ({
   parsedDoc,
   onImportFiles,
   onOpenImageUpload,
+  peers = [],
 }) => {
   const [activeTab, setActiveTab] = useState<'files' | 'outline'>('files');
 
@@ -777,6 +779,22 @@ export const Sidebar: React.FC<Props> = ({
                                 }}>
                                   {getFileDisplayName(f)}
                                 </span>
+                                {peers.filter(p => p.activeFile === f.name || p.activeFile === f.id).map(p => (
+                                  <span
+                                    key={p.id}
+                                    className="sidebar-peer-dot"
+                                    style={{
+                                      width: 6,
+                                      height: 6,
+                                      borderRadius: '50%',
+                                      backgroundColor: p.color,
+                                      flexShrink: 0,
+                                      boxShadow: `0 0 5px ${p.color}`,
+                                      display: 'inline-block',
+                                    }}
+                                    title={`${p.name} is active in this file`}
+                                  />
+                                ))}
                               </div>
 
                               {files.length > 1 && !f.isEntry && role !== 'viewer' && (
@@ -869,6 +887,22 @@ export const Sidebar: React.FC<Props> = ({
                             ROOT
                           </span>
                         )}
+                        {peers.filter(p => p.activeFile === f.name || p.activeFile === f.id).map(p => (
+                          <span
+                            key={p.id}
+                            className="sidebar-peer-dot"
+                            style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: '50%',
+                              backgroundColor: p.color,
+                              flexShrink: 0,
+                              boxShadow: `0 0 5px ${p.color}`,
+                              display: 'inline-block',
+                            }}
+                            title={`${p.name} is active in this file`}
+                          />
+                        ))}
                       </div>
 
                       {files.length > 1 && !f.isEntry && f.name !== 'main.tex' && role !== 'viewer' && (

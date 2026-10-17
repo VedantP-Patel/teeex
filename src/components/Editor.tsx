@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import { openSearchPanel } from '@codemirror/search';
 
+import type * as Y from 'yjs';
+import type { Awareness } from 'y-protocols/awareness';
 import type { Collaborator, Diagnostic, ReviewComment, ProjectRole, ProjectFile, TrackedChange } from '../types/latex';
 import type { BibEntry } from '../services/bibtexParser';
 import { extractLatexLabels } from '../services/latexParser';
@@ -52,6 +54,11 @@ interface Props {
   onSaveShortcut?: () => void;
   onOpenImageUpload?: () => void;
   onImportFiles?: (files: FileList | File[], targetFolder?: string) => void;
+  // Stage 7 Yjs collaboration integration
+  ytext?: Y.Text | null;
+  awareness?: Awareness | null;
+  undoManager?: Y.UndoManager | null;
+  onFollowPeer?: (peer: Collaborator) => void;
 }
 
 export const Editor: React.FC<Props> = ({
@@ -87,6 +94,10 @@ export const Editor: React.FC<Props> = ({
   onSaveShortcut,
   onOpenImageUpload,
   onImportFiles: _onImportFiles,
+  ytext,
+  awareness,
+  undoManager,
+  onFollowPeer,
 }) => {
   const [suggestionMode, setSuggestionMode] = useState(false);
   const [isReviewPanelOpen, setIsReviewPanelOpen] = useState(false);
@@ -181,6 +192,9 @@ export const Editor: React.FC<Props> = ({
     diagnostics,
     targetLine,
     onClearTargetLine,
+    ytext,
+    awareness,
+    undoManager,
   });
 
   // Track scroll with requestAnimationFrame throttling when Minimap is open
@@ -356,6 +370,7 @@ export const Editor: React.FC<Props> = ({
         isMinimapOpen={isMinimapOpen}
         setIsMinimapOpen={setIsMinimapOpen}
         onAddCommentClick={() => setActiveCommentLine(currentCursorLine)}
+        onFollowPeer={onFollowPeer}
       />
 
       {isImageFile ? (

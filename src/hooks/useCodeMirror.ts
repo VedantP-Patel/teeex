@@ -1,7 +1,10 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { StateEffect, StateField, EditorState, type Extension } from '@codemirror/state';
+import { StateEffect, StateField, EditorState, Compartment, type Extension } from '@codemirror/state';
 import { EditorView, ViewUpdate, Decoration, type DecorationSet } from '@codemirror/view';
 import { setDiagnostics, type Diagnostic as CMDiagnostic } from '@codemirror/lint';
+import type * as Y from 'yjs';
+import type { Awareness } from 'y-protocols/awareness';
+import { yCollab } from 'y-codemirror.next';
 
 import type { Collaborator, Diagnostic } from '../types/latex';
 import type { SyntaxTheme } from '../services/syntaxHighlighter';
@@ -11,6 +14,7 @@ import { setPeersEffect } from './usePeerDecorations';
 
 export const flashLineEffect = StateEffect.define<number>();
 export const clearFlashEffect = StateEffect.define<void>();
+export const collabCompartment = new Compartment();
 
 const flashLineDecoration = Decoration.line({
   attributes: { class: 'cm-line-flash' },
@@ -48,6 +52,10 @@ export interface UseCodeMirrorProps {
   diagnostics?: Diagnostic[];
   targetLine?: number | null;
   onClearTargetLine?: () => void;
+  // Stage 7 Yjs collaboration integration
+  ytext?: Y.Text | null;
+  awareness?: Awareness | null;
+  undoManager?: Y.UndoManager | null;
 }
 
 export function useCodeMirror({
@@ -62,6 +70,9 @@ export function useCodeMirror({
   diagnostics = [],
   targetLine,
   onClearTargetLine,
+  ytext,
+  awareness,
+  undoManager,
 }: UseCodeMirrorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -94,9 +105,19 @@ export function useCodeMirror({
       }
     });
 
+    const collabExtension =
+      ytext && awareness
+        ? yCollab(ytext, awareness, { undoManager: undoManager || false })
+        : [];
+
     const state = EditorState.create({
-      doc: code,
-      extensions: [...extensions, flashLineField, updateListener],
+      doc: ytext ? ytext.toString() : code,
+      extensions: [
+        ...extensions,
+        collabCompartment.of(collabExtension),
+        flashLineField,
+        updateListener,
+      ],
     });
 
     const view = new EditorView({
@@ -108,7 +129,7 @@ export function useCodeMirror({
     if (typeof window !== 'undefined') {
       (window as unknown as { __teeexEditorView?: EditorView }).__teeexEditorView = view;
     }
-    lastEmittedDocRef.current = code;
+    lastEmittedDocRef.current = ytext ? ytext.toString() : code;
 
     return () => {
       view.destroy();
@@ -122,10 +143,28 @@ export function useCodeMirror({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reconfigure Yjs collaboration extension when active ytext or awareness changes (e.g. file tab switch)
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+
+    const collabExtension =
+      ytext && awareness
+        ? yCollab(ytext, awareness, { undoManager: undoManager || false })
+        : [];
+
+    view.dispatch({
+      effects: collabCompartment.reconfigure(collabExtension),
+    });
+  }, [ytext, awareness, undoManager]);
+
   // Sync external code changes (tab switch, formatting, quick-fix) with minimal diff
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
+
+    // If Yjs CRDT is active on this document, yCollab manages all document operations
+    if (ytext) return;
 
     // Fast path: if `code` matches what CodeMirror itself just emitted, do nothing!
     if (code === lastEmittedDocRef.current) return;

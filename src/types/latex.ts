@@ -41,6 +41,7 @@ export interface Collaborator {
   activeFile: string;
   status: 'active' | 'idle' | 'typing';
   isSelf?: boolean;
+  role?: 'owner' | 'editor' | 'viewer';
   selectionStartLine?: number;
   selectionEndLine?: number;
   selectionText?: string;
