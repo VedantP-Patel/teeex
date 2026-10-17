@@ -247,6 +247,44 @@ export async function getCachedMisses(): Promise<string[]> {
   });
 }
 
+async function fetchPackageThrottled(
+  items: BundledPackageDef[],
+  concurrency = 3,
+  onLoaded: (pkg: LoadedPackage) => void,
+): Promise<LoadedPackage[]> {
+  const queue = [...items];
+  const loadedList: LoadedPackage[] = [];
+
+  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+    while (queue.length > 0) {
+      const pkg = queue.shift();
+      if (!pkg) break;
+      try {
+        const res = await fetch(`/packages/${pkg.name}`);
+        if (res.ok) {
+          const buf = new Uint8Array(await res.arrayBuffer());
+          const ct = res.headers.get('content-type');
+          if (buf.length > 0 && !isHtmlResponse(buf, ct)) {
+            const loaded: LoadedPackage = {
+              name: pkg.name,
+              format: pkg.format,
+              content: buf,
+              contents: buf,
+            };
+            loadedList.push(loaded);
+            onLoaded(loaded);
+          }
+        }
+      } catch {
+        // Network error: leave retryable
+      }
+    }
+  });
+
+  await Promise.all(workers);
+  return loadedList;
+}
+
 export async function getBundledPackages(): Promise<LoadedPackage[]> {
   if (packageMemoryCache.size >= BUNDLED_PACKAGES.length && loadPromise) {
     return loadPromise;
@@ -265,31 +303,10 @@ export async function getBundledPackages(): Promise<LoadedPackage[]> {
 
     const missingCore = BUNDLED_PACKAGES.filter((p) => !resultsMap.has(p.name));
     if (missingCore.length > 0) {
-      const newlyFetched: LoadedPackage[] = [];
-      await Promise.all(
-        missingCore.map(async (pkg) => {
-          try {
-            const res = await fetch(`/packages/${pkg.name}`);
-            if (res.ok) {
-              const buf = new Uint8Array(await res.arrayBuffer());
-              const ct = res.headers.get('content-type');
-              if (buf.length > 0 && !isHtmlResponse(buf, ct)) {
-                const loaded: LoadedPackage = {
-                  name: pkg.name,
-                  format: pkg.format,
-                  content: buf,
-                  contents: buf,
-                };
-                resultsMap.set(pkg.name, loaded);
-                packageMemoryCache.set(pkg.name, buf);
-                newlyFetched.push(loaded);
-              }
-            }
-          } catch {
-            // Ignore
-          }
-        }),
-      );
+      const newlyFetched = await fetchPackageThrottled(missingCore, 3, (loaded) => {
+        resultsMap.set(loaded.name, loaded);
+        packageMemoryCache.set(loaded.name, loaded.content);
+      });
       if (newlyFetched.length > 0) {
         void saveBatchToIndexedDb(newlyFetched);
       }

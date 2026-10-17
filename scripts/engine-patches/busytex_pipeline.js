@@ -102,8 +102,9 @@ class BusytexPipeline {
             [BusytexPipeline.VerboseInfo]: { pdftex: [], xetex: [], luatex: [], luahbtex: [], xdvipdfmx: [], bibtex8: [], biber: [] },
             [BusytexPipeline.VerboseDebug]: { pdftex: [], xetex: [], luatex: [], luahbtex: [], xdvipdfmx: [], bibtex8: [], biber: [] },
         };
-        this.supported_drivers = ['xetex_bibtex8_dvipdfmx', 'pdftex_bibtex8', 'luahbtex_bibtex8', 'luatex_bibtex8'];
-        this.biber = biber_js && biber_wasm && biber_data && typeof BusytexBiber !== 'undefined' ? new BusytexBiber(biber_js, biber_wasm, biber_data, this.print, this.script_loader) : null;
+        this.biber_args = { biber_js, biber_wasm, biber_data };
+        this.biber = null;
+        this._memfs_file_hashes = new Map();
 
         this.error_messages_fatal = ['Fatal error occurred', 'That was a fatal error', ':fatal:', '! Undefined control sequence.', 'undefined old font command'];
         this.error_messages_all = this.error_messages_fatal.concat(['no output PDF file produced', 'No pages of output.']);
@@ -182,6 +183,14 @@ class BusytexPipeline {
     terminate() {
         this.Module = null;
         this._cached_mem_header = null;
+        this._memfs_file_hashes.clear();
+    }
+
+    get_or_init_biber() {
+        if (!this.biber && this.biber_args?.biber_js && this.biber_args?.biber_wasm && this.biber_args?.biber_data && typeof BusytexBiber !== 'undefined') {
+            this.biber = new BusytexBiber(this.biber_args.biber_js, this.biber_args.biber_wasm, this.biber_args.biber_data, this.print, this.script_loader);
+        }
+        return this.biber;
     }
 
     async reload_module_if_needed(cond, env, project_dir, data_packages_js) {
@@ -450,7 +459,27 @@ class BusytexPipeline {
                 const toWrite = (path === main_tex_path && typeof contents === 'string')
                     ? injectFastPdfFlags(contents)
                     : contents;
+
+                // Delta MEMFS write optimization: compute hash and skip FS.writeFile if unchanged
+                let contentHash = '';
+                if (typeof toWrite === 'string') {
+                    let h = 0x811c9dc5;
+                    for (let i = 0; i < Math.min(toWrite.length, 500); i++) {
+                        h = Math.imul(h ^ toWrite.charCodeAt(i), 0x01000193);
+                    }
+                    contentHash = `${toWrite.length}:${(h >>> 0).toString(36)}`;
+                } else if (toWrite && toWrite.byteLength !== undefined) {
+                    contentHash = `${toWrite.byteLength}:${toWrite[0] || 0}_${toWrite[toWrite.byteLength - 1] || 0}`;
+                }
+
+                if (contentHash && this._memfs_file_hashes.get(absolute_path) === contentHash && FS.analyzePath(absolute_path).exists) {
+                    continue;
+                }
+
                 FS.writeFile(absolute_path, toWrite);
+                if (contentHash) {
+                    this._memfs_file_hashes.set(absolute_path, contentHash);
+                }
             }
         }
 
@@ -524,7 +553,7 @@ class BusytexPipeline {
             }
 
             if (bibtex_needed) {
-                if (bib_backend === 'biber' && this.biber != null)
+                if (bib_backend === 'biber' && this.get_or_init_biber() != null)
                     exit_code = await this._run_biber(FS, tex_path, files, verbose_args_for('biber'), logs);
                 else
                     ({ exit_code } = run(bibtex8_cmd, this.error_messages_fatal));

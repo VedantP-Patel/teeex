@@ -28,7 +28,7 @@ import {
   Cat,
   DownloadCloud
 } from 'lucide-react';
-import type { CompileState, Collaborator, Project, ProjectRole, UserProfile } from '../types/latex';
+import type { CompileState, CompileMode, Collaborator, Project, ProjectRole, UserProfile } from '../types/latex';
 import type { EngineStatus } from '../services/latexCompiler';
 import { usePwaInstall } from '../hooks/usePwaInstall';
 import { EngineWarmupBadge } from './EngineWarmupBadge';
@@ -38,6 +38,8 @@ interface Props {
   onTitleChange: (title: string) => void;
   compileState: CompileState;
   onCompile: () => void;
+  compileMode?: CompileMode;
+  onToggleCompileMode?: (mode: CompileMode) => void;
   onOpenCommandPalette?: () => void;
   peers: Collaborator[];
   selfUser: Collaborator;
@@ -73,6 +75,8 @@ export const Navbar: React.FC<Props> = ({
   onTitleChange,
   compileState,
   onCompile,
+  compileMode = 'fast',
+  onToggleCompileMode,
   onOpenCommandPalette,
   peers,
   selfUser: _selfUser,
@@ -276,6 +280,66 @@ export const Navbar: React.FC<Props> = ({
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 8px', borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', fontSize: 11, color: '#f59e0b', fontWeight: 600, whiteSpace: 'nowrap' }}>
             <Eye size={11} /> Read-Only
+          </div>
+        )}
+
+        {/* Compile Mode Switcher Capsule (⚡ Fast vs 💎 Final) */}
+        {currentRole !== 'viewer' && onToggleCompileMode && (
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              background: 'var(--bg-tertiary, rgba(255, 255, 255, 0.05))',
+              border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.1))',
+              borderRadius: 6,
+              padding: 2,
+              gap: 2,
+            }}
+            role="group"
+            aria-label="LaTeX compilation mode"
+          >
+            <button
+              type="button"
+              onClick={() => onToggleCompileMode('fast')}
+              style={{
+                padding: '2px 7px',
+                borderRadius: 4,
+                border: 'none',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                fontSize: 10.5,
+                fontWeight: compileMode === 'fast' ? 600 : 400,
+                background: compileMode === 'fast' ? 'var(--primary-color, #2563eb)' : 'transparent',
+                color: compileMode === 'fast' ? '#ffffff' : 'var(--text-muted, #94a3b8)',
+                transition: 'all 0.15s ease',
+              }}
+              title="Fast Mode: 2-pass preview cap, cached auxiliary artifacts, instant typing feedback"
+            >
+              ⚡ Fast
+            </button>
+            <button
+              type="button"
+              onClick={() => onToggleCompileMode('publication')}
+              style={{
+                padding: '2px 7px',
+                borderRadius: 4,
+                border: 'none',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                fontSize: 10.5,
+                fontWeight: compileMode === 'publication' ? 600 : 400,
+                background: compileMode === 'publication' ? 'var(--primary-color, #2563eb)' : 'transparent',
+                color: compileMode === 'publication' ? '#ffffff' : 'var(--text-muted, #94a3b8)',
+                transition: 'all 0.15s ease',
+              }}
+              title="Publication Mode: Full multi-pass convergence, bibtex run, guaranteed submission ready"
+            >
+              💎 Final
+            </button>
           </div>
         )}
 

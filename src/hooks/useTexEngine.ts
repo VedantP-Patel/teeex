@@ -13,24 +13,23 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ProjectFile } from '../types/latex';
+import type { CompileMode, ProjectFile } from '../types/latex';
 import {
   texEngine,
   type CompileOutcome,
   type EngineId,
   type EngineStatus,
 } from '../services/latexCompiler';
+import { loadCompiledPdfSnapshot } from '../services/pdfSnapshotCache';
 
 export interface UseTexEngineOptions {
   files: ProjectFile[];
   engine?: EngineId;
   autoCompile?: boolean;
-  /**
-   * Quiet period after the last edit before compiling. Tuned well above the
-   * old 700 ms: with real TeX, a shorter window just queues work that the next
-   * keystroke immediately supersedes.
-   */
   debounceMs?: number;
+  projectId?: string;
+  compileMode?: CompileMode;
+  citations?: string[];
 }
 
 export interface UseTexEngineResult {
@@ -94,6 +93,9 @@ export function useTexEngine({
   engine = 'pdflatex',
   autoCompile = true,
   debounceMs,
+  projectId,
+  compileMode = 'fast',
+  citations,
 }: UseTexEngineOptions): UseTexEngineResult {
   const [status, setStatus] = useState<EngineStatus>(() => texEngine.getStatus());
   const [outcome, setOutcome] = useState<CompileOutcome | null>(null);
@@ -108,6 +110,15 @@ export function useTexEngine({
   const engineRef = useRef(engine);
   engineRef.current = engine;
 
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+
+  const compileModeRef = useRef(compileMode);
+  compileModeRef.current = compileMode;
+
+  const citationsRef = useRef(citations);
+  citationsRef.current = citations;
+
   /** Highest request id whose result we have accepted. */
   const acceptedRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -120,6 +131,20 @@ export function useTexEngine({
     texEngine.prewarm(engineRef.current);
   }, []);
 
+  // Layer 1: Instant IndexedDB snapshot restoration (< 50ms) to eliminate cold-start wait
+  useEffect(() => {
+    if (!projectId) return;
+    let active = true;
+    void loadCompiledPdfSnapshot(projectId).then((cached) => {
+      if (active && cached && cached.byteLength > 0) {
+        setPdf((curr) => (curr ? curr : cached));
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
   const runCompile = useCallback(async () => {
     setIsDebouncing(false);
     setIsCompiling(true);
@@ -127,6 +152,9 @@ export function useTexEngine({
       const result = await texEngine.compile({
         files: filesRef.current,
         engine: engineRef.current,
+        projectId: projectIdRef.current,
+        compileMode: compileModeRef.current,
+        citations: citationsRef.current,
       });
 
       if (result.superseded) return;
@@ -157,17 +185,15 @@ export function useTexEngine({
 
   const fingerprint = useMemo(() => fingerprintFiles(files), [files]);
 
-  // Ultra-responsive debounce for live editing:
-  // Short docs: 250ms, medium: 350ms, large papers: 450ms.
-  // Eliminates up to 1.35s of dead-time lag while preserving typing fluidity.
-  // Balanced debounce for WASM pdfLaTeX compilation:
-  // Waits until user pauses typing so WASM worker isn't saturated mid-sentence.
+  // Ultra-responsive adaptive debounce for live editing:
+  // Short docs: 300ms, medium: 450ms, large papers: 600ms.
+  // Cuts up to 550ms of dead-time lag while preserving typing fluidity.
   const effectiveDebounceMs = useMemo(() => {
     if (debounceMs !== undefined) return debounceMs;
     const totalChars = files.reduce((acc, f) => acc + (f.content ? f.content.length : 0), 0);
-    if (totalChars < 5000) return 750;
-    if (totalChars < 25000) return 900;
-    return 1150;
+    if (totalChars < 5000) return 300;
+    if (totalChars < 25000) return 450;
+    return 600;
   }, [debounceMs, files]);
 
   const isInitialMount = useRef(true);

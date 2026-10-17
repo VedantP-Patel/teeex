@@ -4,8 +4,9 @@
 
 import { BusyTexRunner, LuaLatex, PdfLatex, XeLatex } from 'texlyre-busytex';
 import type { BusyTexConfig } from 'texlyre-busytex';
-import type { ProjectFile } from '../types/latex';
+import type { CompileMode, ProjectFile } from '../types/latex';
 import {
+  computeCitationSignature,
   needsBibtex,
   needsMakeindex,
   resolveEntryFile,
@@ -17,6 +18,12 @@ import {
   getCachedMisses,
   preloadDocumentPackages,
 } from './bundledPackages';
+import { saveCompiledPdfSnapshot } from './pdfSnapshotCache';
+import {
+  loadAuxiliaryArtifacts,
+  saveAuxiliaryArtifacts,
+  type AuxiliaryFileEntry,
+} from './auxiliaryCache';
 
 export { resolveEntryFile } from './texProject';
 
@@ -45,6 +52,9 @@ export interface CompileInput {
   entryPath?: string;
   bibtex?: boolean;
   makeindex?: boolean;
+  projectId?: string;
+  compileMode?: CompileMode;
+  citations?: string[];
 }
 
 export interface CompileOutcome {
@@ -60,6 +70,7 @@ export interface CompileOutcome {
   durationMs: number;
   requestId: number;
   superseded: boolean;
+  compileMode?: CompileMode;
 }
 
 const ENGINE_BASE_PATH = '/core/busytex';
@@ -149,6 +160,9 @@ export class TexEngineService {
   private lastPreambleSig = new Map<EngineId, string>();
   private mountedPackagesByEngine = new Map<EngineId, Set<string>>();
   private registeredMissesByEngine = new Map<EngineId, Set<string>>();
+  private lastBibSignature = new Map<string, string>();
+  private hasSettledBbl = new Map<string, boolean>();
+  private loadedAuxProjects = new Set<string>();
 
   subscribe(listener: (status: EngineStatus) => void): () => void {
     this.listeners.add(listener);
@@ -474,12 +488,51 @@ export class TexEngineService {
             : new PdfLatex(runner, false);
 
       const engineFiles = toEngineFiles(input.files, entry.name);
+      const projectKey = input.projectId ?? 'default';
+
+      // Layer 5: Pre-mount warm auxiliary files from IndexedDB into MEMFS before Pass 1
+      if (input.projectId && !this.loadedAuxProjects.has(input.projectId)) {
+        try {
+          const cachedAux = await loadAuxiliaryArtifacts(input.projectId);
+          if (cachedAux.length > 0) {
+            for (const aux of cachedAux) {
+              if (!engineFiles.some((ef) => ef.path === aux.path)) {
+                engineFiles.push({
+                  path: aux.path,
+                  content: aux.content,
+                });
+                if (aux.path.toLowerCase().endsWith('.bbl')) {
+                  this.hasSettledBbl.set(projectKey, true);
+                }
+              }
+            }
+          }
+          this.loadedAuxProjects.add(input.projectId);
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      // Layer 7: Exact BibTeX avoidance via citation AST hashing
+      let bibtexNeeded = input.bibtex ?? needsBibtex(input.files, source);
+      if (bibtexNeeded) {
+        const bibSig = computeCitationSignature(input.files, input.citations);
+        const prevSig = this.lastBibSignature.get(projectKey);
+        const settled = this.hasSettledBbl.get(projectKey);
+
+        if (settled && prevSig === bibSig) {
+          // Bibliography content and citations are unchanged; reuse existing .bbl
+          bibtexNeeded = false;
+        } else {
+          this.lastBibSignature.set(projectKey, bibSig);
+        }
+      }
 
       let result = await tool.compile({
         input: source,
         mainTexPath: entry.name,
         additionalFiles: engineFiles,
-        bibtex: input.bibtex ?? needsBibtex(input.files, source),
+        bibtex: bibtexNeeded,
         makeindex: input.makeindex ?? needsMakeindex(source),
         rerun: false,
         remoteEndpoint: remoteEndpoint(),
@@ -489,27 +542,15 @@ export class TexEngineService {
       let parsed = parseTexLog(log, { root: entry.name });
       let passes = 1;
 
+      // Layer 8: Two-pass ceiling in 'fast' preview mode vs three-pass in 'publication' mode
+      const maxPasses = input.compileMode === 'publication' ? MAX_COMPILE_PASSES : 2;
+
       /**
        * Re-run while the log says cross-references are unresolved.
-       *
-       * Warm `.aux`/`.toc` files survive in MEMFS between compiles, so a single
-       * pass is usually enough on an edit — but only because the *previous*
-       * compile left them there. The old code recorded an entry as "settled"
-       * before its follow-up pass had even run and then ignored
-       * `rerunRequired` for every later compile, so adding a `\label` left
-       * `\ref` showing `??` until something else happened to trigger a second
-       * pass. Honouring the log every time costs a pass only when TeX says one
-       * is needed.
-       *
-       * Capped, because a document can ask for a rerun forever (an unstable
-       * `\pageref`, or a package that rewrites its own aux file each pass).
-       * When the cap is hit, `rerunRequired` stays true in the outcome so the
-       * UI can say the references may be a pass behind rather than implying
-       * the output is final.
        */
       while (
         parsed.rerunRequired &&
-        passes < MAX_COMPILE_PASSES &&
+        passes < maxPasses &&
         // A newer edit is waiting: stop burning passes on output nobody will see.
         !this.queued &&
         result.pdf &&
@@ -539,6 +580,37 @@ export class TexEngineService {
 
       const pdf = result.pdf && result.pdf.byteLength > 0 ? result.pdf : null;
 
+      // Layer 1 & 5: Persist PDF snapshot and auxiliary artifacts to IndexedDB
+      if (pdf && input.projectId) {
+        void saveCompiledPdfSnapshot(input.projectId, pdf).catch(() => {});
+
+        void (async () => {
+          try {
+            const memfsFiles = await runner.readProjectFiles();
+            const auxExtensions = ['.aux', '.bbl', '.toc', '.out', '.lot', '.lof', '.idx'];
+            const auxToSave: AuxiliaryFileEntry[] = [];
+            for (const f of memfsFiles) {
+              const lower = f.path.toLowerCase();
+              if (auxExtensions.some((ext) => lower.endsWith(ext))) {
+                const textContent =
+                  typeof f.content === 'string'
+                    ? f.content
+                    : new TextDecoder().decode(f.content);
+                auxToSave.push({ path: f.path, content: textContent });
+                if (lower.endsWith('.bbl')) {
+                  this.hasSettledBbl.set(projectKey, true);
+                }
+              }
+            }
+            if (auxToSave.length > 0) {
+              await saveAuxiliaryArtifacts(input.projectId!, auxToSave);
+            }
+          } catch {
+            // Non-fatal
+          }
+        })();
+      }
+
       this.setStatus({ phase: 'ready', engine });
 
       return {
@@ -557,6 +629,7 @@ export class TexEngineService {
         durationMs: Math.round(performance.now() - started),
         requestId,
         superseded: false,
+        compileMode: input.compileMode ?? 'fast',
       };
     } catch (cause) {
       this.setStatus({ phase: 'ready', engine });
@@ -572,6 +645,9 @@ export class TexEngineService {
     this.lastPreambleSig.clear();
     this.mountedPackagesByEngine.clear();
     this.registeredMissesByEngine.clear();
+    this.lastBibSignature.clear();
+    this.hasSettledBbl.clear();
+    this.loadedAuxProjects.clear();
     this.setStatus({ phase: 'idle', progress: 0 });
   }
 }

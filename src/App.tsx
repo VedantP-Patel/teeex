@@ -34,6 +34,7 @@ import { parseSyncTex, forwardSync, type SyncTexIndex, type ForwardMatch } from 
 import type {
   ProjectFile,
   CompileState,
+  CompileMode,
   Collaborator,
   SuggestedFix,
   Template,
@@ -505,7 +506,30 @@ export function App() {
     cyclePresetSplit,
   } = useResizableSplit({ defaultPercent: 50, minPercent: 20, maxPercent: 80 });
 
-  const texEngineView = useTexEngine({ files });
+  const [compileMode, setCompileMode] = useState<CompileMode>('fast');
+
+  const citations = useMemo(() => {
+    const keys = new Set<string>();
+    const citeRegex = /\\(?:cite|citep|citet|parencite|textcite|autocite)\s*(?:\[[^\]]*\])*\s*\{([^}]+)\}/g;
+    for (const f of files) {
+      if (f.name.endsWith('.tex')) {
+        for (const m of f.content.matchAll(citeRegex)) {
+          for (const k of m[1].split(',')) {
+            const trimmed = k.trim();
+            if (trimmed) keys.add(trimmed);
+          }
+        }
+      }
+    }
+    return Array.from(keys);
+  }, [files]);
+
+  const texEngineView = useTexEngine({
+    files,
+    projectId: activeProjectId,
+    compileMode,
+    citations,
+  });
 
   // Desk Pet Companion State & Anonymized Typing Pulse
   const [isTypingActive, setIsTypingActive] = useState(false);
@@ -673,8 +697,9 @@ export function App() {
         ? new Date(texEngineView.lastCompiledAt).toLocaleTimeString()
         : new Date().toLocaleTimeString(),
       rawLogs: outcome.log ? outcome.log.split(/\r?\n/).filter(Boolean) : [],
+      compileMode: outcome.compileMode ?? compileMode,
     });
-  }, [texEngineView.isCompiling, texEngineView.isDebouncing, texEngineView.outcome, texEngineView.lastCompiledAt, liveCompileResult.durationMs]);
+  }, [texEngineView.isCompiling, texEngineView.isDebouncing, texEngineView.outcome, texEngineView.lastCompiledAt, liveCompileResult.durationMs, compileMode]);
 
   // Debounced Word Count to avoid running regex over the whole file on every keystroke
   const [wordCount, setWordCount] = useState(0);
@@ -1675,6 +1700,8 @@ export function App() {
         onTitleChange={handleTitleChange}
         compileState={compileState}
         onCompile={triggerCompile}
+        compileMode={compileMode}
+        onToggleCompileMode={setCompileMode}
         peers={peers}
         selfUser={selfUser}
         theme={theme}

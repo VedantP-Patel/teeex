@@ -59,6 +59,8 @@ export interface ReviewComment {
   resolved: boolean;
 }
 
+export type CompileMode = 'fast' | 'publication';
+
 export interface CompileState {
   status: 'idle' | 'compiling' | 'success' | 'error';
   durationMs: number;
@@ -68,6 +70,7 @@ export interface CompileState {
   errorCount: number;
   warningCount: number;
   rawLogs: string[];
+  compileMode?: CompileMode;
 }
 
 export interface ParsedDocument {

@@ -14,6 +14,19 @@ import { BUNDLED_PACKAGES, getCachedPackageContent } from './bundledPackages';
 export interface EngineFile {
   path: string;
   content: string | Uint8Array;
+  hash?: string;
+}
+
+export function computeCitationSignature(files: ProjectFile[], citations?: string[]): string {
+  const bibFiles = files.filter((f) => f.name.endsWith('.bib'));
+  let bibHash = 0x811c9dc5;
+  for (const bf of bibFiles) {
+    for (let i = 0; i < bf.content.length; i++) {
+      bibHash = Math.imul(bibHash ^ bf.content.charCodeAt(i), 0x01000193);
+    }
+  }
+  const citKey = (citations || []).slice().sort().join(';');
+  return `${(bibHash >>> 0).toString(36)}:${citKey}`;
 }
 
 /**
@@ -66,7 +79,20 @@ export function toEngineFiles(
     // under the alias LaTeX is most likely to use.
     if (seen.has(alias)) continue;
     seen.add(alias);
-    out.push({ path: alias, content: entry.content });
+
+    const c = entry.content;
+    let hash = '';
+    if (typeof c === 'string') {
+      let h = 0x811c9dc5;
+      for (let i = 0; i < Math.min(c.length, 300); i++) {
+        h = Math.imul(h ^ c.charCodeAt(i), 0x01000193);
+      }
+      hash = `${c.length}:${(h >>> 0).toString(36)}`;
+    } else {
+      hash = `${c.byteLength}:${c[0] ?? 0}_${c[c.byteLength - 1] ?? 0}`;
+    }
+
+    out.push({ path: alias, content: entry.content, hash });
   }
 
   // Pre-seed academic classes, styles, and companion assets directly into working directory if referenced
