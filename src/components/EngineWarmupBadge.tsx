@@ -13,9 +13,10 @@ import { checkEngineCacheStatus, requestPersistentStorage, type EngineCacheStatu
 interface Props {
   status: EngineStatus;
   isOffline?: boolean;
+  compact?: boolean;
 }
 
-export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline }) => {
+export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact = true }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [cacheInfo, setCacheInfo] = useState<EngineCacheStatus | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -44,21 +45,18 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline }) => {
 
   // 1. Fetching / Downloading State
   if (status.phase === 'fetching') {
-    const loadedMb = status.loadedBytes ? (status.loadedBytes / 1024 / 1024).toFixed(1) : (status.progress * 1.22).toFixed(1);
-    const speed = status.speedMbps ? `${status.speedMbps} MB/s` : '';
-
     return (
       <div className="engine-warmup-pill-container">
         <button
           type="button"
           onClick={handleToggleOpen}
           className="engine-warmup-pill fetching"
-          title="Click to view TeX engine download telemetry"
+          title={`Click to view TeX engine download telemetry (${status.progress}%)`}
           aria-label={`Priming TeX Engine ${status.progress}%`}
         >
-          <Zap className="engine-warmup-icon pulse-fast" size={13} />
+          <Zap className="engine-warmup-icon pulse-fast" size={12} />
           <span className="engine-warmup-text">
-            Priming TeX Live: {status.progress}% ({loadedMb} MB / 121.8 MB) {speed && `• ${speed}`}
+            Priming {status.progress}%
           </span>
           <div className="engine-warmup-mini-track">
             <div className="engine-warmup-mini-bar" style={{ width: `${status.progress}%` }} />
@@ -81,12 +79,12 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline }) => {
         aria-label="TeX Engine Cache Status"
       >
         {isEngineReady ? (
-          <CheckCircle2 className="engine-warmup-icon text-emerald-400" size={13} />
+          <CheckCircle2 className="engine-warmup-icon text-emerald-400" size={12} />
         ) : (
-          <Zap className="engine-warmup-icon text-amber-400" size={13} />
+          <Zap className="engine-warmup-icon text-amber-400" size={12} />
         )}
         <span className="engine-warmup-text">
-          {isOffline ? 'Offline TeX Live (Local Cache)' : isEngineReady ? 'TeX Live Primed (Offline Ready)' : 'TeX Engine Ready'}
+          {isOffline ? 'Offline' : isEngineReady ? (compact ? 'Ready' : 'TeX Live Primed (Offline Ready)') : 'Idle'}
         </span>
       </button>
 

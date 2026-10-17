@@ -1,11 +1,43 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi } from 'vitest';
-import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+// @ts-expect-error Global test flag for React 19 act()
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { ProjectsDashboardModal } from '../../src/components/modals/ProjectsDashboardModal';
 import type { Project, UserProfile } from '../../src/types/latex';
 
 describe('ProjectsDashboardModal Component', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  const render = async (element: React.ReactElement) => {
+    await act(async () => {
+      root.render(element);
+    });
+    return container;
+  };
+
+  const click = async (el: HTMLElement) => {
+    await act(async () => {
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+  };
+
   const currentUser: UserProfile = {
     id: 'usr-local',
     email: 'you@teeex.local',
@@ -72,8 +104,8 @@ describe('ProjectsDashboardModal Component', () => {
     },
   ];
 
-  it('renders modal with correct dynamic tab counts', () => {
-    render(
+  it('renders modal with correct dynamic tab counts', async () => {
+    await render(
       <ProjectsDashboardModal
         isOpen={true}
         onClose={vi.fn()}
@@ -88,14 +120,14 @@ describe('ProjectsDashboardModal Component', () => {
       />
     );
 
-    expect(screen.getByText('All (2)')).toBeDefined();
-    expect(screen.getByText('My Papers (1)')).toBeDefined();
-    expect(screen.getByText('Shared with Me (1)')).toBeDefined();
-    expect(screen.getByText('Archived (0)')).toBeDefined();
+    expect(container.textContent).toContain('All (2)');
+    expect(container.textContent).toContain('My Papers (1)');
+    expect(container.textContent).toContain('Shared with Me (1)');
+    expect(container.textContent).toContain('Archived (0)');
   });
 
-  it('filters to shared papers when clicking "Shared with Me" tab', () => {
-    render(
+  it('filters to shared papers when clicking "Shared with Me" tab', async () => {
+    await render(
       <ProjectsDashboardModal
         isOpen={true}
         onClose={vi.fn()}
@@ -110,18 +142,19 @@ describe('ProjectsDashboardModal Component', () => {
       />
     );
 
-    const sharedTab = screen.getByText('Shared with Me (1)');
-    fireEvent.click(sharedTab);
+    const sharedTab = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('Shared with Me'));
+    expect(sharedTab).toBeDefined();
+    await click(sharedTab!);
 
     // Neural Quantum State Tomography is visible
-    expect(screen.getByText('Neural Quantum State Tomography')).toBeDefined();
+    expect(container.textContent).toContain('Neural Quantum State Tomography');
     // Untitled Project is filtered out
-    expect(screen.queryByText('Untitled Project')).toBeNull();
+    expect(container.textContent).not.toContain('Untitled Project');
   });
 
-  it('renders Delete button for owner and hides it for non-owners', () => {
+  it('renders Delete button for owner and hides it for non-owners', async () => {
     const onDelete = vi.fn();
-    render(
+    await render(
       <ProjectsDashboardModal
         isOpen={true}
         onClose={vi.fn()}
@@ -137,14 +170,14 @@ describe('ProjectsDashboardModal Component', () => {
     );
 
     // There should only be 1 delete button (for Untitled Project), not 2!
-    const deleteButtons = screen.getAllByTitle('Delete project');
+    const deleteButtons = container.querySelectorAll('button[title*="Delete project"]');
     expect(deleteButtons.length).toBe(1);
   });
 
-  it('closes modal when creating a new project', () => {
+  it('closes modal when creating a new project', async () => {
     const onClose = vi.fn();
     const onCreate = vi.fn();
-    render(
+    await render(
       <ProjectsDashboardModal
         isOpen={true}
         onClose={onClose}
@@ -160,14 +193,23 @@ describe('ProjectsDashboardModal Component', () => {
     );
 
     // Open inline drawer
-    fireEvent.click(screen.getByText('New Project'));
+    const newProjectBtn = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('New Project'));
+    expect(newProjectBtn).toBeDefined();
+    await click(newProjectBtn!);
 
     // Fill title
-    const input = screen.getByPlaceholderText('Project title (e.g. Non-Abelian Anyons & Braiding Dynamics)');
-    fireEvent.change(input, { target: { value: 'Relativistic Plasma Physics' } });
+    const input = container.querySelector('input[placeholder*="Project title"]') as HTMLInputElement;
+    expect(input).toBeDefined();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, 'Relativistic Plasma Physics');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
 
     // Submit
-    fireEvent.click(screen.getByText('Initialize Project'));
+    const submitBtn = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('Initialize Project'));
+    expect(submitBtn).toBeDefined();
+    await click(submitBtn!);
 
     expect(onCreate).toHaveBeenCalledWith('Relativistic Plasma Physics', expect.any(String));
     expect(onClose).toHaveBeenCalled();

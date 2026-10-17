@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['tests/unit/**/*.test.ts', 'tests/fuzz/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.{ts,tsx}', 'tests/fuzz/**/*.test.ts'],
     /**
      * Node, not jsdom. Everything under test here is deliberately free of DOM
      * dependencies — log parsing, SyncTeX, project mapping, source

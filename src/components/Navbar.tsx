@@ -107,11 +107,13 @@ export const Navbar: React.FC<Props> = ({
 }) => {
   const { isInstallable, isInstalled, installApp } = usePwaInstall();
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
-  const [isInsertDropdownOpen, setIsInsertDropdownOpen] = useState(false);
+  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
+  const [isToolsDropdownOpen, setIsToolsDropdownOpen] = useState(false);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
 
   const projectDropdownRef = useRef<HTMLDivElement>(null);
-  const insertDropdownRef = useRef<HTMLDivElement>(null);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
+  const toolsDropdownRef = useRef<HTMLDivElement>(null);
   const userDropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdowns on outside click
@@ -120,8 +122,11 @@ export const Navbar: React.FC<Props> = ({
       if (projectDropdownRef.current && !projectDropdownRef.current.contains(e.target as Node)) {
         setIsProjectDropdownOpen(false);
       }
-      if (insertDropdownRef.current && !insertDropdownRef.current.contains(e.target as Node)) {
-        setIsInsertDropdownOpen(false);
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(e.target as Node)) {
+        setIsExportDropdownOpen(false);
+      }
+      if (toolsDropdownRef.current && !toolsDropdownRef.current.contains(e.target as Node)) {
+        setIsToolsDropdownOpen(false);
       }
       if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
         setIsUserDropdownOpen(false);
@@ -130,6 +135,12 @@ export const Navbar: React.FC<Props> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const formatCompileDuration = (ms?: number | null): string => {
+    if (ms === undefined || ms === null) return '';
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  };
 
   const getRoleIcon = (role: ProjectRole) => {
     switch (role) {
@@ -148,9 +159,9 @@ export const Navbar: React.FC<Props> = ({
   };
 
   return (
-    <header style={navStyle}>
-      {/* LEFT GROUP: Brand & Unified Project Title */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+    <header style={navStyle} className="app-navbar">
+      {/* CLUSTER 1 (LEFT): Brand & Unified Project Scope */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={logoMarkStyle}>
@@ -266,86 +277,88 @@ export const Navbar: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* MIDDLE GROUP: Compilation & Live Status Pill */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+      {/* CLUSTER 2 (CENTER): Compilation, Mode & Unified Health */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
         {currentRole !== 'viewer' ? (
-          <button
-            onClick={onCompile}
-            className="btn-primary"
-            style={{ padding: '4px 10px', fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}
-            title="Recompile LaTeX Document (Ctrl+Enter)"
-          >
-            {compileState.status === 'compiling' ? (
-              <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
-            ) : (
-              <Play size={11} fill="currentColor" />
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <button
+              onClick={onCompile}
+              className="btn-primary"
+              style={{ padding: '4px 10px', fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}
+              title="Recompile LaTeX Document (Ctrl+Enter)"
+            >
+              {compileState.status === 'compiling' ? (
+                <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+              ) : (
+                <Play size={11} fill="currentColor" />
+              )}
+              <span>Compile</span>
+              <span style={shortcutKbdStyle}>Ctrl+↵</span>
+            </button>
+
+            {/* Compile Mode Switcher Capsule (⚡ Fast vs 💎 Final) */}
+            {onToggleCompileMode && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  background: 'var(--bg-tertiary, rgba(255, 255, 255, 0.05))',
+                  border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.1))',
+                  borderRadius: 6,
+                  padding: 2,
+                  gap: 2,
+                }}
+                role="group"
+                aria-label="LaTeX compilation mode"
+              >
+                <button
+                  type="button"
+                  onClick={() => onToggleCompileMode('fast')}
+                  style={{
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    border: 'none',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    fontSize: 10,
+                    fontWeight: compileMode === 'fast' ? 600 : 400,
+                    background: compileMode === 'fast' ? 'var(--primary-color, #2563eb)' : 'transparent',
+                    color: compileMode === 'fast' ? '#ffffff' : 'var(--text-muted, #94a3b8)',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Fast Mode: Instant pass-1 streaming, cached auxiliary artifacts"
+                >
+                  ⚡ <span className="nav-mode-label">Fast</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onToggleCompileMode('publication')}
+                  style={{
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    border: 'none',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    fontSize: 10,
+                    fontWeight: compileMode === 'publication' ? 600 : 400,
+                    background: compileMode === 'publication' ? 'var(--primary-color, #2563eb)' : 'transparent',
+                    color: compileMode === 'publication' ? '#ffffff' : 'var(--text-muted, #94a3b8)',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Publication Mode: Full multi-pass convergence, bibtex run"
+                >
+                  💎 <span className="nav-mode-label">Final</span>
+                </button>
+              </div>
             )}
-            <span>Compile</span>
-            <span style={shortcutKbdStyle}>Ctrl+↵</span>
-          </button>
+          </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 8px', borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', fontSize: 11, color: '#f59e0b', fontWeight: 600, whiteSpace: 'nowrap' }}>
             <Eye size={11} /> Read-Only
-          </div>
-        )}
-
-        {/* Compile Mode Switcher Capsule (⚡ Fast vs 💎 Final) */}
-        {currentRole !== 'viewer' && onToggleCompileMode && (
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              background: 'var(--bg-tertiary, rgba(255, 255, 255, 0.05))',
-              border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.1))',
-              borderRadius: 6,
-              padding: 2,
-              gap: 2,
-            }}
-            role="group"
-            aria-label="LaTeX compilation mode"
-          >
-            <button
-              type="button"
-              onClick={() => onToggleCompileMode('fast')}
-              style={{
-                padding: '2px 7px',
-                borderRadius: 4,
-                border: 'none',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 3,
-                fontSize: 10.5,
-                fontWeight: compileMode === 'fast' ? 600 : 400,
-                background: compileMode === 'fast' ? 'var(--primary-color, #2563eb)' : 'transparent',
-                color: compileMode === 'fast' ? '#ffffff' : 'var(--text-muted, #94a3b8)',
-                transition: 'all 0.15s ease',
-              }}
-              title="Fast Mode: 2-pass preview cap, cached auxiliary artifacts, instant typing feedback"
-            >
-              ⚡ Fast
-            </button>
-            <button
-              type="button"
-              onClick={() => onToggleCompileMode('publication')}
-              style={{
-                padding: '2px 7px',
-                borderRadius: 4,
-                border: 'none',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 3,
-                fontSize: 10.5,
-                fontWeight: compileMode === 'publication' ? 600 : 400,
-                background: compileMode === 'publication' ? 'var(--primary-color, #2563eb)' : 'transparent',
-                color: compileMode === 'publication' ? '#ffffff' : 'var(--text-muted, #94a3b8)',
-                transition: 'all 0.15s ease',
-              }}
-              title="Publication Mode: Full multi-pass convergence, bibtex run, guaranteed submission ready"
-            >
-              💎 Final
-            </button>
           </div>
         )}
 
@@ -370,21 +383,23 @@ export const Navbar: React.FC<Props> = ({
             <>
               <div style={liveRadarDotStyle} />
               <span style={{ color: '#10b981', fontWeight: 600 }}>Live</span>
-              <span
-                style={{
-                  color: 'var(--text-muted)',
-                  fontSize: 10,
-                  fontFamily: 'var(--font-mono)',
-                  letterSpacing: '-0.02em',
-                }}
-                title={
-                  compileState.pdfDurationMs
-                    ? `Live draft render: ${compileState.durationMs}ms | Engine pdfLaTeX pass: ${compileState.pdfDurationMs}ms`
-                    : `Live compilation & render latency: ${compileState.durationMs}ms`
-                }
-              >
-                ({compileState.pdfDurationMs ? `${compileState.pdfDurationMs}ms` : `${compileState.durationMs}ms`})
-              </span>
+              {(compileState.pdfDurationMs || compileState.durationMs) ? (
+                <span
+                  style={{
+                    color: 'var(--text-muted)',
+                    fontSize: 10,
+                    fontFamily: 'var(--font-mono)',
+                    letterSpacing: '-0.02em',
+                  }}
+                  title={
+                    compileState.pdfDurationMs
+                      ? `Live draft: ${compileState.durationMs}ms | Engine pass: ${compileState.pdfDurationMs}ms`
+                      : `Live compilation & render: ${compileState.durationMs}ms`
+                  }
+                >
+                  ({formatCompileDuration(compileState.pdfDurationMs || compileState.durationMs)})
+                </span>
+              ) : null}
             </>
           )}
 
@@ -394,24 +409,24 @@ export const Navbar: React.FC<Props> = ({
             </span>
           )}
 
-          {/* Cloud Sync indicator dot/icon */}
+          {/* Cloud Sync indicator */}
           {isCloudConnected && (
-            <span title="Cloud storage synchronized" style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 3, color: '#10b981' }}>
+            <span title="Cloud synchronized" style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 2, color: '#10b981' }}>
               <Cloud size={11} />
             </span>
           )}
 
-          {/* Offline badge */}
+          {/* Offline indicator */}
           {isOffline && (
-            <span title="Working offline (Cached in IndexedDB)" style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 3, color: '#f59e0b' }}>
+            <span title="Working offline" style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 2, color: '#f59e0b' }}>
               <WifiOff size={11} />
             </span>
           )}
         </div>
 
-        {/* TeX Live WebAssembly Engine Warmup & Telemetry Capsule */}
+        {/* TeX Live WebAssembly Engine Warmup Capsule */}
         {engineStatus && (
-          <EngineWarmupBadge status={engineStatus} isOffline={isOffline} />
+          <EngineWarmupBadge status={engineStatus} isOffline={isOffline} compact={true} />
         )}
 
         {/* Command Palette Trigger Pill (Cmd+K / Ctrl+K) */}
@@ -422,8 +437,8 @@ export const Navbar: React.FC<Props> = ({
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 5,
-              padding: '3px 8px',
+              gap: 4,
+              padding: '3px 7px',
               borderRadius: 5,
               fontSize: 11,
               color: 'var(--text-secondary)',
@@ -435,12 +450,12 @@ export const Navbar: React.FC<Props> = ({
             title="Open Universal Command Palette (Ctrl+K / ⌘K)"
           >
             <Search size={11} color="var(--text-muted)" />
-            <span style={{ fontSize: 10.5, fontWeight: 500 }}>Commands</span>
+            <span className="nav-cmd-label" style={{ fontSize: 10.5, fontWeight: 500 }}>Commands</span>
             <kbd
               style={{
                 fontSize: 9,
                 fontFamily: 'var(--font-mono)',
-                padding: '1px 4px',
+                padding: '1px 3px',
                 borderRadius: 3,
                 backgroundColor: 'var(--bg-surface-2)',
                 border: '1px solid var(--border-subtle)',
@@ -454,71 +469,8 @@ export const Navbar: React.FC<Props> = ({
         )}
       </div>
 
-      {/* RIGHT GROUP: Consolidated Insert, Templates, Share, Export, Theme, User */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-        {/* + Insert Dropdown Menu */}
-        {currentRole !== 'viewer' && (
-          <div ref={insertDropdownRef} style={{ position: 'relative' }}>
-            <button
-              onClick={() => setIsInsertDropdownOpen(prev => !prev)}
-              className="btn-ghost"
-              style={toolBtnStyle}
-              title="Insert figures, tables, formulas or citations"
-            >
-              <Plus size={12} color="#38bdf8" />
-              <span>Insert</span>
-              <ChevronDown size={10} color="var(--text-muted)" />
-            </button>
-
-            {isInsertDropdownOpen && (
-              <div style={{ ...dropdownMenuStyle, width: 200, left: 0 }}>
-                <div style={{ padding: '4px 0' }}>
-                  <button
-                    onClick={() => { setIsInsertDropdownOpen(false); onOpenImageUpload(); }}
-                    style={dropdownItemStyle}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                      <ImageIcon size={13} color="#38bdf8" />
-                      <span>Figure &amp; Image</span>
-                    </div>
-                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\includegraphics</span>
-                  </button>
-
-                  <button
-                    onClick={() => { setIsInsertDropdownOpen(false); onOpenTableBuilder(); }}
-                    style={dropdownItemStyle}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                      <Table size={13} color="#10b981" />
-                      <span>Table Builder</span>
-                    </div>
-                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\tabular</span>
-                  </button>
-
-                  <button
-                    onClick={() => { setIsInsertDropdownOpen(false); onOpenSymbols(); }}
-                    style={dropdownItemStyle}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                      <Hash size={13} color="#a855f7" />
-                      <span>Math &amp; Formulas</span>
-                    </div>
-                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\equation</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Starter Templates */}
-        <button onClick={onOpenTemplates} className="btn-ghost" title="Starter Templates" style={toolBtnStyle}>
-          <BookOpen size={12} />
-          <span>Templates</span>
-        </button>
-
-        <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
-
+      {/* CLUSTER 3 (RIGHT): Collaboration, Consolidated Export, Tools & Account */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
         {/* Share Button / Co-authors */}
         <button
           onClick={onOpenShare}
@@ -526,7 +478,7 @@ export const Navbar: React.FC<Props> = ({
           title="Share project & invite collaborators"
         >
           <Share2 size={12} color="#38bdf8" />
-          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>Share</span>
+          <span className="nav-btn-label" style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>Share</span>
           {peers.length > 0 && (
             <span className="badge badge-cyan" style={{ fontSize: 9, padding: '0 4px', marginLeft: 2 }}>
               {peers.length + 1}
@@ -534,17 +486,126 @@ export const Navbar: React.FC<Props> = ({
           )}
         </button>
 
-        {/* Export PDF */}
-        <button onClick={onExportPdf} className="btn-secondary" title="Export PDF Document" style={compactBtnStyle}>
-          <Download size={11} />
-          <span>PDF</span>
-        </button>
+        {/* Consolidated Export Dropdown (PDF & ZIP) */}
+        <div ref={exportDropdownRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setIsExportDropdownOpen(prev => !prev)}
+            className="btn-secondary"
+            style={{ ...compactBtnStyle, padding: '4px 8px', gap: 4 }}
+            title="Export manuscript or source bundle"
+          >
+            <Download size={11} />
+            <span className="nav-btn-label">Export</span>
+            <ChevronDown size={10} color="var(--text-muted)" />
+          </button>
 
-        {/* Export ZIP */}
-        <button onClick={onExportZip} className="btn-secondary" title="Download .ZIP Package" style={compactBtnStyle}>
-          <FolderArchive size={11} color="#38bdf8" />
-          <span>ZIP</span>
-        </button>
+          {isExportDropdownOpen && (
+            <div style={{ ...dropdownMenuStyle, width: 200, right: 0 }}>
+              <div style={{ padding: '6px 12px', borderBottom: '1px solid var(--border-subtle)', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>
+                EXPORT MANUSCRIPT
+              </div>
+              <div style={{ padding: '4px 0' }}>
+                <button
+                  onClick={() => { setIsExportDropdownOpen(false); onExportPdf(); }}
+                  style={dropdownItemStyle}
+                  title="Download compiled PDF document"
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Download size={13} color="#38bdf8" />
+                    <div>
+                      <div style={{ fontSize: 11.5, fontWeight: 600 }}>PDF Document</div>
+                      <div style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>Compiled vector output (.pdf)</div>
+                    </div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setIsExportDropdownOpen(false); onExportZip(); }}
+                  style={dropdownItemStyle}
+                  title="Download LaTeX source package as ZIP"
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <FolderArchive size={13} color="#10b981" />
+                    <div>
+                      <div style={{ fontSize: 11.5, fontWeight: 600 }}>LaTeX Source (.zip)</div>
+                      <div style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>Complete project bundle</div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Consolidated Tools & Insert Dropdown */}
+        <div ref={toolsDropdownRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setIsToolsDropdownOpen(prev => !prev)}
+            className="btn-ghost"
+            style={{ ...toolBtnStyle, padding: '4px 8px', gap: 4 }}
+            title="Insert figures, tables, formulas, or browse templates"
+          >
+            <Plus size={12} color="#38bdf8" />
+            <span className="nav-btn-label">Tools</span>
+            <ChevronDown size={10} color="var(--text-muted)" />
+          </button>
+
+          {isToolsDropdownOpen && (
+            <div style={{ ...dropdownMenuStyle, width: 220, right: 0 }}>
+              <div style={{ padding: '6px 12px', borderBottom: '1px solid var(--border-subtle)', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>
+                INSERT &amp; TEMPLATES
+              </div>
+              <div style={{ padding: '4px 0' }}>
+                {currentRole !== 'viewer' && (
+                  <>
+                    <button
+                      onClick={() => { setIsToolsDropdownOpen(false); onOpenImageUpload(); }}
+                      style={dropdownItemStyle}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <ImageIcon size={13} color="#38bdf8" />
+                        <span>Figure &amp; Image</span>
+                      </div>
+                      <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\includegraphics</span>
+                    </button>
+
+                    <button
+                      onClick={() => { setIsToolsDropdownOpen(false); onOpenTableBuilder(); }}
+                      style={dropdownItemStyle}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Table size={13} color="#10b981" />
+                        <span>Table Builder</span>
+                      </div>
+                      <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\tabular</span>
+                    </button>
+
+                    <button
+                      onClick={() => { setIsToolsDropdownOpen(false); onOpenSymbols(); }}
+                      style={dropdownItemStyle}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Hash size={13} color="#a855f7" />
+                        <span>Math &amp; Formulas</span>
+                      </div>
+                      <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>\equation</span>
+                    </button>
+                  </>
+                )}
+
+                <button
+                  onClick={() => { setIsToolsDropdownOpen(false); onOpenTemplates(); }}
+                  style={dropdownItemStyle}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <BookOpen size={13} color="#f59e0b" />
+                    <span>Starter Templates</span>
+                  </div>
+                  <span style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>IEEE, Nature...</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* PWA App Install Action */}
         {isInstallable && !isInstalled && (
@@ -556,9 +617,11 @@ export const Navbar: React.FC<Props> = ({
             aria-label="Install Teeex Desktop App"
           >
             <DownloadCloud size={12} />
-            <span>Install App</span>
+            <span className="nav-btn-label">Install</span>
           </button>
         )}
+
+        <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 1px' }} />
 
         {/* Theme Toggle */}
         <button
@@ -590,7 +653,7 @@ export const Navbar: React.FC<Props> = ({
           <Cat size={13} color={isDeskPetEnabled ? '#38bdf8' : 'var(--text-muted)'} />
         </button>
 
-        <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+        <div style={{ width: 1, height: 14, backgroundColor: 'var(--border-subtle)', margin: '0 1px' }} />
 
         {/* User Account / Sign In */}
         <div ref={userDropdownRef} style={{ position: 'relative' }}>
