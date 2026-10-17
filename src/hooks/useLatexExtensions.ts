@@ -33,6 +33,8 @@ export interface UseLatexExtensionsOptions {
   readOnly?: boolean;
   onCompileShortcut?: () => void;
   onForwardSync?: (line: number) => void;
+  onOpenCommandPalette?: () => void;
+  onSaveShortcut?: () => void;
 }
 
 export const themeCompartment = new Compartment();
@@ -51,6 +53,8 @@ export function useLatexExtensions({
   readOnly = false,
   onCompileShortcut,
   onForwardSync,
+  onOpenCommandPalette,
+  onSaveShortcut,
 }: UseLatexExtensionsOptions): Extension[] {
   return useMemo(() => {
     const compileKeymap = onCompileShortcut
@@ -59,6 +63,30 @@ export function useLatexExtensions({
             key: 'Mod-Enter',
             run: () => {
               onCompileShortcut();
+              return true;
+            },
+          },
+        ])
+      : [];
+
+    const commandKeymap = onOpenCommandPalette
+      ? keymap.of([
+          {
+            key: 'Mod-k',
+            run: () => {
+              onOpenCommandPalette();
+              return true;
+            },
+          },
+        ])
+      : [];
+
+    const saveKeymap = onSaveShortcut
+      ? keymap.of([
+          {
+            key: 'Mod-s',
+            run: () => {
+              onSaveShortcut();
               return true;
             },
           },
@@ -118,6 +146,8 @@ export function useLatexExtensions({
       readOnlyCompartment.of(EditorView.editable.of(!readOnly)),
 
       // Keymaps
+      Prec.highest(commandKeymap),
+      Prec.highest(saveKeymap),
       Prec.high(compileKeymap),
       Prec.high(forwardSyncKeymap),
       keymap.of([
@@ -131,5 +161,5 @@ export function useLatexExtensions({
     ];
 
     return extensions;
-  }, [theme, isLight, bibEntries, labels, readOnly, onCompileShortcut, onForwardSync]);
+  }, [theme, isLight, bibEntries, labels, readOnly, onCompileShortcut, onForwardSync, onOpenCommandPalette, onSaveShortcut]);
 }

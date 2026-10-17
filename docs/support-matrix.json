@@ -221,6 +221,70 @@
         "Structural navigation only; does not approximate layout or pagination."
       ],
       "overall": "verified"
+    },
+    {
+      "id": "design.tokens",
+      "capability": "W3C DTCG 3-tier design token architecture and accessibility system",
+      "spec": "Primitive scales (--space-*, --font-size-*, --z-*), dual-theme semantic obsidian/slate variables, component dimensions, CSS Houdini @property, and high-contrast :focus-visible",
+      "stages": {
+        "tokens": "verified",
+        "dualThemes": "verified",
+        "reducedMotion": "verified"
+      },
+      "tests": [
+        "tests/unit/designSystemTokens.test.ts",
+        "tests/e2e/design-system-stage4.spec.ts"
+      ],
+      "limitations": [],
+      "overall": "verified"
+    },
+    {
+      "id": "palette.combobox",
+      "capability": "WAI-ARIA 1.2+ Command Palette Combobox and Listbox",
+      "spec": "Universal dialog with continuous input focus, aria-activedescendant option tracking, auto-scrolling, live-region count announcement, and HTML inert background isolation",
+      "stages": {
+        "ariaPattern": "verified",
+        "backgroundInert": "verified",
+        "execution": "verified"
+      },
+      "tests": [
+        "tests/unit/keyboardShortcuts.test.ts",
+        "tests/e2e/design-system-stage4.spec.ts"
+      ],
+      "limitations": [],
+      "overall": "verified"
+    },
+    {
+      "id": "splitter.apg",
+      "capability": "APG Window Splitter resizable panel engine",
+      "spec": "Accessible separator role with pointer capture (setPointerCapture), keyboard arrow adjustments, bounds clamping (20-80%), preset cycling (50/70/30), and localStorage persistence",
+      "stages": {
+        "pointerCapture": "verified",
+        "keyboard": "verified",
+        "presets": "verified"
+      },
+      "tests": [
+        "tests/unit/resizableSplit.test.ts",
+        "tests/e2e/design-system-stage4.spec.ts"
+      ],
+      "limitations": [],
+      "overall": "verified"
+    },
+    {
+      "id": "keyboard.shortcuts",
+      "capability": "Authoritative global keyboard shortcut engine",
+      "spec": "CodeMirror 6 Prec.highest keymap bindings and window-level listener with Mod normalization (Mod+K, Mod+P, Mod+S, Mod+Enter, Mod+B, Shift+Alt+F, Ctrl+Alt+J) suppressing browser defaults",
+      "stages": {
+        "keyInterception": "verified",
+        "editorPrecedence": "verified",
+        "dismissalCascade": "verified"
+      },
+      "tests": [
+        "tests/unit/keyboardShortcuts.test.ts",
+        "tests/e2e/design-system-stage4.spec.ts"
+      ],
+      "limitations": [],
+      "overall": "verified"
     }
   ],
   "notCovered": [

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { UploadCloud, Loader2 } from 'lucide-react';
 import { AuthPortal } from './components/AuthPortal';
 import { Navbar } from './components/Navbar';
@@ -15,19 +15,10 @@ import {
   haveFilesChanged,
 } from './services/checkpointsService';
 
-// Performance: Lazy-loaded modal dialogs for zero initial bundle overhead
-const SymbolPaletteModal = lazy(() => import('./components/modals/SymbolPaletteModal').then(m => ({ default: m.SymbolPaletteModal })));
-const TableBuilderModal = lazy(() => import('./components/modals/TableBuilderModal').then(m => ({ default: m.TableBuilderModal })));
-const ShareModal = lazy(() => import('./components/modals/ShareModal').then(m => ({ default: m.ShareModal })));
-const TemplateModal = lazy(() => import('./components/modals/TemplateModal').then(m => ({ default: m.TemplateModal })));
-const ImageUploadModal = lazy(() => import('./components/modals/ImageUploadModal').then(m => ({ default: m.ImageUploadModal })));
-const VersionHistoryModal = lazy(() => import('./components/modals/VersionHistoryModal').then(m => ({ default: m.VersionHistoryModal })));
-const WordCountModal = lazy(() => import('./components/modals/WordCountModal').then(m => ({ default: m.WordCountModal })));
-const AuthModal = lazy(() => import('./components/modals/AuthModal').then(m => ({ default: m.AuthModal })));
-const ProjectsDashboardModal = lazy(() => import('./components/modals/ProjectsDashboardModal').then(m => ({ default: m.ProjectsDashboardModal })));
-const CommandPaletteModal = lazy(() => import('./components/modals/CommandPaletteModal').then(m => ({ default: m.CommandPaletteModal })));
-const AuditLogModal = lazy(() => import('./components/modals/AuditLogModal').then(m => ({ default: m.AuditLogModal })));
-const EncryptionModal = lazy(() => import('./components/modals/EncryptionModal').then(m => ({ default: m.EncryptionModal })));
+import { ModalContainer } from './components/modals/ModalContainer';
+import { useNetworkStatus } from './hooks/useNetworkStatus';
+import { useGlobalKeyboardShortcuts } from './hooks/useGlobalKeyboardShortcuts';
+import { useResizableSplit } from './hooks/useResizableSplit';
 
 import { formatLatexCode } from './services/latexFormatter';
 import { logAuditAction } from './services/auditService';
@@ -410,13 +401,29 @@ export function App() {
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isEncryptionModalOpen, setIsEncryptionModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [commandPaletteMode, setCommandPaletteMode] = useState<'all' | 'files'>('all');
 
-  const [isOffline, setIsOffline] = useState<boolean>(() => !navigator.onLine);
+  const { isOffline } = useNetworkStatus({
+    onStatusChange: (offline) => {
+      setToast(
+        offline
+          ? 'Working offline — local compilation & IndexedDB persistence active'
+          : 'Back online — cloud sync restored'
+      );
+    },
+  });
   const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [splitPercent, setSplitPercent] = useState<number>(50);
-  const [isDraggingSplit, setIsDraggingSplit] = useState(false);
+  const {
+    splitPercent,
+    isDraggingSplit,
+    handlePointerDownSplit,
+    handlePointerMoveSplit,
+    handlePointerUpSplit,
+    handleKeyDownSplit,
+    cyclePresetSplit,
+  } = useResizableSplit({ defaultPercent: 50, minPercent: 20, maxPercent: 80 });
 
   const texEngineView = useTexEngine({ files });
 
@@ -613,16 +620,7 @@ export function App() {
     return () => unsubscribe();
   }, [hub]);
 
-  useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
+
 
   const handleSelectFile = useCallback((fileId: string) => {
     setActiveFileId(fileId);
@@ -789,17 +787,71 @@ export function App() {
     }
   }, [handleCodeChange]);
 
-  // Single authoritative Global Shortcut for Command Palette (Ctrl+K / Cmd+K)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault();
-        setIsCommandPaletteOpen(prev => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  const isAnyModalActive =
+    isImageUploadOpen ||
+    isSymbolsOpen ||
+    isTableBuilderOpen ||
+    isHistoryOpen ||
+    isWordCountOpen ||
+    isShareOpen ||
+    isTemplatesOpen ||
+    isAuthOpen ||
+    isProjectsHubOpen ||
+    isEncryptionModalOpen ||
+    isAuditModalOpen ||
+    isCommandPaletteOpen;
+
+  const handleDismissModal = useCallback(() => {
+    if (isCommandPaletteOpen) setIsCommandPaletteOpen(false);
+    else if (isImageUploadOpen) setIsImageUploadOpen(false);
+    else if (isSymbolsOpen) setIsSymbolsOpen(false);
+    else if (isTableBuilderOpen) setIsTableBuilderOpen(false);
+    else if (isHistoryOpen) setIsHistoryOpen(false);
+    else if (isWordCountOpen) setIsWordCountOpen(false);
+    else if (isShareOpen) setIsShareOpen(false);
+    else if (isTemplatesOpen) setIsTemplatesOpen(false);
+    else if (isAuthOpen) setIsAuthOpen(false);
+    else if (isProjectsHubOpen) setIsProjectsHubOpen(false);
+    else if (isEncryptionModalOpen) setIsEncryptionModalOpen(false);
+    else if (isAuditModalOpen) setIsAuditModalOpen(false);
+  }, [
+    isCommandPaletteOpen,
+    isImageUploadOpen,
+    isSymbolsOpen,
+    isTableBuilderOpen,
+    isHistoryOpen,
+    isWordCountOpen,
+    isShareOpen,
+    isTemplatesOpen,
+    isAuthOpen,
+    isProjectsHubOpen,
+    isEncryptionModalOpen,
+    isAuditModalOpen,
+  ]);
+
+  useGlobalKeyboardShortcuts({
+    onOpenCommandPalette: () => {
+      setCommandPaletteMode('all');
+      setIsCommandPaletteOpen((prev) => !prev);
+    },
+    onQuickOpenFile: () => {
+      setCommandPaletteMode('files');
+      setIsCommandPaletteOpen(true);
+    },
+    onSaveProject: () => {
+      flushCurrentProjectSave();
+      handleCreateCheckpoint('Manual snapshot');
+      setToast('Project checkpoint saved');
+    },
+    onCompileDocument: () => triggerCompile(),
+    onToggleSidebar: () => setIsSidebarOpen((prev) => !prev),
+    onFormatDocument: handleFormatDocument,
+    onForwardSync: () => {
+      if (activeCursorLine) setForwardTargetLine(activeCursorLine);
+    },
+    onDismissModal: handleDismissModal,
+    isModalOpen: isAnyModalActive,
+  });
 
   const handleAddComment = useCallback((line: number, text: string) => {
     const newComment: ReviewComment = {
@@ -1291,40 +1343,6 @@ export function App() {
     }
   }, [flushCurrentProjectSave]);
 
-  const handleMouseDownSplit = () => {
-    setIsDraggingSplit(true);
-  };
-
-  useEffect(() => {
-    if (!isDraggingSplit) return;
-
-    let rafId: number | null = null;
-    const handleMouseMove = (e: MouseEvent) => {
-      if (rafId !== null) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = null;
-        const sidebarWidth = isSidebarOpen ? 236 : 0;
-        const availableWidth = window.innerWidth - sidebarWidth;
-        const mouseRelativeX = e.clientX - sidebarWidth;
-        const newPercent = Math.min(78, Math.max(22, (mouseRelativeX / availableWidth) * 100));
-        setSplitPercent(newPercent);
-      });
-    };
-
-    const handleMouseUp = () => {
-      setIsDraggingSplit(false);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      if (rafId !== null) cancelAnimationFrame(rafId);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDraggingSplit, isSidebarOpen]);
-
   const [isDragOverApp, setIsDragOverApp] = useState(false);
   const dragCounterRef = useRef(0);
 
@@ -1364,31 +1382,31 @@ export function App() {
       <div style={{
         minHeight: '100vh',
         width: '100vw',
-        backgroundColor: '#070b14',
+        backgroundColor: 'var(--bg-app)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 16,
-        color: '#f8fafc',
-        fontFamily: 'Inter, system-ui, sans-serif',
+        gap: 'var(--space-4)',
+        color: 'var(--text-primary)',
+        fontFamily: 'var(--font-sans)',
       }}>
         <div style={{
           width: 50,
           height: 50,
-          borderRadius: 12,
-          backgroundColor: 'rgba(56, 189, 248, 0.12)',
-          border: '1px solid rgba(56, 189, 248, 0.3)',
+          borderRadius: 'var(--radius-lg)',
+          backgroundColor: 'var(--brand-surface)',
+          border: '1px solid var(--border-focus)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          boxShadow: '0 0 25px rgba(56, 189, 248, 0.25)',
+          boxShadow: 'var(--shadow-glow)',
         }}>
-          <Loader2 size={24} color="#38bdf8" style={{ animation: 'spin 1s linear infinite' }} />
+          <Loader2 size={24} color="var(--brand-primary)" style={{ animation: 'spin 1s linear infinite' }} />
         </div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>Teeex</div>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Restoring your session…</div>
+          <div style={{ fontSize: 'var(--font-size-base)', fontWeight: 700, letterSpacing: '-0.01em' }}>Teeex</div>
+          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 'var(--space-1)' }}>Restoring your session…</div>
         </div>
       </div>
     );
@@ -1399,7 +1417,9 @@ export function App() {
   }
 
   return (
-    <div
+    <>
+      <div
+        id="root-workspace"
       onDragEnter={handleAppDragEnter}
       onDragLeave={handleAppDragLeave}
       onDragOver={handleAppDragOver}
@@ -1541,7 +1561,10 @@ export function App() {
         </div>
 
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
-          <div style={{ width: `${splitPercent}%`, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div
+            id="workspace-editor-pane"
+            style={{ width: `${splitPercent}%`, height: '100%', display: 'flex', flexDirection: 'column' }}
+          >
             <Editor
               code={activeFile.content}
               fileName={activeFile.name}
@@ -1581,26 +1604,33 @@ export function App() {
           </div>
 
           <div
-            onMouseDown={handleMouseDownSplit}
-            onDoubleClick={() => setSplitPercent(prev => prev === 50 ? 70 : prev === 70 ? 30 : 50)}
-            style={{
-              width: 5,
-              cursor: 'col-resize',
-              backgroundColor: isDraggingSplit ? '#38bdf8' : 'var(--border-subtle)',
-              zIndex: 35,
-              transition: isDraggingSplit ? 'none' : 'background 0.2s ease',
-              position: 'relative',
-            }}
-            title="Drag to resize panels • Double-click to cycle 50/50, 70/30, 30/70"
+            role="separator"
+            tabIndex={0}
+            aria-orientation="vertical"
+            aria-valuenow={Math.round(splitPercent)}
+            aria-valuemin={20}
+            aria-valuemax={80}
+            aria-controls="workspace-editor-pane workspace-preview-pane"
+            aria-label="Resize Editor and Preview panels"
+            className={`panel-resizer ${isDraggingSplit ? 'is-dragging' : ''}`}
+            onPointerDown={handlePointerDownSplit}
+            onPointerMove={(e) => handlePointerMoveSplit(e, isSidebarOpen ? 236 : 0)}
+            onPointerUp={handlePointerUpSplit}
+            onKeyDown={handleKeyDownSplit}
+            onDoubleClick={cyclePresetSplit}
+            title="Drag or use Left/Right arrows to resize panels • Double-click to cycle presets"
           />
 
-          <div style={{
-            width: `${100 - splitPercent}%`,
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            backgroundColor: 'var(--bg-app)',
-          }}>
+          <div
+            id="workspace-preview-pane"
+            style={{
+              width: `${100 - splitPercent}%`,
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              backgroundColor: 'var(--bg-app)',
+            }}
+          >
             <PreviewPane
               parsedDoc={parsedDoc}
               labels={labels}
@@ -1638,159 +1668,93 @@ export function App() {
           </button>
         </div>
       )}
+      </div>
 
-      <Suspense fallback={null}>
-        {isImageUploadOpen && (
-          <ImageUploadModal
-            isOpen={isImageUploadOpen}
-            onClose={() => setIsImageUploadOpen(false)}
-            onAddImageFile={handleAddImageFile}
-            onInsertLatex={handleInsertCode}
-          />
-        )}
-
-        {isSymbolsOpen && (
-          <SymbolPaletteModal
-            isOpen={isSymbolsOpen}
-            onClose={() => setIsSymbolsOpen(false)}
-            onInsert={handleInsertCode}
-            onAddPreambleMacro={handleAddPreambleMacro}
-            initialTab={symbolsInitialTab}
-          />
-        )}
-
-        {isTableBuilderOpen && (
-          <TableBuilderModal
-            isOpen={isTableBuilderOpen}
-            onClose={() => setIsTableBuilderOpen(false)}
-            onInsert={handleInsertCode}
-          />
-        )}
-
-        {isHistoryOpen && (
-          <VersionHistoryModal
-            isOpen={isHistoryOpen}
-            onClose={() => setIsHistoryOpen(false)}
-            checkpoints={checkpoints}
-            currentFiles={files}
-            onCreateCheckpoint={handleCreateCheckpoint}
-            onRestoreCheckpoint={handleRestoreCheckpoint}
-            onRestoreSingleFile={handleRestoreSingleFile}
-            onDeleteCheckpoint={handleDeleteCheckpoint}
-            onSyncCloud={handleSyncCheckpointsCloud}
-            isCloudConnected={isCloudConnected}
-          />
-        )}
-
-        {isWordCountOpen && (
-          <WordCountModal
-            isOpen={isWordCountOpen}
-            onClose={() => setIsWordCountOpen(false)}
-            wordCount={wordCount}
-            equationCount={equationCount}
-            parsedDoc={parsedDoc}
-            activeCode={activeFile.content}
-          />
-        )}
-
-        {isShareOpen && (
-          <ShareModal
-            isOpen={isShareOpen}
-            onClose={() => setIsShareOpen(false)}
-            roomId={roomId}
-            peers={peers}
-            selfUser={selfUser}
-            currentUser={currentUser}
-            projectMembers={activeProject?.members || []}
-            onInviteMember={handleInviteMember}
-            onUpdateMemberRole={handleUpdateMemberRole}
-            onRemoveMember={handleRemoveMember}
-            currentRole={currentRole}
-          />
-        )}
-
-        {isTemplatesOpen && (
-          <TemplateModal
-            isOpen={isTemplatesOpen}
-            onClose={() => setIsTemplatesOpen(false)}
-            onSelectTemplate={handleSelectTemplate}
-          />
-        )}
-
-        {isAuthOpen && (
-          <AuthModal
-            isOpen={isAuthOpen}
-            onClose={() => setIsAuthOpen(false)}
-            currentUser={currentUser}
-            onAuthSuccess={handleAuthSuccess}
-          />
-        )}
-
-        {isProjectsHubOpen && (
-          <ProjectsDashboardModal
-            isOpen={isProjectsHubOpen}
-            onClose={() => setIsProjectsHubOpen(false)}
-            projects={projects}
-            activeProjectId={activeProjectId}
-            onSelectProject={handleSelectProject}
-            onCreateProject={handleCreateProject}
-            onDuplicateProject={handleDuplicateProject}
-            onToggleArchiveProject={handleToggleArchiveProject}
-            onDeleteProject={handleDeleteProject}
-            currentUser={currentUser}
-          />
-        )}
-
-        {isEncryptionModalOpen && (
-          <EncryptionModal
-            isOpen={isEncryptionModalOpen}
-            onClose={() => setIsEncryptionModalOpen(false)}
-            isEncrypted={!!activeProject?.isEncrypted}
-            encryptionSalt={activeProject?.encryptionSalt}
-            files={files}
-            onToggleEncryption={handleToggleEncryption}
-          />
-        )}
-
-        {isAuditModalOpen && (
-          <AuditLogModal
-            isOpen={isAuditModalOpen}
-            onClose={() => setIsAuditModalOpen(false)}
-            projectId={activeProjectId}
-            projectTitle={projectTitle}
-          />
-        )}
-
-        {isCommandPaletteOpen && (
-          <CommandPaletteModal
-            isOpen={isCommandPaletteOpen}
-            onClose={() => setIsCommandPaletteOpen(false)}
-            files={files}
-            onSelectFile={handleSelectFile}
-            onCompile={triggerCompile}
-            onFormatDocument={handleFormatDocument}
-            onToggleTwoColumn={handleToggleTwoColumn}
-            isTwoColumn={isTwoColumn}
-            activeFormat={paperFormat}
-            onSelectFormat={handleSelectFormat}
-            theme={theme}
-            onToggleTheme={toggleTheme}
-            onExportPdf={handleExportPdf}
-            onExportZip={handleExportZip}
-            onOpenWordCount={() => setIsWordCountOpen(true)}
-            onOpenHistory={() => setIsHistoryOpen(true)}
-            onOpenProjectsHub={() => setIsProjectsHubOpen(true)}
-            onOpenSymbols={() => {
-              setSymbolsInitialTab('symbols');
-              setIsSymbolsOpen(true);
-            }}
-            onOpenTableBuilder={() => setIsTableBuilderOpen(true)}
-            sections={parsedDoc.sections}
-            onJumpToLine={setTargetLine}
-          />
-        )}
-      </Suspense>
-    </div>
+      <ModalContainer
+        isImageUploadOpen={isImageUploadOpen}
+        setIsImageUploadOpen={setIsImageUploadOpen}
+        isSymbolsOpen={isSymbolsOpen}
+        setIsSymbolsOpen={setIsSymbolsOpen}
+        symbolsInitialTab={symbolsInitialTab}
+        isTableBuilderOpen={isTableBuilderOpen}
+        setIsTableBuilderOpen={setIsTableBuilderOpen}
+        isHistoryOpen={isHistoryOpen}
+        setIsHistoryOpen={setIsHistoryOpen}
+        isWordCountOpen={isWordCountOpen}
+        setIsWordCountOpen={setIsWordCountOpen}
+        isShareOpen={isShareOpen}
+        setIsShareOpen={setIsShareOpen}
+        isTemplatesOpen={isTemplatesOpen}
+        setIsTemplatesOpen={setIsTemplatesOpen}
+        isAuthOpen={isAuthOpen}
+        setIsAuthOpen={setIsAuthOpen}
+        isProjectsHubOpen={isProjectsHubOpen}
+        setIsProjectsHubOpen={setIsProjectsHubOpen}
+        isEncryptionModalOpen={isEncryptionModalOpen}
+        setIsEncryptionModalOpen={setIsEncryptionModalOpen}
+        isAuditModalOpen={isAuditModalOpen}
+        setIsAuditModalOpen={setIsAuditModalOpen}
+        isCommandPaletteOpen={isCommandPaletteOpen}
+        setIsCommandPaletteOpen={setIsCommandPaletteOpen}
+        commandPaletteInitialMode={commandPaletteMode}
+        activeProject={activeProject}
+        activeProjectId={activeProjectId}
+        projectTitle={projectTitle}
+        files={files}
+        activeFile={activeFile}
+        checkpoints={checkpoints}
+        isCloudConnected={isCloudConnected}
+        parsedDoc={parsedDoc}
+        wordCount={wordCount}
+        equationCount={equationCount}
+        roomId={roomId}
+        peers={peers}
+        selfUser={selfUser}
+        currentUser={currentUser}
+        currentRole={currentRole}
+        projects={projects}
+        isTwoColumn={isTwoColumn}
+        paperFormat={paperFormat}
+        theme={theme}
+        handleAddImageFile={handleAddImageFile}
+        handleInsertCode={handleInsertCode}
+        handleAddPreambleMacro={handleAddPreambleMacro}
+        handleCreateCheckpoint={handleCreateCheckpoint}
+        handleRestoreCheckpoint={handleRestoreCheckpoint}
+        handleRestoreSingleFile={handleRestoreSingleFile}
+        handleDeleteCheckpoint={handleDeleteCheckpoint}
+        handleSyncCheckpointsCloud={handleSyncCheckpointsCloud}
+        handleInviteMember={handleInviteMember}
+        handleUpdateMemberRole={handleUpdateMemberRole}
+        handleRemoveMember={handleRemoveMember}
+        handleSelectTemplate={handleSelectTemplate}
+        handleAuthSuccess={handleAuthSuccess}
+        handleSelectProject={handleSelectProject}
+        handleCreateProject={handleCreateProject}
+        handleDuplicateProject={handleDuplicateProject}
+        handleToggleArchiveProject={handleToggleArchiveProject}
+        handleDeleteProject={handleDeleteProject}
+        handleToggleEncryption={handleToggleEncryption}
+        handleSelectFile={handleSelectFile}
+        triggerCompile={triggerCompile}
+        handleFormatDocument={handleFormatDocument}
+        handleToggleTwoColumn={handleToggleTwoColumn}
+        handleSelectFormat={handleSelectFormat}
+        toggleTheme={toggleTheme}
+        handleExportPdf={handleExportPdf}
+        handleExportZip={handleExportZip}
+        setTargetLine={setTargetLine}
+        onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
+        onSaveProject={() => {
+          flushCurrentProjectSave();
+          handleCreateCheckpoint('Manual snapshot');
+          setToast('Project checkpoint saved');
+        }}
+        onForwardSync={() => {
+          if (activeCursorLine) setForwardTargetLine(activeCursorLine);
+        }}
+      />
+    </>
   );
 }
 

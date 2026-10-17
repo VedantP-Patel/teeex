@@ -283,7 +283,7 @@ export const Sidebar: React.FC<Props> = ({
   };
 
   return (
-    <aside style={sidebarStyle}>
+    <aside aria-label="Workspace file browser and document outline" style={sidebarStyle}>
       {/* Sleek Segmented Tab Switcher */}
       <div style={tabBarStyle}>
         <div style={{
@@ -985,8 +985,27 @@ export const Sidebar: React.FC<Props> = ({
           {/* Outline Items List */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '6px 6px' }}>
             {filteredOutlineNodes.length === 0 ? (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '16px 8px', textAlign: 'center' }}>
-                {outlineSearch ? 'No matches found.' : 'No structure items detected in LaTeX.'}
+              <div
+                className="sidebar-empty-state"
+                style={{
+                  padding: '24px 12px',
+                  textAlign: 'center',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 8,
+                  color: 'var(--text-muted)',
+                }}
+              >
+                <ListTree size={20} style={{ opacity: 0.5 }} />
+                <div style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--text-secondary)' }}>
+                  {outlineSearch ? 'No matching structure items' : 'No sections or labels found'}
+                </div>
+                <div style={{ fontSize: 10, maxWidth: 180, lineHeight: 1.4 }}>
+                  {outlineSearch
+                    ? 'Try clearing your search query'
+                    : 'Add \\section{...} or \\label{...} in your document to generate an outline'}
+                </div>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

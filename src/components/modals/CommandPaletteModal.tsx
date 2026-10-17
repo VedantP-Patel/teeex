@@ -15,7 +15,10 @@ import {
   Check,
   Code,
   Table,
-  FolderKanban
+  FolderKanban,
+  PanelLeft,
+  ArrowRight,
+  Save
 } from 'lucide-react';
 import type { ProjectFile } from '../../types/latex';
 import { PAPER_FORMATS, type PaperFormatId } from '../../services/paperFormats';
@@ -50,8 +53,12 @@ interface Props {
   onOpenProjectsHub: () => void;
   onOpenSymbols: () => void;
   onOpenTableBuilder: () => void;
+  onToggleSidebar?: () => void;
+  onSaveProject?: () => void;
+  onForwardSync?: () => void;
   sections?: Array<{ title: string; line: number; level: number }>;
   onJumpToLine: (line: number) => void;
+  initialMode?: 'all' | 'files';
 }
 
 export const CommandPaletteModal: React.FC<Props> = ({
@@ -74,8 +81,12 @@ export const CommandPaletteModal: React.FC<Props> = ({
   onOpenProjectsHub,
   onOpenSymbols,
   onOpenTableBuilder,
+  onToggleSidebar,
+  onSaveProject,
+  onForwardSync,
   sections = [],
   onJumpToLine,
+  initialMode = 'all',
 }) => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -85,11 +96,12 @@ export const CommandPaletteModal: React.FC<Props> = ({
   // Auto-focus input on open
   useEffect(() => {
     if (isOpen) {
-      setQuery('');
+      setQuery(initialMode === 'files' ? 'p:' : '');
       setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 40);
+      const timer = setTimeout(() => inputRef.current?.focus(), 40);
+      return () => clearTimeout(timer);
     }
-  }, [isOpen]);
+  }, [isOpen, initialMode]);
 
   // Build All Available Commands
   const allCommands = useMemo<CommandItem[]>(() => {
@@ -100,7 +112,7 @@ export const CommandPaletteModal: React.FC<Props> = ({
       id: 'action-compile',
       category: 'Commands',
       title: 'Compile Document',
-      subtitle: 'Run LaTeX live compilation & typeset KaTeX',
+      subtitle: 'Compile document with WebAssembly pdfLaTeX (TeX Live 2026)',
       icon: <Play size={13} color="#10b981" />,
       shortcut: 'Ctrl+Enter',
       onExecute: () => { onCompile(); onClose(); },
@@ -115,6 +127,42 @@ export const CommandPaletteModal: React.FC<Props> = ({
       shortcut: 'Shift+Alt+F',
       onExecute: () => { onFormatDocument(); onClose(); },
     });
+
+    if (onSaveProject) {
+      list.push({
+        id: 'action-save',
+        category: 'Commands',
+        title: 'Save Project Checkpoint',
+        subtitle: 'Record instant project snapshot in local IndexedDB history',
+        icon: <Save size={13} color="#38bdf8" />,
+        shortcut: 'Ctrl+S',
+        onExecute: () => { onSaveProject(); onClose(); },
+      });
+    }
+
+    if (onToggleSidebar) {
+      list.push({
+        id: 'action-sidebar',
+        category: 'Commands',
+        title: 'Toggle Sidebar & Files Tree',
+        subtitle: 'Expand or collapse the document structure sidebar',
+        icon: <PanelLeft size={13} color="#38bdf8" />,
+        shortcut: 'Ctrl+B',
+        onExecute: () => { onToggleSidebar(); onClose(); },
+      });
+    }
+
+    if (onForwardSync) {
+      list.push({
+        id: 'action-forward-sync',
+        category: 'Commands',
+        title: 'Sync Editor to PDF Preview',
+        subtitle: 'Jump preview location to current editor cursor line',
+        icon: <ArrowRight size={13} color="#38bdf8" />,
+        shortcut: 'Ctrl+Alt+J',
+        onExecute: () => { onForwardSync(); onClose(); },
+      });
+    }
 
     list.push({
       id: 'action-columns',
@@ -240,6 +288,9 @@ export const CommandPaletteModal: React.FC<Props> = ({
   }, [
     onCompile,
     onFormatDocument,
+    onSaveProject,
+    onToggleSidebar,
+    onForwardSync,
     isTwoColumn,
     onToggleTwoColumn,
     theme,
@@ -260,15 +311,39 @@ export const CommandPaletteModal: React.FC<Props> = ({
     onClose,
   ]);
 
-  // Filter commands by search query
+  // Filter commands by search query and prefix modes
   const filteredCommands = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return allCommands;
-    return allCommands.filter(c =>
-      c.title.toLowerCase().includes(q) ||
-      (c.subtitle && c.subtitle.toLowerCase().includes(q)) ||
-      c.category.toLowerCase().includes(q)
-    );
+    const raw = query.trim();
+    if (!raw) return allCommands;
+
+    let targetCategory: string | null = null;
+    let searchTerm = raw.toLowerCase();
+
+    if (raw.startsWith('@')) {
+      targetCategory = 'Sections';
+      searchTerm = raw.slice(1).trim().toLowerCase();
+    } else if (raw.startsWith('#')) {
+      targetCategory = 'Academic Formats';
+      searchTerm = raw.slice(1).trim().toLowerCase();
+    } else if (raw.startsWith('>')) {
+      targetCategory = 'Commands';
+      searchTerm = raw.slice(1).trim().toLowerCase();
+    } else if (raw.toLowerCase().startsWith('p:') || raw.toLowerCase().startsWith('f:')) {
+      targetCategory = 'Files';
+      searchTerm = raw.slice(2).trim().toLowerCase();
+    }
+
+    return allCommands.filter(c => {
+      if (targetCategory && c.category !== targetCategory) {
+        return false;
+      }
+      if (!searchTerm) return true;
+      return (
+        c.title.toLowerCase().includes(searchTerm) ||
+        (c.subtitle && c.subtitle.toLowerCase().includes(searchTerm)) ||
+        c.category.toLowerCase().includes(searchTerm)
+      );
+    });
   }, [allCommands, query]);
 
   // Reset selectedIndex when filter changes
@@ -276,7 +351,18 @@ export const CommandPaletteModal: React.FC<Props> = ({
     setSelectedIndex(0);
   }, [filteredCommands.length, query]);
 
-  // Keyboard navigation
+  // Auto-scroll the active option into view when selectedIndex changes
+  useEffect(() => {
+    const current = filteredCommands[selectedIndex];
+    if (current) {
+      const el = document.getElementById(`cmd-opt-${current.id}`);
+      if (el) {
+        el.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [selectedIndex, filteredCommands]);
+
+  // Keyboard navigation inside Combobox
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -296,15 +382,22 @@ export const CommandPaletteModal: React.FC<Props> = ({
 
   if (!isOpen) return null;
 
+  const activeOptionId = filteredCommands[selectedIndex]
+    ? `cmd-opt-${filteredCommands[selectedIndex].id}`
+    : undefined;
+
   return (
     <div
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Universal Command Palette"
       style={{
         position: 'fixed',
         inset: 0,
         backgroundColor: 'rgba(0, 0, 0, 0.65)',
         backdropFilter: 'blur(10px)',
-        zIndex: 99999,
+        zIndex: 2000,
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'center',
@@ -326,7 +419,7 @@ export const CommandPaletteModal: React.FC<Props> = ({
           animation: 'modalSlideUp 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
-        {/* Search Input Bar */}
+        {/* Search Input Bar (Combobox Pattern) */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -335,14 +428,22 @@ export const CommandPaletteModal: React.FC<Props> = ({
           borderBottom: '1px solid var(--border-subtle)',
           backgroundColor: 'var(--bg-surface-1)',
         }}>
-          <Search size={15} color="#38bdf8" />
+          <Search size={15} color="#38bdf8" aria-hidden="true" />
           <input
             ref={inputRef}
+            autoFocus
             type="text"
+            role="combobox"
+            aria-label="Command Palette Search"
+            aria-expanded={isOpen}
+            aria-haspopup="listbox"
+            aria-autocomplete="list"
+            aria-controls="command-palette-listbox"
+            aria-activedescendant={activeOptionId}
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a command, format, file, or section..."
+            placeholder="Type a command, or prefix with @ (sections), # (formats), > (commands), p: (files)..."
             style={{
               flex: 1,
               border: 'none',
@@ -366,9 +467,31 @@ export const CommandPaletteModal: React.FC<Props> = ({
           </kbd>
         </div>
 
-        {/* Results List */}
+        {/* Live Status Announcer for Screen Readers */}
         <div
+          aria-live="polite"
+          aria-atomic="true"
+          style={{
+            position: 'absolute',
+            width: 1,
+            height: 1,
+            padding: 0,
+            margin: -1,
+            overflow: 'hidden',
+            clip: 'rect(0, 0, 0, 0)',
+            whiteSpace: 'nowrap',
+            border: 0,
+          }}
+        >
+          {filteredCommands.length} commands available
+        </div>
+
+        {/* Results Listbox */}
+        <div
+          id="command-palette-listbox"
           ref={listRef}
+          role="listbox"
+          aria-label="Command suggestions"
           style={{
             flex: 1,
             overflowY: 'auto',
@@ -388,6 +511,9 @@ export const CommandPaletteModal: React.FC<Props> = ({
               return (
                 <div
                   key={item.id}
+                  id={`cmd-opt-${item.id}`}
+                  role="option"
+                  aria-selected={isSelected}
                   onClick={item.onExecute}
                   onMouseEnter={() => setSelectedIndex(idx)}
                   style={{
@@ -496,3 +622,5 @@ export const CommandPaletteModal: React.FC<Props> = ({
     </div>
   );
 };
+
+export default CommandPaletteModal;

@@ -462,6 +462,7 @@ export const Navbar: React.FC<Props> = ({
         {/* Theme Toggle */}
         <button
           onClick={onToggleTheme}
+          aria-label="Toggle color theme"
           className="btn-ghost"
           style={{ padding: 4, borderRadius: 'var(--radius-sm)', display: 'inline-flex', alignItems: 'center' }}
           title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}

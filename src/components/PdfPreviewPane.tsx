@@ -687,7 +687,7 @@ export function PdfPreviewPane({
         <div className="pdf-toolbar-status" role="status" aria-live="polite">
           {previewState.type === 'compiling' && (
             <span
-              className="pdf-status pdf-status-compiling"
+              className="pdf-status pdf-status-compiling pdf-status-busy"
               title="Typesetting document with pdfLaTeX"
             >
               <Loader2 size={12} className="spin" />

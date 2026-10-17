@@ -3,16 +3,16 @@
   "project": "Teeex",
   "mission": "One authoritative document-rendering architecture: real TeX computes layout, the preview renders the compiled PDF, and export ships those same bytes.",
   "updated": "2026-10-17",
-  "phase": "Stage 3 verified (virtual windowed PDF preview, lazy geometry, clickable secure link annotation layer, explicit 4-state preview lifecycle; 153 unit tests passing, tsc clean, oxlint clean, playwright e2e tests passing)",
+  "phase": "Stage 4 verified (W3C DTCG 3-tier design token architecture, WAI-ARIA 1.2+ command palette combobox, APG window splitter with pointer capture and preset cycling, authoritative keyboard shortcuts with CodeMirror Prec.highest, HTML inert background isolation, lazy dialog containerization; 177 unit tests passing across 18 files, tsc clean, oxlint clean, 19 playwright e2e tests passing)",
 
   "verificationStatus": {
     "state": "PASSING",
-    "note": "Stage 3 verification gate executed and passed against real WebAssembly pdfLaTeX engine and CodeMirror 6.",
+    "note": "Stage 4 verification gate executed and passed across design tokens, command palette, resizable split engine, CodeMirror keymaps, and background inert isolation.",
     "results": {
       "typecheck": "npx tsc -p tsconfig.app.json --noEmit — clean, exit 0",
-      "lint": "npx oxlint — clean, exit 0 (0 errors, 215 warnings)",
-      "unitAndFuzz": "npx vitest run — 153 passed across 15 files (including pdfViewerWindowing 5, pdfAnnotationLayer 8)",
-      "runtimeE2E": "npx playwright test — pdf-fidelity, latex-workflow, remote-packages, pdf-viewer-stage3 (covering virtual windowing, unmounting, link annotations, and 4-state transitions)",
+      "lint": "npx oxlint — clean, exit 0 (0 errors, 222 warnings)",
+      "unitAndFuzz": "npx vitest run — 177 passed across 18 files (including designSystemTokens 8, keyboardShortcuts 9, resizableSplit 7)",
+      "runtimeE2E": "npx playwright test — 19 passed across all E2E specs (benchmark, delivery-offline, design-system-stage4, latex-workflow, pdf-fidelity, pdf-viewer-stage3, remote-packages)",
       "benchmarks": "docs/benchmarks.json captured via benchmark.spec.ts (cold start 13.1s, compile latency median 200-323ms across small/med/large, heap flat across 6 compiles)"
     },
     "stillUnverified": [

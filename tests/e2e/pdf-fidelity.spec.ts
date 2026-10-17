@@ -103,25 +103,30 @@ test('the preview renders the shipped artifact, not a placeholder', async ({ pag
     .first();
 
   // A placeholder or a blank pane is a flat field. Real typeset text produces
-  // many distinct luminance buckets.
-  const stats = await canvas.evaluate((el: HTMLCanvasElement) => {
-    const ctx = el.getContext('2d');
-    if (!ctx || el.width === 0 || el.height === 0) {
-      return { width: el.width, height: el.height, distinctLuma: 0 };
-    }
-    const { data } = ctx.getImageData(0, 0, el.width, el.height);
-    const seen = new Set<number>();
-    for (let i = 0; i < data.length; i += 4 * 97) {
-      const luma = (data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000;
-      seen.add(luma >> 3);
-      if (seen.size > 8) break;
-    }
-    return { width: el.width, height: el.height, distinctLuma: seen.size };
-  });
+  // many distinct luminance buckets once PDF.js finishes rasterizing.
+  await expect.poll(async () => {
+    return canvas.evaluate((el: HTMLCanvasElement) => {
+      const ctx = el.getContext('2d');
+      if (!ctx || el.width === 0 || el.height === 0) {
+        return 0;
+      }
+      const { data } = ctx.getImageData(0, 0, el.width, el.height);
+      const seen = new Set<number>();
+      for (let i = 0; i < data.length; i += 4 * 97) {
+        const luma = (data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000;
+        seen.add(luma >> 3);
+        if (seen.size > 8) break;
+      }
+      return seen.size;
+    });
+  }, { timeout: 15_000 }).toBeGreaterThan(2);
 
+  const stats = await canvas.evaluate((el: HTMLCanvasElement) => ({
+    width: el.width,
+    height: el.height,
+  }));
   expect(stats.width).toBeGreaterThan(0);
   expect(stats.height).toBeGreaterThan(0);
-  expect(stats.distinctLuma).toBeGreaterThan(2);
 
   // Backing store must be at least CSS-sized, or text is upscaled and blurry.
   const cssWidth = await canvas.evaluate((el) => el.getBoundingClientRect().width);

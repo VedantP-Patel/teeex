@@ -72,17 +72,23 @@ test('measure compile latency, first-paint, structure outline latency and heap s
   results.coldStartToFirstPaintMs = Date.now() - t0;
 
   // --- compile latency by size (warm engine) ---------------------------
-  const busy = page.locator('.pdf-status-busy');
   const REPS = 4;
   const latency: Record<string, ReturnType<typeof summarise>> = {};
 
   const measureCompile = async (source: string, rep: number): Promise<number> => {
     const marked = source.replace('\\begin{document}', `\\begin{document}\n% rep ${rep}`);
+    const countBefore = await page.evaluate(
+      () => (window as unknown as { __teeexCompileCount?: number }).__teeexCompileCount ?? 0,
+    );
+    const start = Date.now();
     await setEditorContent(page, marked);
     await page.keyboard.press('ControlOrMeta+Enter');
-    await expect(busy).toBeVisible({ timeout: 30_000 });
-    const start = Date.now();
-    await expect(busy).toBeHidden({ timeout: 180_000 });
+    await page.waitForFunction(
+      (prev) =>
+        ((window as unknown as { __teeexCompileCount?: number }).__teeexCompileCount ?? 0) > prev,
+      countBefore,
+      { timeout: 180_000 },
+    );
     return Date.now() - start;
   };
 
@@ -125,10 +131,17 @@ test('measure compile latency, first-paint, structure outline latency and heap s
   const heapBefore = await heapReading();
 
   for (let i = 0; i < 6; i++) {
+    const countBefore = await page.evaluate(
+      () => (window as unknown as { __teeexCompileCount?: number }).__teeexCompileCount ?? 0,
+    );
     await setEditorContent(page, DOCS.medium.replace('\\begin{document}', `\\begin{document}\n% churn ${i}`));
     await page.keyboard.press('ControlOrMeta+Enter');
-    await expect(busy).toBeVisible({ timeout: 30_000 });
-    await expect(busy).toBeHidden({ timeout: 180_000 });
+    await page.waitForFunction(
+      (prev) =>
+        ((window as unknown as { __teeexCompileCount?: number }).__teeexCompileCount ?? 0) > prev,
+      countBefore,
+      { timeout: 180_000 },
+    );
   }
   await page.waitForTimeout(500);
   const heapAfter = await heapReading();

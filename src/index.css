@@ -91,7 +91,66 @@
 
 :root {
   color-scheme: dark;
-  /* Color Palette - Dark Obsidian (Default) */
+
+  /* ========================================================================
+     Tier 1: Global Primitive Metric Scales (Spacing, Typography, Z-Index)
+     ======================================================================== */
+  /* Spacing Scale (8pt Grid with 4pt half-steps) */
+  --space-0: 0px;
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-2-5: 10px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Typography Scale */
+  --font-size-2xs: 10px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13.5px;
+  --font-size-md: 15px;
+  --font-size-lg: 18px;
+  --font-size-xl: 22px;
+  --font-size-2xl: 28px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --font-weight-black: 800;
+  --line-height-none: 1;
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.65;
+
+  /* Z-Index Hierarchy */
+  --z-base: 1;
+  --z-split-handle: 35;
+  --z-dropdown: 50;
+  --z-dock: 100;
+  --z-toast: 500;
+  --z-modal-backdrop: 1000;
+  --z-modal: 1010;
+  --z-command-palette: 2000;
+
+  /* Tier 3: Component-Scoped Sizing Variables */
+  --navbar-height: 44px;
+  --toolbar-height: 38px;
+  --sidebar-width: 236px;
+  --resizer-width: 5px;
+  --dock-collapsed-height: 32px;
+  --dock-expanded-height: 180px;
+
+  /* ========================================================================
+     Tier 2: Semantic Palette — Dark Obsidian (Default)
+     ======================================================================== */
   --bg-app: #080a0f;
   --bg-surface-0: #0d1017;
   --bg-surface-1: #131722;
@@ -122,7 +181,7 @@
   --accent-rose-glow: rgba(244, 63, 94, 0.2);
   --accent-purple: #a855f7;
 
-  /* Paper Preview Sheet Variables - Exact 3-Layer Shadow matching Light Mode */
+  /* Paper Preview Sheet Variables */
   --paper-bg: #ffffff;
   --paper-text: #111827;
   --paper-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.7), 0 4px 12px -2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1);
@@ -147,7 +206,7 @@
   --radius-xl: 20px;
 }
 
-/* Light Theme Variables */
+/* Tier 2: Semantic Palette — Light Theme Variables */
 [data-theme="light"] {
   color-scheme: light;
   --bg-app: #f1f5f9;
@@ -170,6 +229,88 @@
   --paper-bg: #ffffff;
   --paper-text: #111827;
   --paper-shadow: 0 14px 34px -4px rgba(15, 23, 42, 0.14), 0 2px 6px -1px rgba(15, 23, 42, 0.06), 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+/* ==========================================================================
+   Focus-Visible and High Contrast Accessibility
+   ========================================================================== */
+:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}
+
+/* ==========================================================================
+   Reduced Motion Accessibility (Zero Lag & Instant Jumps)
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ==========================================================================
+   Window Splitter / Resizer (APG Separator Pattern)
+   ========================================================================== */
+.panel-resizer {
+  width: var(--resizer-width);
+  cursor: col-resize;
+  touch-action: none;
+  background-color: var(--border-subtle);
+  z-index: var(--z-split-handle);
+  position: relative;
+  transition: background var(--transition-fast);
+  outline: none;
+  user-select: none;
+}
+
+.panel-resizer:hover,
+.panel-resizer.is-dragging {
+  background-color: var(--accent-cyan);
+}
+
+.panel-resizer:focus-visible {
+  background-color: var(--accent-cyan);
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+/* ==========================================================================
+   Modal Loading Suspense Fallback
+   ========================================================================== */
+.modal-loading-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  z-index: var(--z-modal-backdrop);
+  display: flex;
+  align-items: center;
+  justifyContent: center;
+}
+
+.modal-loading-card {
+  padding: var(--space-4) var(--space-6);
+  background-color: var(--bg-surface-0);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
 }
 
 /* Global Reset */

@@ -49,6 +49,7 @@ interface Props {
   onOpenSnippets?: () => void;
   onFormatDocument?: () => void;
   onOpenCommandPalette?: () => void;
+  onSaveShortcut?: () => void;
   onOpenImageUpload?: () => void;
   onImportFiles?: (files: FileList | File[], targetFolder?: string) => void;
 }
@@ -81,6 +82,8 @@ export const Editor: React.FC<Props> = ({
   onRejectTrackedChange,
   onOpenSnippets,
   onFormatDocument,
+  onOpenCommandPalette,
+  onSaveShortcut,
   onOpenImageUpload,
 }) => {
   const [suggestionMode, setSuggestionMode] = useState(false);
@@ -152,6 +155,8 @@ export const Editor: React.FC<Props> = ({
     readOnly: role === 'viewer',
     onCompileShortcut,
     onForwardSync,
+    onOpenCommandPalette,
+    onSaveShortcut,
   });
 
   const handleInternalCursorChange = useCallback(
