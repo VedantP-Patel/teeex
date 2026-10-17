@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Zap,
   CheckCircle2,
@@ -6,9 +7,11 @@ import {
   ShieldCheck,
   X,
   AlertCircle,
+  DownloadCloud,
 } from 'lucide-react';
 import type { EngineStatus } from '../services/latexCompiler';
 import { checkEngineCacheStatus, requestPersistentStorage, type EngineCacheStatus } from '../services/serviceWorker';
+import { usePwaInstall } from '../hooks/usePwaInstall';
 
 interface Props {
   status: EngineStatus;
@@ -20,10 +23,24 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact 
   const [isOpen, setIsOpen] = useState(false);
   const [cacheInfo, setCacheInfo] = useState<EngineCacheStatus | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [hasRequestedPersist, setHasRequestedPersist] = useState(false);
+  const { isInstallable, isInstalled, installApp } = usePwaInstall();
 
   useEffect(() => {
     checkEngineCacheStatus().then(setCacheInfo).catch(() => {});
   }, [status.phase]);
+
+  // Dismiss modal on Escape key press
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
 
   const handleToggleOpen = () => {
     setIsOpen(prev => !prev);
@@ -34,6 +51,7 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact 
 
   const handleRequestPersist = async () => {
     setIsVerifying(true);
+    setHasRequestedPersist(true);
     await requestPersistentStorage();
     const next = await checkEngineCacheStatus();
     setCacheInfo(next);
@@ -42,6 +60,15 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact 
 
   const isEngineReady = status.phase === 'ready' || Boolean(cacheInfo?.isEngineCached);
   const isPersisted = Boolean(cacheInfo?.persistedStorage);
+
+  const renderModalPortal = () => {
+    if (!isOpen) return null;
+    const modalContent = renderTelemetryModal();
+    if (typeof document !== 'undefined' && document.body) {
+      return createPortal(modalContent, document.body);
+    }
+    return modalContent;
+  };
 
   // 1. Fetching / Downloading State
   if (status.phase === 'fetching') {
@@ -63,7 +90,7 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact 
           </div>
         </button>
 
-        {isOpen && renderTelemetryModal()}
+        {renderModalPortal()}
       </div>
     );
   }
@@ -88,7 +115,7 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact 
         </span>
       </button>
 
-      {isOpen && renderTelemetryModal()}
+      {renderModalPortal()}
     </div>
   );
 
@@ -99,9 +126,9 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact 
       <div className="engine-telemetry-backdrop" onClick={() => setIsOpen(false)}>
         <div className="engine-telemetry-card" onClick={e => e.stopPropagation()}>
           <div className="engine-telemetry-header">
-            <div className="flex items-center gap-2">
-              <HardDrive className="text-sky-400" size={16} />
-              <h3 className="engine-telemetry-title">TeX Engine & Storage Telemetry</h3>
+            <div className="flex items-center gap-2" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <HardDrive color="#38bdf8" size={16} />
+              <h3 className="engine-telemetry-title">TeX Engine &amp; Storage Telemetry</h3>
             </div>
             <button
               type="button"
@@ -140,31 +167,62 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact 
 
             <div className="engine-metric-row">
               <span className="engine-metric-label">Eviction Protection</span>
-              <span className="engine-metric-val flex items-center gap-1">
+              <span className="engine-metric-val flex items-center gap-1" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 {isPersisted ? (
                   <>
-                    <ShieldCheck size={14} className="text-emerald-400" />
-                    <span className="text-emerald-400">Persistent (Protected)</span>
+                    <ShieldCheck size={14} color="#10b981" />
+                    <span style={{ color: '#10b981', fontWeight: 600 }}>Persistent (Protected)</span>
                   </>
                 ) : (
                   <>
-                    <AlertCircle size={14} className="text-amber-400" />
-                    <span className="text-amber-400">Best-effort</span>
+                    <AlertCircle size={14} color="#f59e0b" />
+                    <span style={{ color: '#f59e0b', fontWeight: 600 }}>Best-effort</span>
                   </>
                 )}
               </span>
             </div>
 
             {!isPersisted && (
-              <button
-                type="button"
-                onClick={handleRequestPersist}
-                disabled={isVerifying}
-                className="engine-persist-btn"
-              >
-                <ShieldCheck size={14} />
-                <span>Request Permanent Eviction-Proof Storage</span>
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                {isInstallable && !isInstalled && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await installApp();
+                      const next = await checkEngineCacheStatus();
+                      setCacheInfo(next);
+                    }}
+                    className="engine-persist-btn"
+                    style={{
+                      background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                      borderColor: '#38bdf8',
+                    }}
+                  >
+                    <DownloadCloud size={14} />
+                    <span>Install Desktop App (PWA) for Eviction Immunity</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleRequestPersist}
+                  disabled={isVerifying}
+                  className="engine-persist-btn"
+                >
+                  <ShieldCheck size={14} />
+                  <span>
+                    {isVerifying
+                      ? 'Contacting Browser Heuristics...'
+                      : hasRequestedPersist
+                        ? 'Requested • Granted via PWA / Regular Usage'
+                        : 'Request Browser Eviction Immunity'}
+                  </span>
+                </button>
+
+                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.4, padding: '2px 4px' }}>
+                  Chromium (Chrome &amp; Edge) evaluates storage persistence automatically based on site engagement or PWA desktop installation.
+                </div>
+              </div>
             )}
 
             <div className="engine-telemetry-tip">

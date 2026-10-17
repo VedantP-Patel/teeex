@@ -370,6 +370,44 @@ function extractRequirements(text: string): Array<{ name: string; format: number
     add(m[1], '.tex');
   }
 
+  // Bibliography style files (\bibliographystyle{...})
+  for (const m of text.matchAll(/\\bibliographystyle\s*\{([^}]+)\}/g)) {
+    const style = m[1]?.trim();
+    if (style && !style.includes('\\')) {
+      out.push({
+        name: style.endsWith('.bst') ? style : `${style}.bst`,
+        format: 26,
+      });
+    }
+  }
+
+  // JIT pre-fetching of companion font metrics for common academic packages:
+  // Prevents the WASM worker from pausing on serial, synchronous XMLHttpRequest roundtrips.
+  if (text.includes('IEEEtran') || text.includes('times') || text.includes('newtx') || text.includes('acmart')) {
+    const timesMetrics = [
+      'ot1ptm.fd', 't1ptm.fd', 'omlptm.fd', 'omsptm.fd',
+      'ptmr7t.tfm', 'ptmb7t.tfm', 'ptmri7t.tfm', 'ptmro7t.tfm', 'ptmrc7t.tfm',
+      'phvr7t.tfm', 'pcrr7t.tfm',
+    ];
+    for (const name of timesMetrics) {
+      out.push({ name, format: name.endsWith('.tfm') ? 51 : 26 });
+    }
+  }
+
+  if (text.includes('amssymb') || text.includes('amsfonts')) {
+    const amsMetrics = [
+      'msam10.tfm', 'msbm10.tfm', 'msam7.tfm', 'msbm7.tfm', 'msam5.tfm', 'msbm5.tfm',
+    ];
+    for (const name of amsMetrics) {
+      out.push({ name, format: 51 });
+    }
+  }
+
+  if (text.includes('sn-jnl') || text.includes('sn-basic')) {
+    out.push({ name: 'sn-jnl.cls', format: 26 });
+    out.push({ name: 'sn-basic.bst', format: 26 });
+  }
+
   return out;
 }
 

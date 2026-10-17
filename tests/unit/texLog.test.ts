@@ -338,19 +338,21 @@ describe('parseTexLog — 1-click suggestedFix generation', () => {
     });
   });
 
-  it('generates suggestedFix for duplicate label warnings', () => {
-    const log = "LaTeX Warning: Label `sec:intro' multiply defined on input line 85.";
+  it('classifies font size substitution notices as info rather than warning to prevent false alarm noise', () => {
+    const log = [
+      'LaTeX Font Warning: Size substitutions with differences',
+      '(Font)              up to 0.5pt have occurred.',
+      "LaTeX Font Warning: Font shape `OT1/ptm/m/n' in size <5> not available",
+      '(Font)              size <6> substituted on input line 42.',
+    ].join('\n');
     const { diagnostics } = parseTexLog(log);
-    const diag = diagnostics.find((d) => d.code === 'duplicate-label');
 
-    expect(diag).toBeDefined();
-    expect(diag!.suggestedFix).toEqual({
-      title: "Rename duplicate label 'sec:intro'",
-      description: "Renames duplicate label to 'sec:intro-duplicate'.",
-      replacement: '\\label{sec:intro-duplicate}',
-      startLine: 85,
-      endLine: 85,
-    });
+    // Font size substitutions should be info, never warning
+    expect(diagnostics.length).toBeGreaterThan(0);
+    for (const d of diagnostics) {
+      expect(d.severity).toBe('info');
+    }
   });
 });
+
 

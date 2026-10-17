@@ -2879,24 +2879,27 @@ p.latex-force-indent {
 .engine-telemetry-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.65);
+  background-color: rgba(0, 0, 0, 0.72);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  z-index: 9999;
+  z-index: 99999;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 20px;
   animation: fadeIn 0.15s ease-out;
 }
 
 .engine-telemetry-card {
   width: 100%;
-  max-width: 460px;
+  max-width: 480px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-surface-0, #0d1017);
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  border: 1px solid var(--border-medium, rgba(255, 255, 255, 0.15));
   border-radius: 12px;
-  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.08);
   overflow: hidden;
   animation: scaleUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -2919,6 +2922,7 @@ p.latex-force-indent {
   padding: 14px 18px;
   border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.07));
   background: var(--bg-surface-1, #131722);
+  flex-shrink: 0;
 }
 
 .engine-telemetry-title {
@@ -2952,6 +2956,7 @@ p.latex-force-indent {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
 }
 
 .engine-metric-row {
@@ -3068,7 +3073,7 @@ p.latex-force-indent {
    Stage 13: Decongested Navbar Responsive Priority & CSS Containment
    ========================================================================== */
 .app-navbar {
-  contain: layout style;
+  contain: style;
 }
 
 @media (max-width: 1280px) {

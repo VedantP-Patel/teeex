@@ -47,6 +47,8 @@ const BUNDLED_STATIC_FILES = new Set([
   'ptmro7t.tfm',
   'ragged2e.sty',
   'setspace.sty',
+  'sn-basic.bst',
+  'sn-jnl.cls',
   'subcaption.sty',
   't1ptm.fd',
   'tabularx.sty',

@@ -276,7 +276,7 @@ describe('Navbar Redesign & Decongestion (Stage 13)', () => {
     expect(onToggleTheme).toHaveBeenCalledTimes(1);
   });
 
-  it('EngineWarmupBadge renders in compact mode without breaking .engine-warmup-pill selector', async () => {
+  it('EngineWarmupBadge renders in compact mode and portals modal cleanly to document.body', async () => {
     await render(
       <EngineWarmupBadge
         status={{ phase: 'ready', progress: 100, message: 'Primed' }}
@@ -289,9 +289,17 @@ describe('Navbar Redesign & Decongestion (Stage 13)', () => {
     expect(pill?.classList.contains('ready')).toBe(true);
     expect(pill?.textContent).toContain('Ready');
 
-    // Clicking pill opens telemetry modal
+    // Clicking pill opens telemetry modal mounted via portal to document.body
     await click(pill as HTMLElement);
-    expect(container.querySelector('.engine-telemetry-card')).toBeDefined();
+    const card = document.querySelector('.engine-telemetry-card');
+    expect(card).toBeDefined();
+    expect(document.body.textContent).toContain('TeX Engine & Storage Telemetry');
+
+    // Pressing Escape closes the modal
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(document.querySelector('.engine-telemetry-card')).toBeNull();
   });
 
   it('humanizes large compilation durations properly', async () => {

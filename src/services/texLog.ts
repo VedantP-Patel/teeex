@@ -517,6 +517,8 @@ export function parseTexLog(
       let hint: string | undefined;
       let suggestedFix: DiagnosticSuggestedFix | undefined;
 
+      const isInfo = /Info:/i.test(line);
+
       if (/Citation [`'"]([^`'"]+)[`'"].*undefined/i.test(message)) {
         code = 'missing-citation';
         hint = 'Run BibTeX, or check that the key exists in a .bib file included via \\bibliography.';
@@ -540,13 +542,15 @@ export function parseTexLog(
       } else if (/Rerun|Label\(s\) may have changed/i.test(message)) {
         code = 'rerun-required';
         rerunRequired = true;
-      } else if (/Font shape .* (?:undefined|not available)/i.test(message)) {
+      } else if (/Font shape .* (?:undefined|not available)|Size substitutions with differences/i.test(message)) {
         code = 'font-substitution';
-        hint = 'TeX substituted a different font shape, so this text will not match the requested face.';
+        hint = 'TeX substituted a font shape or scaled size.';
       }
 
+      const isFontSizeSub = /Size substitutions with differences/i.test(message) || /Font shape .* in size .* not available/i.test(message);
+
       push(builder, {
-        severity: code === 'rerun-required' ? 'info' : 'warning',
+        severity: (isInfo || code === 'rerun-required' || isFontSizeSub) ? 'info' : 'warning',
         code,
         message: origin === 'LaTeX' ? message : `[${origin}] ${message}`,
         file: files.current(),
