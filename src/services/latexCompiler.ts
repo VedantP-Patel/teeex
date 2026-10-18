@@ -103,6 +103,65 @@ function hashString(str: string): string {
 }
 
 /**
+ * Minimal valid 1x1 transparent PNG (68 bytes) to serve as a graceful placeholder
+ * for missing \includegraphics references, preventing pdfTeX fatal halting.
+ */
+const DUMMY_1X1_PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49,
+  0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06,
+  0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44,
+  0x41, 0x54, 0x78, 0x9c, 0x63, 0x60, 0x00, 0x02, 0x00, 0x00, 0x05, 0x00, 0x01,
+  0xe9, 0xfa, 0xdc, 0xd8, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+  0x42, 0x60, 0x82,
+]);
+
+/**
+ * Minimal valid 1x1 white JPEG (134 bytes) for missing JPEG images.
+ */
+const DUMMY_1X1_JPG = new Uint8Array([
+  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01,
+  0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00, 0xff, 0xdb, 0x00, 0x43, 0x00, 0xff,
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
+  0xff, 0xc4, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xda, 0x00, 0x08, 0x01,
+  0x01, 0x00, 0x00, 0x3f, 0x00, 0x37, 0xff, 0xd9,
+]);
+
+/**
+ * Minimal valid 1-page blank PDF (317 bytes) for missing PDF vector graphic figures.
+ */
+const DUMMY_1X1_PDF = new TextEncoder().encode(
+  '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/MediaBox[0 0 100 100]/Parent 2 0 R/Resources<<>>>>endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n180\n%%EOF\n'
+);
+
+function getPlaceholderGraphicBytes(filename: string): Uint8Array {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.png')) return DUMMY_1X1_PNG;
+  if (lower.endsWith('.pdf')) return DUMMY_1X1_PDF;
+  return DUMMY_1X1_JPG;
+}
+
+function extractReferencedImages(texContent: string): string[] {
+  const images = new Set<string>();
+  const includeGraphicsRegex = /\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}/g;
+  for (const match of texContent.matchAll(includeGraphicsRegex)) {
+    const raw = match[1]?.trim();
+    if (raw) images.add(raw);
+  }
+  const extRegex = /\{([a-zA-Z0-9_./-]+\.(?:jpe?g|png|gif|svg|eps|pdf))\}/gi;
+  for (const match of texContent.matchAll(extRegex)) {
+    const raw = match[1]?.trim();
+    if (raw) images.add(raw);
+  }
+  return Array.from(images);
+}
+
+/**
  * Finds all image filenames referenced in the document that are not present in `files`,
  * so we can pre-register them as kpathsea misses and avoid 404 network roundtrips.
  */
@@ -115,10 +174,10 @@ function extractMissingImageKeys(texContent: string, files: ProjectFile[]): stri
   }
 
   const misses = new Set<string>();
-  const imgRegex = /\{([a-zA-Z0-9_./-]+\.(?:jpe?g|png|gif|svg|eps|pdf))\}/gi;
-  for (const match of texContent.matchAll(imgRegex)) {
-    const imgName = match[1];
-    if (imgName && !existingNames.has(imgName)) {
+  const allReferenced = extractReferencedImages(texContent);
+  for (const imgName of allReferenced) {
+    const base = imgName.slice(imgName.lastIndexOf('/') + 1);
+    if (!existingNames.has(imgName) && !existingNames.has(base)) {
       misses.add(imgName);
       misses.add(`26/${imgName}`);
       misses.add(`39/${imgName}`);
@@ -490,6 +549,37 @@ export class TexEngineService {
       const engineFiles = toEngineFiles(input.files, entry.name);
       const projectKey = input.projectId ?? 'default';
 
+      // Synthesize lightweight placeholder graphics for missing image files to prevent pdfTeX fatal halting
+      const existingFileNames = new Set<string>();
+      for (const f of input.files) {
+        existingFileNames.add(f.name);
+        existingFileNames.add(f.name.replace(/^\/+/, ''));
+        existingFileNames.add(f.name.slice(f.name.lastIndexOf('/') + 1));
+      }
+      for (const ef of engineFiles) {
+        existingFileNames.add(ef.path);
+        existingFileNames.add(ef.path.replace(/^\/+/, ''));
+        existingFileNames.add(ef.path.slice(ef.path.lastIndexOf('/') + 1));
+      }
+
+      const referencedImages = extractReferencedImages(source);
+      for (const imgName of referencedImages) {
+        const baseName = imgName.slice(imgName.lastIndexOf('/') + 1);
+        if (!existingFileNames.has(imgName) && !existingFileNames.has(baseName)) {
+          const placeholderBytes = getPlaceholderGraphicBytes(imgName);
+          engineFiles.push({
+            path: imgName,
+            content: placeholderBytes,
+          });
+          // Also provide common image extensions if referenced without extension
+          if (!imgName.includes('.')) {
+            engineFiles.push({ path: `${imgName}.png`, content: DUMMY_1X1_PNG });
+            engineFiles.push({ path: `${imgName}.jpg`, content: DUMMY_1X1_JPG });
+            engineFiles.push({ path: `${imgName}.pdf`, content: DUMMY_1X1_PDF });
+          }
+        }
+      }
+
       // Layer 5: Pre-mount warm auxiliary files from IndexedDB into MEMFS before Pass 1
       if (input.projectId && !this.loadedAuxProjects.has(input.projectId)) {
         try {
@@ -618,10 +708,30 @@ export class TexEngineService {
         pdf,
         synctex: result.synctex && result.synctex.byteLength > 0 ? result.synctex : null,
         log,
-        // Filter out harmless LaTeX Info messages that were masquerading as warnings
-        diagnostics: parsed.diagnostics.filter(
-          (d) => !d.raw?.includes('LaTeX Info:') && !d.message.startsWith('Redefining \\')
-        ),
+        // Filter out harmless TeX Info messages that were masquerading as warnings
+        diagnostics: parsed.diagnostics.filter((d) => {
+          if (d.severity === 'error') return true;
+          if (d.code === 'other') {
+            const raw = d.raw || '';
+            const msg = d.message || '';
+            if (
+              raw.includes('Info:') ||
+              msg.includes('Info:') ||
+              msg.includes('Overwriting symbol font') ||
+              msg.includes('Overwriting math alphabet') ||
+              msg.includes('Checking defaults for') ||
+              msg.includes('Redeclaring font encoding') ||
+              msg.includes('Redeclaring math alphabet') ||
+              msg.includes('Model `') ||
+              msg.startsWith('Redefining \\') ||
+              raw.includes('Loading configuration file') ||
+              raw.includes('Applying patch')
+            ) {
+              return false;
+            }
+          }
+          return true;
+        }),
         missingPackages: parsed.missingPackages,
         rerunRequired: parsed.rerunRequired,
         entryPath: entry.name,

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
+  Info,
   Wrench,
   ChevronDown,
   ChevronUp,
@@ -147,6 +148,8 @@ export const DiagnosticsDock: React.FC<Props> = ({
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flex: 1 }}>
                       {d.severity === 'error' ? (
                         <AlertCircle size={15} color="#f43f5e" style={{ flexShrink: 0, marginTop: 2 }} />
+                      ) : d.severity === 'info' ? (
+                        <Info size={15} color="#38bdf8" style={{ flexShrink: 0, marginTop: 2 }} />
                       ) : (
                         <AlertTriangle size={15} color="#f59e0b" style={{ flexShrink: 0, marginTop: 2 }} />
                       )}
@@ -159,7 +162,7 @@ export const DiagnosticsDock: React.FC<Props> = ({
                               fontFamily: 'var(--font-mono)',
                               fontSize: 11,
                               fontWeight: 700,
-                              color: d.severity === 'error' ? '#f43f5e' : '#f59e0b',
+                              color: d.severity === 'error' ? '#f43f5e' : d.severity === 'info' ? '#38bdf8' : '#f59e0b',
                               textDecoration: 'underline',
                               cursor: 'pointer',
                             }}

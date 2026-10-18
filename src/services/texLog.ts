@@ -545,6 +545,21 @@ export function parseTexLog(
       } else if (/Font shape .* (?:undefined|not available)|Size substitutions with differences/i.test(message)) {
         code = 'font-substitution';
         hint = 'TeX substituted a font shape or scaled size.';
+      } else if (/File [`'"]([^`'"]+)[`'"] not found/i.test(message)) {
+        const targetMatch = message.match(/File [`'"]([^`'"]+)[`'"] not found/i);
+        const target = targetMatch ? targetMatch[1] : '';
+        if (/\.(?:png|jpe?g|pdf|eps|svg)$/i.test(target)) {
+          code = 'missing-graphic';
+          hint = `Upload "${target}" to the project, or correct the path in \\includegraphics.`;
+        } else {
+          code = 'missing-file';
+          hint = `Add "${target}" to the project, or correct the path.`;
+        }
+      }
+
+      // Skip non-actionable Info logs (e.g., "LaTeX Font Info:", "Package microtype Info:", "Checking defaults for...")
+      if (isInfo && code === 'other') {
+        continue;
       }
 
       const isFontSizeSub = /Size substitutions with differences/i.test(message) || /Font shape .* in size .* not available/i.test(message);

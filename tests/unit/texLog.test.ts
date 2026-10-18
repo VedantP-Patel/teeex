@@ -353,6 +353,37 @@ describe('parseTexLog — 1-click suggestedFix generation', () => {
       expect(d.severity).toBe('info');
     }
   });
+
+  it('filters out noisy LaTeX Font Info and Package Info messages from diagnostics', () => {
+    const noisyLog = [
+      "LaTeX Font Info: Overwriting symbol font `operators' in version `normal'",
+      "LaTeX Font Info: Overwriting symbol font `letters' in version `normal'",
+      'Package microtype Info: Loading configuration file microtype.cfg.',
+      'Package pdftexcmds Info: \\pdf@primitive is available.',
+      'Package hyperref Info: Hyper figures OFF on input line 4201.',
+      "Package xcolor Info: Model `cmy' substituted by `cmy0' on input line 1349.",
+      'LaTeX Font Info: Checking defaults for OML/cmm/m/it on input line 118.',
+      'LaTeX Font Info: ... okay on input line 118.',
+    ].join('\n');
+
+    const { diagnostics } = parseTexLog(noisyLog);
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it('detects missing graphics from LaTeX warnings and assigns actionable hints', () => {
+    const log = [
+      "LaTeX Warning: File `svnit.jpg' not found on input line 127.",
+      "! Package pdftex.def Error: File `svnit.jpg' not found: using draft setting.",
+      'l.127 \\includegraphics[width=3cm]{svnit.jpg}',
+    ].join('\n');
+
+    const { diagnostics } = parseTexLog(log);
+    const graphicDiag = diagnostics.find((d) => d.code === 'missing-graphic');
+
+    expect(graphicDiag).toBeDefined();
+    expect(graphicDiag!.message).toContain('svnit.jpg');
+    expect(graphicDiag!.hint).toContain('Upload "svnit.jpg"');
+  });
 });
 
 
