@@ -60,6 +60,8 @@ export interface VirtualFileEntry {
   mimeType?: string;
 }
 
+import { getPlaceholderGraphicBytes, isGraphicFilename } from './placeholderGraphics';
+
 /**
  * Mounts and normalizes project files into an in-memory virtual filesystem map
  * ensuring all binary images/figures are converted to raw Uint8Array buffers
@@ -69,10 +71,23 @@ export function mountVirtualTeXFileSystem(files: ProjectFile[]): Map<string, Vir
   const vfs = new Map<string, VirtualFileEntry>();
 
   for (const file of files) {
-    const isImage = file.type === 'image' || Boolean(file.dataUrl) || /\.(png|jpe?g|gif|svg|webp|pdf)$/i.test(file.name);
+    const isImage = file.type === 'image' || Boolean(file.dataUrl) || isGraphicFilename(file.name);
 
-    if (isImage && file.dataUrl) {
-      const buffer = dataUrlToUint8Array(file.dataUrl);
+    if (isImage) {
+      let buffer: Uint8Array | null = null;
+      if (file.dataUrl) {
+        const decoded = dataUrlToUint8Array(file.dataUrl);
+        if (decoded.byteLength > 0) buffer = decoded;
+      }
+      if (!buffer && file.content && typeof file.content === 'string' && file.content.startsWith('data:')) {
+        const decoded = dataUrlToUint8Array(file.content);
+        if (decoded.byteLength > 0) buffer = decoded;
+      }
+      // If buffer is missing, empty, or corrupted, provide our standard valid dummy placeholder
+      if (!buffer || buffer.byteLength === 0) {
+        buffer = getPlaceholderGraphicBytes(file.name);
+      }
+
       const ext = file.name.split('.').pop()?.toLowerCase();
       const mime = ext === 'svg' ? 'image/svg+xml' : ext === 'pdf' ? 'application/pdf' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
 
@@ -86,10 +101,15 @@ export function mountVirtualTeXFileSystem(files: ProjectFile[]): Map<string, Vir
 
       // Mount under primary name
       vfs.set(file.name, entry);
+      // Mount under ./ prefix
+      if (!file.name.startsWith('./') && !file.name.startsWith('/')) {
+        vfs.set(`./${file.name}`, entry);
+      }
       // Mount under basename if different
       const basename = file.name.split('/').pop();
       if (basename && basename !== file.name) {
         vfs.set(basename, entry);
+        vfs.set(`./${basename}`, entry);
       }
       // Mount under folder path if folder is specified
       if (file.folder && !file.name.startsWith(file.folder + '/')) {
