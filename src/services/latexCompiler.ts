@@ -634,6 +634,16 @@ export class TexEngineService {
     } catch (cause) {
       this.setStatus({ phase: 'ready', engine });
       const message = cause instanceof Error ? cause.message : String(cause);
+      if (message.includes('supported_drivers') || message.includes("reading 'includes'")) {
+        if (typeof caches !== 'undefined') {
+          void caches.open('teeex-engine-v1.4.0').then((c) => {
+            void c.delete('/core/busytex/busytex_pipeline.js');
+          });
+        }
+        for (const r of this.runners.values()) r.terminate();
+        this.runners.clear();
+        this.initPromises.clear();
+      }
       return failure(`Compilation could not be completed: ${message}`);
     }
   }

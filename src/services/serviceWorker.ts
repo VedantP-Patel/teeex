@@ -33,6 +33,25 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
   try {
     const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
 
+    // Force service worker update check on registration
+    try {
+      await registration.update();
+    } catch {}
+
+    // Invalidate stale cached engine JS scripts in CacheStorage
+    if (typeof caches !== 'undefined') {
+      try {
+        const cache = await caches.open(ENGINE_CACHE_NAME);
+        const pipelineResp = await cache.match('/core/busytex/busytex_pipeline.js');
+        if (pipelineResp) {
+          const text = await pipelineResp.clone().text();
+          if (!text.includes('supported_drivers =')) {
+            await cache.delete('/core/busytex/busytex_pipeline.js');
+          }
+        }
+      } catch {}
+    }
+
     // Request persistent storage to protect against browser eviction under disk pressure
     await requestPersistentStorage();
 

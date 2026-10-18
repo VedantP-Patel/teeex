@@ -10,7 +10,7 @@
  *   Guarded against HTML response poisoning; capped at 300 entries with LRU eviction.
  */
 
-const CACHE_STATIC = 'teeex-static-v5-20261017';
+const CACHE_STATIC = 'teeex-static-v6-20261018';
 const CACHE_ENGINE = 'teeex-engine-v1.4.0';
 const CACHE_PACKAGES = 'teeex-packages-v1';
 const MAX_PACKAGE_ENTRIES = 300;
@@ -42,6 +42,11 @@ self.addEventListener('activate', (event) => {
           .filter((k) => k !== CACHE_STATIC && k !== CACHE_ENGINE && k !== CACHE_PACKAGES)
           .map((k) => caches.delete(k))
       );
+      // Evict stale pipeline JS script from CACHE_ENGINE so fresh patched file is used
+      try {
+        const engineCache = await caches.open(CACHE_ENGINE);
+        await engineCache.delete('/core/busytex/busytex_pipeline.js');
+      } catch {}
       await self.clients.claim();
     })()
   );
@@ -123,11 +128,29 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. TeX Engine Assets (/core/busytex/*): Cache-First in version-pinned CACHE_ENGINE
+  // 2. TeX Engine Assets (/core/busytex/*): Network-First for JS scripts, Cache-First for heavy binaries
   if (url.origin === self.location.origin && url.pathname.startsWith('/core/busytex/')) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE_ENGINE);
+        const isScript = url.pathname.endsWith('.js');
+
+        // Fast-path: Network-First for lightweight JS scripts so patches take effect immediately
+        if (isScript) {
+          try {
+            const res = await fetch(request);
+            const ct = res.headers.get('content-type') || '';
+            if (res.ok && !ct.includes('text/html')) {
+              cache.put(request, res.clone()).catch(() => {});
+            }
+            return res;
+          } catch {
+            const cached = await cache.match(request);
+            if (cached) return cached;
+            return new Response('Offline: Engine script unavailable', { status: 503 });
+          }
+        }
+
         const cached = await cache.match(request);
         if (cached) return cached;
 
