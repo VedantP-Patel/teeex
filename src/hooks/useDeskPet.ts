@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { DeskPetAudioEngine } from '../services/deskPetAudio';
 
 export type DeskPetActionState =
@@ -35,7 +35,33 @@ export type DeskPetActionState =
   | 'yoga-stretch'
   | 'butterfly-bat'
   | 'face-wash'
-  | 'fling-air';
+  | 'fling-air'
+  // Stage 19: Feline Annoyance Engine States
+  | 'airplane-ears'
+  | 'annoyed-hiss'
+  | 'swat-aggressive'
+  | 'tail-thump'
+  | 'cold-shoulder'
+  | 'facepalm-paw'
+  | 'paper-shred'
+  | 'glare-judge'
+  | 'dizzy-wobble'
+  | 'keyboard-sprawl'
+  | 'hairball-cough'
+  | 'drama-flop'
+  // Stage 19: Authentic Feline & Scholar Behaviors
+  | 'pounce-prep'
+  | 'flehmen-sniff'
+  | 'knead-dough'
+  | 'midnight-zoomies'
+  | 'slow-blink'
+  | 'cheek-bunt'
+  | 'cello-leg'
+  | 'blep'
+  | 'math-zoomies'
+  | 'loaf-wiggle'
+  | 'focus-scholar'
+  | 'qed-celebration';
 
 export type DeskPetRoamMode = 'dock' | 'free';
 
@@ -60,6 +86,14 @@ export const MATH_DREAM_FORMULAS = [
   '\\mathcal{L}\\{\\dot{x}\\} = sX(s) - x(0)',
   '\\TeX \\; \\text{v}\\pi',
 ];
+
+export function getScholarLevel(xp: number): { level: number; title: string; nextXp: number; progress: number } {
+  if (xp < 100) return { level: 1, title: 'Novice Kitten', nextXp: 100, progress: Math.max(0, Math.min(1, xp / 100)) };
+  if (xp < 300) return { level: 2, title: 'Math Apprentice', nextXp: 300, progress: Math.max(0, Math.min(1, (xp - 100) / 200)) };
+  if (xp < 600) return { level: 3, title: 'TeX Journeyman', nextXp: 600, progress: Math.max(0, Math.min(1, (xp - 300) / 300)) };
+  if (xp < 1000) return { level: 4, title: 'Macro Wizard', nextXp: 1000, progress: Math.max(0, Math.min(1, (xp - 600) / 400)) };
+  return { level: 5, title: 'Knuth Grandmaster', nextXp: 2000, progress: Math.max(0, Math.min(1, (xp - 1000) / 1000)) };
+}
 
 export interface UseDeskPetOptions {
   compileStatus?: 'idle' | 'compiling' | 'success' | 'error';
@@ -124,6 +158,28 @@ export interface UseDeskPetReturn {
   triggerEarScratch: () => void;
   triggerNapYawn: () => void;
   triggerRoam: () => void;
+  // Stage 19 additions:
+  annoyanceLevel: number;
+  annoyanceReason: string | null;
+  scholarXp: number;
+  scholarLevel: number;
+  scholarTitle: string;
+  scholarProgress: number;
+  addScholarXp: (amount: number) => void;
+  playSpecificAnimation: (anim: DeskPetActionState, durationMs?: number) => void;
+  triggerAnnoyanceReaction: (reason?: string) => void;
+  triggerPouncePrep: () => void;
+  triggerKneadDough: () => void;
+  triggerMidnightZoomies: () => void;
+  triggerSlowBlink: () => void;
+  triggerCheekBunt: () => void;
+  triggerCelloLeg: () => void;
+  triggerBlep: () => void;
+  triggerFlehmenSniff: () => void;
+  triggerMathZoomies: () => void;
+  triggerLoafWiggle: () => void;
+  triggerFocusScholar: () => void;
+  triggerQedCelebration: () => void;
 }
 
 const STORAGE_KEY = 'teeex_desk_pet_enabled';
@@ -135,6 +191,7 @@ const PERCH_X_STORAGE_KEY = 'teeex_desk_pet_perch_x';
 const PERCH_Y_STORAGE_KEY = 'teeex_desk_pet_perch_y';
 const SNAPPED_STORAGE_KEY = 'teeex_desk_pet_is_snapped';
 const ROAM_MODE_STORAGE_KEY = 'teeex_desk_pet_roam_mode';
+const SCHOLAR_XP_STORAGE_KEY = 'teeex_desk_pet_scholar_xp';
 
 export function useDeskPet({
   compileStatus = 'idle',
@@ -412,6 +469,42 @@ export function useDeskPet({
   const [isLaserActive, setIsLaserActive] = useState<boolean>(false);
   const [laserCoords, setLaserCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
+  // Stage 19: Feline Annoyance Engine
+  const [annoyanceLevel, setAnnoyanceLevel] = useState<number>(0);
+  const [annoyanceReason, setAnnoyanceReason] = useState<string | null>(null);
+
+  // Stage 19: LaTeX Scholar Progression XP
+  const [scholarXp, setScholarXp] = useState<number>(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const saved = window.localStorage.getItem(SCHOLAR_XP_STORAGE_KEY);
+        if (saved) {
+          const val = parseInt(saved, 10);
+          if (!isNaN(val) && val >= 0) return val;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return 0;
+  });
+
+  const addScholarXp = useCallback((amount: number) => {
+    setScholarXp(prev => {
+      const next = prev + amount;
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(SCHOLAR_XP_STORAGE_KEY, next.toString());
+        }
+      } catch {
+        // Ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const scholarInfo = useMemo(() => getScholarLevel(scholarXp), [scholarXp]);
+
   const dragStartRef = useRef<{
     clientX: number;
     clientY: number;
@@ -423,6 +516,7 @@ export function useDeskPet({
     vx: number;
     vy: number;
   } | null>(null);
+  const dragStartTimeRef = useRef<number | null>(null);
 
   // References for active timers
   const stateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -436,6 +530,23 @@ export function useDeskPet({
   const prevCompileStatusRef = useRef<string>(compileStatus);
   const prevLastCompiledAtRef = useRef<number | null | undefined>(lastCompiledAt);
   const isTypingRef = useRef<boolean>(false);
+  const stateRef = useRef<DeskPetActionState>(state);
+  const petTimestampsRef = useRef<number[]>([]);
+  const consecutiveErrorsRef = useRef<number>(0);
+
+  // Synchronize stateRef with current state
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  // Annoyance passive decay: cool down by 10 every 2.5s if left alone
+  useEffect(() => {
+    if (!isEnabled || isPaused || annoyanceLevel <= 0) return;
+    const decayTimer = setInterval(() => {
+      setAnnoyanceLevel(prev => Math.max(0, prev - 10));
+    }, 2500);
+    return () => clearInterval(decayTimer);
+  }, [isEnabled, isPaused, annoyanceLevel]);
 
   // Clear helper
   const clearStateTimer = useCallback(() => {
@@ -744,11 +855,13 @@ export function useDeskPet({
     if (compileStatus === 'success' && (prevStatus === 'compiling' || (lastCompiledAt && lastCompiledAt !== prevTimestamp))) {
       clearStateTimer();
       resetInactivityTimer();
+      consecutiveErrorsRef.current = 0;
 
       if (warningCount > 0) {
         // Warning build: typesetter tape measure inspection
         setState('compile-warning');
         audioEngineRef.current?.playWarningChime();
+        addScholarXp(10);
         stateTimerRef.current = setTimeout(() => {
           setState('idle');
         }, 3200);
@@ -756,6 +869,7 @@ export function useDeskPet({
         // Clean zero-warning compilation: Q.E.D. celebration
         setState('compile-success');
         audioEngineRef.current?.playSuccessChime();
+        addScholarXp(25);
         stateTimerRef.current = setTimeout(() => {
           setState('idle');
         }, 3500);
@@ -766,15 +880,28 @@ export function useDeskPet({
     // C. Compilation resolved to Error
     if (compileStatus === 'error' && (prevStatus === 'compiling' || (lastCompiledAt && lastCompiledAt !== prevTimestamp))) {
       clearStateTimer();
-      setState('compile-fail');
       resetInactivityTimer();
-      audioEngineRef.current?.playAlertBoop();
-      stateTimerRef.current = setTimeout(() => {
-        setState('idle');
-      }, 4500);
+      consecutiveErrorsRef.current = (consecutiveErrorsRef.current || 0) + 1;
+
+      if (consecutiveErrorsRef.current >= 2) {
+        // Feline frustration at consecutive LaTeX errors
+        setAnnoyanceReason('compile_frustration');
+        setAnnoyanceLevel(prev => Math.min(100, prev + 35));
+        setState('facepalm-paw');
+        audioEngineRef.current?.playAlertBoop();
+        stateTimerRef.current = setTimeout(() => {
+          setState('idle');
+        }, 3200);
+      } else {
+        setState('compile-fail');
+        audioEngineRef.current?.playAlertBoop();
+        stateTimerRef.current = setTimeout(() => {
+          setState('idle');
+        }, 4500);
+      }
       return;
     }
-  }, [compileStatus, lastCompiledAt, warningCount, isEnabled, isPaused, clearStateTimer, resetInactivityTimer]);
+  }, [compileStatus, lastCompiledAt, warningCount, isEnabled, isPaused, clearStateTimer, resetInactivityTimer, addScholarXp]);
 
   // Autonomous Waypoint Navigation Stroll
   const triggerRoam = useCallback(() => {
@@ -808,10 +935,12 @@ export function useDeskPet({
       // Perch 3: Vertical Split Pane Divider Line (between editor and PDF)
       // Perch 4: PDF Top-Right Whitespace Margin
       const perchOptions = [
-        { x: Math.round(Math.random() * 240 + 28), y: 36, snapped: true },
-        { x: Math.round(Math.random() * 200 + 40), y: Math.max(36, maxH - 80), snapped: false },
-        { x: Math.round(maxW * 0.5), y: Math.round(Math.random() * (maxH - 240) + 60), snapped: false },
-        { x: 36, y: Math.max(36, maxH - 110), snapped: false },
+        { x: Math.round(Math.random() * 240 + 28), y: 36, snapped: true }, // Dock Right
+        { x: Math.round(maxW * 0.35), y: 36, snapped: true }, // Dock Center-Left
+        { x: Math.round(Math.random() * 200 + 40), y: Math.max(36, maxH - 80), snapped: false }, // Navbar Right
+        { x: Math.round(maxW * 0.45), y: Math.max(36, maxH - 80), snapped: false }, // Navbar Center
+        { x: Math.round(maxW * 0.5), y: Math.round(maxH * 0.7), snapped: false }, // Split-Pane Top
+        { x: Math.round(maxW * 0.5), y: Math.round(maxH * 0.25), snapped: false }, // Split-Pane Bottom
       ];
 
       const chosen = perchOptions[Math.floor(Math.random() * perchOptions.length)];
@@ -836,7 +965,8 @@ export function useDeskPet({
     }
   }, [isEnabled, isPaused, isReducedMotion, isDragging, roamMode, pacingOffset, perchX, perchY, transitionTo]);
 
-  // Stage 15: Dynamic Organic Behavior Scheduler (Every 5–9.5s when idle)
+  // Stage 19: Dynamic Organic Behavior Scheduler (Every 2.0s–4.2s when idle)
+  // Decoupled from `state` dependencies so state transitions never abort or starve the scheduler!
   useEffect(() => {
     if (!isEnabled || isPaused || isReducedMotion) {
       if (organicScheduleTimerRef.current) clearTimeout(organicScheduleTimerRef.current);
@@ -844,59 +974,62 @@ export function useDeskPet({
     }
 
     const scheduleNextBehavior = () => {
-      const delay = 5000 + Math.random() * 4500; // 5000ms - 9500ms
+      const delay = 2000 + Math.random() * 2200; // 2000ms - 4200ms
       organicScheduleTimerRef.current = setTimeout(() => {
-        if (state === 'idle' && !isTypingRef.current && !isDragging && !isLaserActive) {
+        if (stateRef.current === 'idle' && !isTypingRef.current && !isDragging && !isLaserActive) {
           const roll = Math.random();
 
-          if (roll < 0.08) {
-            // 8% Sleepy Nap Yawn
+          if (roll < 0.05) {
             audioEngineRef.current?.playYawnSigh();
             transitionTo('nap-yawn', 2400);
-          } else if (roll < 0.15) {
-            // 7% Playful Belly-Up Flop
+          } else if (roll < 0.10) {
             audioEngineRef.current?.playPurr(1200);
             transitionTo('belly-flop', 2600);
-          } else if (roll < 0.22) {
-            // 7% Rapid Ear Scratch with Hind Paw
+          } else if (roll < 0.15) {
             transitionTo('ear-scratch', 2200);
+          } else if (roll < 0.20) {
+            audioEngineRef.current?.playPurr(1400);
+            transitionTo('knead-dough', 2800);
+          } else if (roll < 0.25) {
+            transitionTo('pounce-prep', 2000);
           } else if (roll < 0.30) {
-            // 8% Peek-a-Boo Hiding behind ledge
-            audioEngineRef.current?.playMeow();
-            transitionTo('peek-a-boo', 2600);
-          } else if (roll < 0.37) {
-            // 7% Playful Cursor Swat
-            audioEngineRef.current?.playMeow();
-            transitionTo('swat-cursor', 1800);
-          } else if (roll < 0.43) {
-            // 6% Knock Coffee Mug Antics
+            audioEngineRef.current?.playPurr(1600);
+            transitionTo('slow-blink', 2800);
+          } else if (roll < 0.35) {
+            audioEngineRef.current?.playPurr(1400);
+            transitionTo('cheek-bunt', 2200);
+          } else if (roll < 0.40) {
+            audioEngineRef.current?.playSlurp();
+            transitionTo('blep', 2600);
+          } else if (roll < 0.45) {
+            audioEngineRef.current?.playSlurp();
+            transitionTo('cello-leg', 2800);
+          } else if (roll < 0.50) {
+            transitionTo('flehmen-sniff', 2400);
+          } else if (roll < 0.55) {
             audioEngineRef.current?.playMugClink();
             transitionTo('knock-mug', 2400);
-          } else if (roll < 0.51) {
-            // 8% Downward Cat Yoga Stretch
+          } else if (roll < 0.60) {
             transitionTo('yoga-stretch', 2200);
-          } else if (roll < 0.59) {
-            // 8% Attentive Face & Paw Wash
-            transitionTo('face-wash', 2200);
           } else if (roll < 0.65) {
-            // 6% Playful Butterfly Batting
+            transitionTo('face-wash', 2200);
+          } else if (roll < 0.70) {
             transitionTo('butterfly-bat', 2400);
-          } else if (roll < 0.71) {
-            // 6% Tail Chase Spin
+          } else if (roll < 0.75) {
             transitionTo('tail-chase', 2000);
-          } else if (roll < 0.78) {
-            // 7% Donald Knuth's TeXbook Celebration
+          } else if (roll < 0.80) {
             audioEngineRef.current?.playSuccessChime();
-            transitionTo('knuth-texbook', 3200);
-          } else if (roll < 0.86) {
-            // 8% Peaceful Loaf Pose
-            transitionTo('loaf', 3800);
+            transitionTo('knuth-texbook', 3000);
+          } else if (roll < 0.85) {
+            transitionTo('loaf', 3600);
           } else if (roll < 0.90) {
-            // 4% \hbox Box Sit Peek
             audioEngineRef.current?.playBoxThud();
             transitionTo('box-sit', 3000);
+          } else if (roll < 0.94) {
+            audioEngineRef.current?.playZoomieWhoosh();
+            transitionTo('midnight-zoomies', 2400);
           } else {
-            // 10% Autonomous Waypoint Stroll
+            // Autonomous Waypoint Stroll
             triggerRoam();
           }
         }
@@ -909,7 +1042,141 @@ export function useDeskPet({
     return () => {
       if (organicScheduleTimerRef.current) clearTimeout(organicScheduleTimerRef.current);
     };
-  }, [isEnabled, isPaused, isReducedMotion, state, isDragging, isLaserActive, transitionTo, triggerRoam]);
+  }, [isEnabled, isPaused, isReducedMotion, isDragging, isLaserActive, transitionTo, triggerRoam]);
+
+  // Stage 19: Feline Annoyance Engine Reaction Trigger
+  const triggerAnnoyanceReaction = useCallback((reason?: string) => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    const currentReason = reason || 'general';
+    setAnnoyanceReason(currentReason);
+    setAnnoyanceLevel(prev => Math.min(100, prev + 35));
+
+    const annoyedStates: { state: DeskPetActionState; duration: number; sound?: () => void }[] = [
+      { state: 'airplane-ears', duration: 2200, sound: () => audioEngineRef.current?.playAlertBoop() },
+      { state: 'annoyed-hiss', duration: 1800, sound: () => audioEngineRef.current?.playHiss() },
+      { state: 'swat-aggressive', duration: 1400, sound: () => audioEngineRef.current?.playAlertBoop() },
+      { state: 'tail-thump', duration: 2400, sound: () => audioEngineRef.current?.playTailThump() },
+      { state: 'cold-shoulder', duration: 3200 },
+      { state: 'facepalm-paw', duration: 2600, sound: () => audioEngineRef.current?.playAlertBoop() },
+      { state: 'paper-shred', duration: 2000, sound: () => audioEngineRef.current?.playTreatCrunch() },
+      { state: 'glare-judge', duration: 3000 },
+      { state: 'dizzy-wobble', duration: 2600 },
+      { state: 'keyboard-sprawl', duration: 3500 },
+      { state: 'hairball-cough', duration: 2400, sound: () => audioEngineRef.current?.playAlertBoop() },
+      { state: 'drama-flop', duration: 2800, sound: () => audioEngineRef.current?.playPurr(800) },
+    ];
+
+    const pick = annoyedStates[Math.floor(Math.random() * annoyedStates.length)];
+    pick.sound?.();
+    transitionTo(pick.state, pick.duration);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  // Stage 19: Authentic Behaviors & Quick Action Triggers
+  const triggerPouncePrep = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    transitionTo('pounce-prep', 2000);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerKneadDough = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playPurr(2000);
+    transitionTo('knead-dough', 3000);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerMidnightZoomies = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playZoomieWhoosh();
+    transitionTo('midnight-zoomies', 2800);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerSlowBlink = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playPurr(1500);
+    transitionTo('slow-blink', 3000);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerCheekBunt = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playPurr(1400);
+    transitionTo('cheek-bunt', 2400);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerCelloLeg = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playSlurp();
+    transitionTo('cello-leg', 3200);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerBlep = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playSlurp();
+    transitionTo('blep', 3000);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerFlehmenSniff = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playAlertBoop();
+    transitionTo('flehmen-sniff', 2800);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerMathZoomies = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playZoomieWhoosh();
+    transitionTo('math-zoomies', 2800);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerLoafWiggle = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playPurr(1200);
+    transitionTo('loaf-wiggle', 2400);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerFocusScholar = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playSingingBowl();
+    transitionTo('focus-scholar', 4000);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
+
+  const triggerQedCelebration = useCallback(() => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    audioEngineRef.current?.playSuccessChime();
+    addScholarXp(25);
+    transitionTo('qed-celebration', 3200);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo, addScholarXp]);
+
+  const playSpecificAnimation = useCallback((anim: DeskPetActionState, durationMs = 2800) => {
+    if (!isEnabled || isPaused) return;
+    resetInactivityTimer();
+    if (anim === 'annoyed-hiss') audioEngineRef.current?.playHiss();
+    else if (anim === 'tail-thump') audioEngineRef.current?.playTailThump();
+    else if (anim === 'midnight-zoomies' || anim === 'math-zoomies') audioEngineRef.current?.playZoomieWhoosh();
+    else if (anim === 'laser-pounce') audioEngineRef.current?.playPounceLeap();
+    else if (anim === 'blep' || anim === 'cello-leg') audioEngineRef.current?.playSlurp();
+    else if (anim === 'focus-scholar') audioEngineRef.current?.playSingingBowl();
+    else if (anim === 'knead-dough' || anim === 'slow-blink' || anim === 'cheek-bunt' || anim === 'loaf-wiggle') audioEngineRef.current?.playPurr(1500);
+    else if (anim === 'knuth-texbook' || anim === 'knuth-check' || anim === 'compile-success' || anim === 'qed-celebration') audioEngineRef.current?.playSuccessChime();
+    else if (anim === 'knock-mug') audioEngineRef.current?.playMugClink();
+    else if (anim === 'box-sit') audioEngineRef.current?.playBoxThud();
+    else if (anim === 'fish-feast') audioEngineRef.current?.playTreatCrunch();
+    else if (anim === 'yarn-chase') audioEngineRef.current?.playYarnChirp();
+    else if (anim === 'laser-chase') audioEngineRef.current?.playLaserChirp();
+    else if (anim === 'nap-yawn') audioEngineRef.current?.playYawnSigh();
+
+    transitionTo(anim, durationMs);
+  }, [isEnabled, isPaused, resetInactivityTimer, transitionTo]);
 
   // Stage 15: Interactive Toys & Quick Action Triggers
   const triggerYarnChase = useCallback(() => {
@@ -1000,15 +1267,27 @@ export function useDeskPet({
 
   const triggerPet = useCallback(() => {
     if (!isEnabled || isPaused) return;
-    setPetCount(prev => prev + 1);
     resetInactivityTimer();
+
+    const now = Date.now();
+    petTimestampsRef.current = petTimestampsRef.current.filter(t => now - t < 5000);
+    petTimestampsRef.current.push(now);
+
+    if (petTimestampsRef.current.length >= 8) {
+      // Feline overstimulation / petting aggression
+      petTimestampsRef.current = [];
+      triggerAnnoyanceReaction('over_petting');
+      return;
+    }
+
+    setPetCount(prev => prev + 1);
     audioEngineRef.current?.playPurr();
     if (state === 'sleep' || state === 'loaf') {
       wakeUp();
     }
-  }, [isEnabled, isPaused, state, wakeUp, resetInactivityTimer]);
+  }, [isEnabled, isPaused, state, wakeUp, resetInactivityTimer, triggerAnnoyanceReaction]);
 
-  // Pointer move tracking for Laser Pointer Mode
+  // Stage 19: Real-Time Active Laser Chasing Kinematics Loop
   useEffect(() => {
     if (!isLaserActive || !isEnabled || isPaused) return;
 
@@ -1017,10 +1296,53 @@ export function useDeskPet({
     };
 
     window.addEventListener('pointermove', handlePointerMove, { passive: true });
+
+    const chaseInterval = setInterval(() => {
+      if (!isLaserActive || isDragging) return;
+
+      const targetX = typeof window !== 'undefined'
+        ? Math.max(20, Math.min(window.innerWidth - 60, window.innerWidth - laserCoords.x - 30))
+        : 100;
+      const targetY = typeof window !== 'undefined'
+        ? Math.max(20, Math.min(window.innerHeight - 60, window.innerHeight - laserCoords.y - 20))
+        : 40;
+
+      const dx = targetX - perchX;
+      const dy = targetY - perchY;
+      const dist = Math.hypot(dx, dy);
+
+      if (dx > 10) setDirection('left');
+      else if (dx < -10) setDirection('right');
+
+      if (dist > 80) {
+        // Active sprint towards moving red dot
+        const speed = Math.min(dist, 55);
+        const nextX = perchX + (dx / dist) * speed;
+        const nextY = perchY + (dy / dist) * speed;
+        setPerchX(Math.round(nextX));
+        setPerchY(Math.round(nextY));
+        setIsSnappedToDock(false);
+
+        setState(cur => (cur === 'laser-pounce' || cur === 'pounce-prep' ? cur : 'laser-chase'));
+      } else if (dist <= 80 && dist > 15) {
+        // Pre-pounce butt wiggle
+        setState('pounce-prep');
+        setTimeout(() => {
+          if (!isLaserActive) return;
+          // Pounce leap slam directly onto the dot
+          setPerchX(targetX);
+          setPerchY(targetY);
+          setState('laser-pounce');
+          audioEngineRef.current?.playPounceLeap();
+        }, 450);
+      }
+    }, 110);
+
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
+      clearInterval(chaseInterval);
     };
-  }, [isLaserActive, isEnabled, isPaused]);
+  }, [isLaserActive, isEnabled, isPaused, laserCoords, perchX, perchY, isDragging]);
 
   // 2D Pointer Drag, Ledge Snap & Shimeji-Style Fling Physics
   const startDrag = useCallback((e: React.PointerEvent) => {
@@ -1036,6 +1358,7 @@ export function useDeskPet({
     clearStateTimer();
     setIsDragging(true);
     setState('lifted-scruff');
+    dragStartTimeRef.current = Date.now();
 
     dragStartRef.current = {
       clientX: e.clientX,
@@ -1090,6 +1413,12 @@ export function useDeskPet({
       setIsDragging(false);
       setDragTilt(0);
 
+      if (dragStartTimeRef.current && Date.now() - dragStartTimeRef.current > 2500) {
+        // Drag abuse: held by scruff for too long triggers dizzy/annoyance
+        triggerAnnoyanceReaction('drag_abuse');
+      }
+      dragStartTimeRef.current = null;
+
       const dragInfo = dragStartRef.current;
       dragStartRef.current = null;
 
@@ -1134,7 +1463,7 @@ export function useDeskPet({
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
     window.addEventListener('pointercancel', handlePointerUp);
-  }, [isReducedMotion, perchX, perchY, clearStateTimer]);
+  }, [isReducedMotion, perchX, perchY, clearStateTimer, triggerAnnoyanceReaction]);
 
   // Cleanup on unmount or when disabled
   useEffect(() => {
@@ -1219,5 +1548,27 @@ export function useDeskPet({
     triggerEarScratch,
     triggerNapYawn,
     triggerRoam,
+    // Stage 19 additions:
+    annoyanceLevel,
+    annoyanceReason,
+    scholarXp,
+    scholarLevel: scholarInfo.level,
+    scholarTitle: scholarInfo.title,
+    scholarProgress: scholarInfo.progress,
+    addScholarXp,
+    playSpecificAnimation,
+    triggerAnnoyanceReaction,
+    triggerPouncePrep,
+    triggerKneadDough,
+    triggerMidnightZoomies,
+    triggerSlowBlink,
+    triggerCheekBunt,
+    triggerCelloLeg,
+    triggerBlep,
+    triggerFlehmenSniff,
+    triggerMathZoomies,
+    triggerLoafWiggle,
+    triggerFocusScholar,
+    triggerQedCelebration,
   };
 }

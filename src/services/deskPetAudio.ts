@@ -560,6 +560,230 @@ export class DeskPetAudioEngine {
   }
 
   /**
+   * Feline Annoyed Hiss: Bandpass-filtered high-frequency white noise hiss with sharp rise.
+   */
+  public playHiss(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const sampleRate = ctx.sampleRate;
+      const duration = 0.42;
+      const bufferSize = Math.floor(sampleRate * duration);
+      const buffer = ctx.createBuffer(1, bufferSize, sampleRate);
+      const data = buffer.getChannelData(0);
+
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * 0.4;
+      }
+
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(4200, ctx.currentTime);
+      filter.Q.setValueAtTime(2.2, ctx.currentTime);
+
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.getDestination(ctx));
+
+      noise.start(now);
+      noise.stop(now + duration);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Heavy Desk Tail Thump: Low-frequency wooden desk resonance.
+   */
+  public playTailThump(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(95, now);
+      osc.frequency.exponentialRampToValueAtTime(32, now + 0.16);
+
+      gain.gain.setValueAtTime(0.26, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+
+      osc.connect(gain);
+      gain.connect(this.getDestination(ctx));
+
+      osc.start(now);
+      osc.stop(now + 0.18);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Airborne Pounce Leap & Impact: Fast frequency sweep followed by padded paw landing.
+   */
+  public playPounceLeap(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      // Spring leap whoosh
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(180, now);
+      osc.frequency.linearRampToValueAtTime(540, now + 0.12);
+      osc.frequency.exponentialRampToValueAtTime(120, now + 0.28);
+
+      gain.gain.setValueAtTime(0.14, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+      osc.connect(gain);
+      gain.connect(this.getDestination(ctx));
+      osc.start(now);
+      osc.stop(now + 0.32);
+
+      // Padded paw slam landing impact
+      const landingOsc = ctx.createOscillator();
+      const landingGain = ctx.createGain();
+      landingOsc.type = 'sine';
+      landingOsc.frequency.setValueAtTime(140, now + 0.22);
+      landingOsc.frequency.exponentialRampToValueAtTime(45, now + 0.38);
+
+      landingGain.gain.setValueAtTime(0.2, now + 0.22);
+      landingGain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+
+      landingOsc.connect(landingGain);
+      landingGain.connect(this.getDestination(ctx));
+      landingOsc.start(now + 0.22);
+      landingOsc.stop(now + 0.4);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Midnight Zoomies Whoosh: Doppler rush sound effect.
+   */
+  public playZoomieWhoosh(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(320, now);
+      osc.frequency.linearRampToValueAtTime(680, now + 0.15);
+      osc.frequency.exponentialRampToValueAtTime(160, now + 0.45);
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(900, now);
+      filter.frequency.linearRampToValueAtTime(1800, now + 0.15);
+      filter.frequency.exponentialRampToValueAtTime(400, now + 0.45);
+
+      gain.gain.setValueAtTime(0.01, now);
+      gain.gain.linearRampToValueAtTime(0.16, now + 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.getDestination(ctx));
+
+      osc.start(now);
+      osc.stop(now + 0.48);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Tongue Blep / Groom Slurp: Tiny playful wet chirp.
+   */
+  public playSlurp(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(420, now);
+      osc.frequency.linearRampToValueAtTime(620, now + 0.05);
+      osc.frequency.exponentialRampToValueAtTime(260, now + 0.12);
+
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+      osc.connect(gain);
+      gain.connect(this.getDestination(ctx));
+
+      osc.start(now);
+      osc.stop(now + 0.14);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Singing Bowl Harmonic Resonance for Scholar / Zen Focus Mode.
+   */
+  public playSingingBowl(): void {
+    if (this.isMuted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const freqs = [432, 864, 1296]; // Pure harmonic Pythagorean tuning
+
+      freqs.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now);
+
+        const initialVol = idx === 0 ? 0.22 : idx === 1 ? 0.11 : 0.05;
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(initialVol, now + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0005, now + 2.2);
+
+        osc.connect(gain);
+        gain.connect(this.getDestination(ctx));
+
+        osc.start(now);
+        osc.stop(now + 2.3);
+      });
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
    * Suspend context on tab backgrounding.
    */
   public handleVisibilityChange(hidden: boolean): void {
@@ -571,3 +795,4 @@ export class DeskPetAudioEngine {
     }
   }
 }
+

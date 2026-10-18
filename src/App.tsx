@@ -1893,6 +1893,10 @@ export function App() {
           {...deskPet}
           dockCollapsed={diagnostics.length === 0}
           onToggleEnabled={deskPet.toggleEnabled}
+          onInsertFormula={(formula) => {
+            handleInsertCode(`$${formula}$`);
+            setToast(`Inserted $${formula}$ from TeXCat dream!`);
+          }}
         />
       )}
 

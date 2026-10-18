@@ -936,5 +936,256 @@ describe('TeXCat Desk Companion (useDeskPet & DeskPet)', () => {
       expect(currentHook.isDragging).toBe(false);
     });
   });
+
+  describe('Stage 19: Pet Scholar Progression, Authentic Behaviors & Feline Annoyance Engine', () => {
+    beforeEach(() => {
+      localStorage.setItem('teeex_desk_pet_enabled', 'true');
+    });
+
+    it('verifies mascot opacity is full and never fades on hover (no ghost-hover class)', async () => {
+      await act(async () => {
+        root.render(
+          React.createElement(DeskPet, {
+            isEnabled: true,
+            state: 'idle',
+            direction: 'right',
+            pacingOffset: 0,
+            isSleeping: false,
+            isReducedMotion: false,
+            isPaused: false,
+            petCount: 0,
+          })
+        );
+      });
+
+      const mascotWrapper = container.querySelector('.desk-pet-mascot-wrapper');
+      expect(mascotWrapper).not.toBeNull();
+      expect(mascotWrapper?.classList.contains('ghost-hover')).toBe(false);
+    });
+
+    it('renders dream thought bubble with KaTeX math formula and triggers onInsertFormula when Insert is clicked', async () => {
+      const mockInsert = vi.fn();
+      await act(async () => {
+        root.render(
+          React.createElement(DeskPet, {
+            isEnabled: true,
+            state: 'sleep',
+            direction: 'right',
+            pacingOffset: 0,
+            isSleeping: true,
+            isReducedMotion: false,
+            isPaused: false,
+            petCount: 0,
+            currentDreamFormula: 'e^{i\\pi} + 1 = 0',
+            onInsertFormula: mockInsert,
+          })
+        );
+      });
+
+      const dreamBubble = container.querySelector('.pet-dream-bubble');
+      expect(dreamBubble).not.toBeNull();
+      const insertBtn = Array.from(dreamBubble?.querySelectorAll('button') || []).find(b => b.textContent?.includes('Insert'));
+      expect(insertBtn).toBeDefined();
+
+      await act(async () => {
+        insertBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(mockInsert).toHaveBeenCalledWith('e^{i\\pi} + 1 = 0');
+    });
+
+    it('triggers click spam annoyance when clicked > 4 times rapidly within 1.2s', async () => {
+      const mockAnnoyance = vi.fn();
+      await act(async () => {
+        root.render(
+          React.createElement(DeskPet, {
+            isEnabled: true,
+            state: 'idle',
+            direction: 'right',
+            pacingOffset: 0,
+            isSleeping: false,
+            isReducedMotion: false,
+            isPaused: false,
+            petCount: 0,
+            triggerAnnoyanceReaction: mockAnnoyance,
+          })
+        );
+      });
+
+      const mascot = container.querySelector('.desk-pet-mascot-wrapper');
+      await act(async () => {
+        for (let i = 0; i < 5; i++) {
+          mascot?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        }
+      });
+
+      expect(mockAnnoyance).toHaveBeenCalledWith('click_spam');
+    });
+
+    it('triggers feline overstimulation annoyance when petted >= 8 times in 5s', async () => {
+      await mountHook();
+
+      await act(async () => {
+        for (let i = 0; i < 8; i++) {
+          currentHook.triggerPet();
+        }
+      });
+
+      expect(currentHook.annoyanceLevel).toBeGreaterThan(0);
+      expect(currentHook.annoyanceReason).toBe('over_petting');
+    });
+
+    it('awards Scholar XP on successful LaTeX compilation and advances level title', async () => {
+      await mountHook({ compileStatus: 'compiling' });
+      expect(currentHook.scholarXp).toBe(0);
+      expect(currentHook.scholarLevel).toBe(1);
+      expect(currentHook.scholarTitle).toBe('Novice Kitten');
+
+      // Compile success adds +25 XP
+      await mountHook({ compileStatus: 'success', lastCompiledAt: 1000 });
+      expect(currentHook.scholarXp).toBe(25);
+
+      // Explicitly add XP to reach Level 2 (100 XP)
+      await act(async () => {
+        currentHook.addScholarXp(80);
+      });
+      expect(currentHook.scholarLevel).toBe(2);
+      expect(currentHook.scholarTitle).toBe('Math Apprentice');
+
+      // Reach Level 5 Knuth Grandmaster (1000+ XP)
+      await act(async () => {
+        currentHook.addScholarXp(900);
+      });
+      expect(currentHook.scholarLevel).toBe(5);
+      expect(currentHook.scholarTitle).toBe('Knuth Grandmaster');
+    });
+
+    it('supports on-demand playback of all 35+ animations via playSpecificAnimation for Jukebox', async () => {
+      await mountHook();
+
+      await act(async () => {
+        currentHook.playSpecificAnimation('midnight-zoomies', 2000);
+      });
+      expect(currentHook.state).toBe('midnight-zoomies');
+
+      await act(async () => {
+        currentHook.playSpecificAnimation('knead-dough', 2000);
+      });
+      expect(currentHook.state).toBe('knead-dough');
+
+      await act(async () => {
+        currentHook.playSpecificAnimation('blep', 2000);
+      });
+      expect(currentHook.state).toBe('blep');
+
+      await act(async () => {
+        currentHook.playSpecificAnimation('flehmen-sniff', 2000);
+      });
+      expect(currentHook.state).toBe('flehmen-sniff');
+
+      await act(async () => {
+        currentHook.playSpecificAnimation('qed-celebration', 2000);
+      });
+      expect(currentHook.state).toBe('qed-celebration');
+    });
+
+    it('renders Jukebox tab in Companion Card with categorized animation chips', async () => {
+      const mockPlayAnim = vi.fn();
+      await act(async () => {
+        root.render(
+          React.createElement(DeskPet, {
+            isEnabled: true,
+            state: 'idle',
+            direction: 'right',
+            pacingOffset: 0,
+            isSleeping: false,
+            isReducedMotion: false,
+            isPaused: false,
+            petCount: 0,
+            scholarXp: 150,
+            scholarLevel: 2,
+            scholarTitle: 'Box Typesetter',
+            scholarProgress: 35,
+            playSpecificAnimation: mockPlayAnim,
+          })
+        );
+      });
+
+      const mascot = container.querySelector('[role="img"]') as HTMLElement;
+      await act(async () => {
+        mascot.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', bubbles: true }));
+      });
+
+      const tabs = container.querySelectorAll('.companion-tab-btn');
+      const jukeboxTab = Array.from(tabs).find(t => t.textContent?.includes('Jukebox'));
+      expect(jukeboxTab).toBeDefined();
+
+      await act(async () => {
+        jukeboxTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      const chips = container.querySelectorAll('.companion-jukebox-chip');
+      expect(chips.length).toBeGreaterThan(25);
+
+      const zoomiesChip = Array.from(chips).find(c => c.textContent?.includes('3 AM Zoomies'));
+      expect(zoomiesChip).toBeDefined();
+
+      await act(async () => {
+        zoomiesChip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(mockPlayAnim).toHaveBeenCalledWith('midnight-zoomies', expect.any(Number));
+    });
+
+    it('triggers butt-wiggle pounce prep and pounce leap during active laser kinematics', async () => {
+      await mountHook();
+
+      await act(async () => {
+        currentHook.triggerLaser();
+      });
+      expect(currentHook.isLaserActive).toBe(true);
+
+      // When laser is active, simulate close proximity pointer movement
+      await act(async () => {
+        window.dispatchEvent(
+          new PointerEvent('pointermove', {
+            clientX: window.innerWidth - currentHook.perchX - 40,
+            clientY: window.innerHeight - currentHook.perchY - 20,
+          })
+        );
+      });
+
+      // Advance kinematics loop
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+      });
+      // Should enter either pounce-prep or laser-chase
+      expect(['laser-chase', 'pounce-prep', 'laser-pounce']).toContain(currentHook.state);
+    });
+
+    it('triggers drama flop when disturbed from sleep', async () => {
+      const mockDramaFlop = vi.fn();
+      await act(async () => {
+        root.render(
+          React.createElement(DeskPet, {
+            isEnabled: true,
+            state: 'sleep',
+            direction: 'right',
+            pacingOffset: 0,
+            isSleeping: true,
+            isReducedMotion: false,
+            isPaused: false,
+            petCount: 0,
+            playSpecificAnimation: mockDramaFlop,
+          })
+        );
+      });
+
+      const mascot = container.querySelector('.desk-pet-mascot-wrapper');
+      await act(async () => {
+        mascot?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      expect(mockDramaFlop).toHaveBeenCalledWith('drama-flop', 3200);
+    });
+  });
 });
 

@@ -2012,9 +2012,10 @@ p.latex-force-indent {
   --pet-chest-fill: #e2e8f0;
 }
 
-/* Container Isolation & Compositor Containment */
+/* Container Isolation & Compositor Containment - overflow visible to prevent particle and animation clipping */
 .desk-pet-container {
-  contain: layout style paint;
+  overflow: visible;
+  contain: layout style;
 }
 
 /* Paused state when document.hidden is active */
@@ -2065,7 +2066,11 @@ p.latex-force-indent {
   pointer-events: auto;
 }
 
-/* Base Mascot Hover & Focus */
+/* Base Mascot Hover & Focus - Full Opacity Guaranteed (Never Fades on Hover or Click) */
+.desk-pet-mascot-wrapper {
+  opacity: 1 !important;
+}
+
 .desk-pet-mascot-wrapper:focus-visible {
   outline: 2px solid var(--accent-cyan, #38bdf8);
   outline-offset: 4px;
@@ -2073,14 +2078,9 @@ p.latex-force-indent {
 }
 
 .desk-pet-mascot-wrapper:hover .texcat-rig {
-  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.4));
+  filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.5));
 }
 
-/* Subtle hover ghost transparency so underlying text is never blocked */
-.desk-pet-mascot-wrapper.ghost-hover:hover {
-  opacity: 0.35;
-  transition: opacity 0.2s ease;
-}
 
 /* Compact Companion Card Popover */
 .texcat-companion-card {
@@ -2456,41 +2456,45 @@ p.latex-force-indent {
   }
 }
 
-/* Floating Hearts on Petting */
+/* Floating Hearts on Petting - Unclipped & Soaring */
 .pet-heart-particles {
   position: absolute;
-  top: -8px;
+  top: -12px;
   left: 50%;
   transform: translateX(-50%);
-  width: 48px;
-  height: 28px;
+  width: 64px;
+  height: 120px;
+  overflow: visible;
   pointer-events: none;
 }
 
 .floating-heart {
   position: absolute;
   color: #f43f5e;
-  font-size: 14px;
-  animation: floatHeart 1.2s ease-out forwards;
+  font-size: 15px;
+  animation: floatHeart 1.4s ease-out forwards;
+  filter: drop-shadow(0 2px 6px rgba(244, 63, 94, 0.45));
 }
 
-.heart-1 { left: 4px; animation-delay: 0s; }
-.heart-2 { left: 18px; animation-delay: 0.15s; font-size: 16px; }
-.heart-3 { left: 32px; animation-delay: 0.3s; }
+.heart-1 { left: 2px; animation-delay: 0s; font-size: 14px; }
+.heart-2 { left: 22px; animation-delay: 0.14s; font-size: 18px; }
+.heart-3 { left: 42px; animation-delay: 0.28s; font-size: 15px; }
 
 @keyframes floatHeart {
-  0% { transform: translateY(0) scale(0.6); opacity: 0; }
-  30% { opacity: 1; }
-  100% { transform: translateY(-28px) scale(1.2); opacity: 0; }
+  0% { transform: translateY(0) scale(0.6) rotate(-8deg); opacity: 0; }
+  25% { opacity: 1; transform: translateY(-18px) scale(1.15) rotate(4deg); }
+  60% { opacity: 0.95; transform: translateY(-42px) scale(1.25) rotate(-6deg); }
+  100% { transform: translateY(-68px) scale(1.3) rotate(8deg); opacity: 0; }
 }
 
 /* Floating Zzz during Sleep */
 .pet-sleep-particles {
   position: absolute;
-  top: -6px;
-  right: 6px;
-  width: 32px;
-  height: 28px;
+  top: -10px;
+  right: 4px;
+  width: 48px;
+  height: 90px;
+  overflow: visible;
   pointer-events: none;
 }
 
@@ -2500,16 +2504,17 @@ p.latex-force-indent {
   font-weight: 700;
   font-family: var(--font-mono, monospace);
   animation: floatZ 2.4s ease-in-out infinite;
+  filter: drop-shadow(0 2px 6px rgba(168, 85, 247, 0.45));
 }
 
-.z-1 { font-size: 11px; top: 0; right: 0; animation-delay: 0s; }
-.z-2 { font-size: 14px; top: -10px; right: 8px; animation-delay: 0.8s; }
-.z-3 { font-size: 17px; top: -20px; right: 16px; animation-delay: 1.6s; }
+.z-1 { font-size: 12px; top: 0; right: 0; animation-delay: 0s; }
+.z-2 { font-size: 15px; top: -14px; right: 10px; animation-delay: 0.8s; }
+.z-3 { font-size: 18px; top: -28px; right: 20px; animation-delay: 1.6s; }
 
 @keyframes floatZ {
   0% { transform: translateY(0) scale(0.7); opacity: 0; }
-  35% { opacity: 0.9; }
-  100% { transform: translateY(-22px) translateX(-8px) scale(1.15); opacity: 0; }
+  35% { opacity: 0.95; }
+  100% { transform: translateY(-46px) translateX(-16px) scale(1.2); opacity: 0; }
 }
 
 /* Floating Sparkles on Compile Success */
@@ -2518,8 +2523,9 @@ p.latex-force-indent {
   top: -14px;
   left: 50%;
   transform: translateX(-50%);
-  width: 48px;
-  height: 28px;
+  width: 64px;
+  height: 90px;
+  overflow: visible;
   pointer-events: none;
 }
 
@@ -2527,16 +2533,17 @@ p.latex-force-indent {
   position: absolute;
   color: #38bdf8;
   animation: floatSparkle 1.8s ease-out infinite;
+  filter: drop-shadow(0 2px 6px rgba(56, 189, 248, 0.5));
 }
 
-.sparkle-1 { left: -16px; font-size: 14px; animation-delay: 0s; color: #38bdf8; }
-.sparkle-2 { left: 0px; font-size: 16px; animation-delay: 0.4s; color: #f59e0b; }
-.sparkle-3 { left: 16px; font-size: 12px; animation-delay: 0.8s; color: #38bdf8; }
+.sparkle-1 { left: -18px; font-size: 15px; animation-delay: 0s; color: #38bdf8; }
+.sparkle-2 { left: 4px; font-size: 18px; animation-delay: 0.4s; color: #f59e0b; }
+.sparkle-3 { left: 24px; font-size: 14px; animation-delay: 0.8s; color: #38bdf8; }
 
 @keyframes floatSparkle {
   0% { transform: translateY(0) scale(0.5) rotate(0deg); opacity: 0; }
   40% { opacity: 1; }
-  100% { transform: translateY(-24px) scale(1.1) rotate(90deg); opacity: 0; }
+  100% { transform: translateY(-48px) scale(1.15) rotate(120deg); opacity: 0; }
 }
 
 /* Rolling Cyan Yarn Ball */
@@ -2935,6 +2942,385 @@ p.latex-force-indent {
   0% { transform: rotate(-5deg); }
   100% { transform: rotate(24deg); }
 }
+
+/* 23. Feline Annoyance Engine Animations */
+.texcat-rig.state-airplane-ears {
+  animation: pet-airplane-ears 1.8s ease-in-out forwards;
+}
+@keyframes pet-airplane-ears {
+  0%, 100% { transform: translateY(0); }
+  20% { transform: translateY(2px) scale(1.02, 0.98); }
+  50% { transform: translateY(3px) scale(1.04, 0.96); }
+}
+
+.texcat-rig.state-annoyed-hiss {
+  animation: pet-hiss-arch 1.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+@keyframes pet-hiss-arch {
+  0%, 100% { transform: scale(1) translateY(0); }
+  15% { transform: scale(0.96, 1.14) translateY(-6px); }
+  40% { transform: scale(0.94, 1.16) translateY(-8px) rotate(-2deg); }
+  75% { transform: scale(1.02, 0.98) translateY(1px); }
+}
+
+.texcat-rig.state-swat-aggressive {
+  animation: pet-swat-double 1.2s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+@keyframes pet-swat-double {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  15% { transform: translateY(-4px) rotate(-14deg) scale(1.08); }
+  35% { transform: translateY(-16px) rotate(-22deg) scale(1.15); }
+  55% { transform: translateY(-3px) rotate(-6deg); }
+  75% { transform: translateY(-14px) rotate(-18deg) scale(1.12); }
+}
+
+.texcat-rig.state-tail-thump {
+  animation: pet-loaf-breathe 2s ease-in-out infinite;
+}
+.texcat-rig.state-tail-thump .texcat-tail {
+  animation: pet-tail-heavy-thump 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+@keyframes pet-tail-heavy-thump {
+  0% { transform: rotate(24deg) translateY(-8px); }
+  60% { transform: rotate(-10deg) translateY(6px); }
+  80% { transform: rotate(-6deg) translateY(4px); }
+  100% { transform: rotate(24deg) translateY(-8px); }
+}
+
+.texcat-rig.state-cold-shoulder {
+  animation: pet-cold-turn 3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes pet-cold-turn {
+  0% { transform: rotate(0deg); }
+  20% { transform: rotateY(180deg) scale(0.96); }
+  85% { transform: rotateY(180deg) scale(0.96); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+.texcat-rig.state-facepalm-paw {
+  animation: pet-facepalm-tilt 2.4s ease-in-out forwards;
+}
+@keyframes pet-facepalm-tilt {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  20%, 75% { transform: rotate(-8deg) translateY(2px) scale(0.98); }
+}
+
+.texcat-rig.state-paper-shred {
+  animation: pet-paper-fury 1.8s ease-in-out forwards;
+}
+@keyframes pet-paper-fury {
+  0%, 100% { transform: translateY(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateY(-4px) rotate(-6deg) scale(1.05); }
+  20%, 40%, 60%, 80% { transform: translateY(-2px) rotate(6deg) scale(0.97); }
+}
+
+.texcat-rig.state-glare-judge {
+  animation: pet-judge-slow 3s ease-in-out forwards;
+}
+@keyframes pet-judge-slow {
+  0%, 100% { transform: scale(1) translateY(0); }
+  30%, 70% { transform: scale(1.03, 0.97) translateY(1px); }
+}
+
+.texcat-rig.state-dizzy-wobble {
+  animation: pet-dizzy-sway 2.6s ease-in-out forwards;
+}
+@keyframes pet-dizzy-sway {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  15% { transform: rotate(14deg) translateY(-2px); }
+  35% { transform: rotate(-14deg) translateY(-2px); }
+  55% { transform: rotate(10deg) translateY(1px); }
+  75% { transform: rotate(-8deg) translateY(0); }
+}
+
+.texcat-rig.state-keyboard-sprawl {
+  animation: pet-sprawl-flat 3.5s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+@keyframes pet-sprawl-flat {
+  0%, 100% { transform: scale(1) translateY(0); }
+  20%, 85% { transform: scale(1.22, 0.72) translateY(8px); }
+}
+
+.texcat-rig.state-hairball-cough {
+  animation: pet-hairball-heave 2.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+@keyframes pet-hairball-heave {
+  0%, 100% { transform: scale(1) translateY(0); }
+  15%, 35%, 55% { transform: scale(1.12, 0.88) translateY(4px); }
+  25%, 45%, 65% { transform: scale(0.9, 1.15) translateY(-5px); }
+  80% { transform: scale(1.06, 0.94) translateY(2px); }
+}
+
+.texcat-rig.state-drama-flop {
+  animation: pet-drama-collapse 2.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+@keyframes pet-drama-collapse {
+  0% { transform: rotate(0deg) translateY(0); }
+  25% { transform: rotate(-35deg) translateY(-10px) scale(1.08); }
+  45% { transform: rotate(-90deg) translateY(8px) scale(1.04); }
+  80% { transform: rotate(-90deg) translateY(8px) scale(1.04); }
+  100% { transform: rotate(0deg) translateY(0) scale(1); }
+}
+
+/* 24. Authentic Feline Behaviors */
+.texcat-rig.state-pounce-prep {
+  animation: pet-butt-wiggle 0.35s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite alternate;
+}
+@keyframes pet-butt-wiggle {
+  0% { transform: translateY(3px) scale(1.06, 0.94) rotate(-6deg) translateX(-4px); }
+  100% { transform: translateY(3px) scale(1.06, 0.94) rotate(6deg) translateX(4px); }
+}
+
+.texcat-rig.state-laser-pounce {
+  animation: pet-laser-pounce-leap 1.1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes pet-laser-pounce-leap {
+  0% { transform: translateY(4px) scale(1.1, 0.9); }
+  30% { transform: translateY(-28px) scale(0.92, 1.25) rotate(-12deg); }
+  65% { transform: translateY(-34px) scale(0.9, 1.28) rotate(-6deg); }
+  85% { transform: translateY(2px) scale(1.18, 0.82) rotate(0deg); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.texcat-rig.state-flehmen-sniff {
+  animation: pet-flehmen-grimace 2.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+@keyframes pet-flehmen-grimace {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  20%, 75% { transform: rotate(8deg) translateY(-3px) scale(1.03); }
+}
+
+.texcat-rig.state-knead-dough {
+  animation: pet-knead-body 0.6s ease-in-out infinite alternate;
+}
+@keyframes pet-knead-body {
+  0% { transform: translateY(0) rotate(-2deg); }
+  100% { transform: translateY(2px) rotate(2deg); }
+}
+
+.texcat-rig.state-midnight-zoomies {
+  animation: pet-zoomies-sprint 0.24s linear infinite alternate;
+}
+@keyframes pet-zoomies-sprint {
+  0% { transform: translateY(0) rotate(-6deg) scale(1.08, 0.92); }
+  100% { transform: translateY(-8px) rotate(6deg) scale(0.92, 1.08); }
+}
+
+.texcat-rig.state-slow-blink {
+  animation: pet-slow-blink-body 2.8s ease-in-out forwards;
+}
+@keyframes pet-slow-blink-body {
+  0%, 100% { transform: translateY(0) scale(1); }
+  30%, 70% { transform: translateY(1px) scale(1.02, 0.98); }
+}
+
+.texcat-rig.state-cheek-bunt {
+  animation: pet-cheek-rub 2.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+@keyframes pet-cheek-rub {
+  0%, 100% { transform: rotate(0deg) translateX(0); }
+  30% { transform: rotate(14deg) translateX(5px) scale(1.04); }
+  60% { transform: rotate(18deg) translateX(7px) scale(1.06); }
+}
+
+.texcat-rig.state-cello-leg {
+  animation: pet-cello-pose 3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes pet-cello-pose {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  20%, 80% { transform: rotate(-12deg) translateY(2px) scale(1.03); }
+}
+
+.texcat-rig.state-blep {
+  animation: pet-derp-gaze 3s ease-in-out forwards;
+}
+@keyframes pet-derp-gaze {
+  0%, 100% { transform: rotate(0deg); }
+  25%, 75% { transform: rotate(4deg) translateY(-1px); }
+}
+
+.texcat-rig.state-math-zoomies {
+  animation: pet-math-zoomies-run 0.28s ease-in-out infinite alternate;
+}
+@keyframes pet-math-zoomies-run {
+  0% { transform: translateY(0) rotate(-8deg) scale(1.05); }
+  100% { transform: translateY(-7px) rotate(8deg) scale(0.95); }
+}
+
+.texcat-rig.state-loaf-wiggle {
+  animation: pet-loaf-settle 0.45s ease-in-out infinite alternate;
+}
+@keyframes pet-loaf-settle {
+  0% { transform: scale(1.04, 0.96) translateX(-2px); }
+  100% { transform: scale(1.04, 0.96) translateX(2px); }
+}
+
+.texcat-rig.state-focus-scholar {
+  animation: pet-scholar-float 3.2s ease-in-out infinite;
+}
+@keyframes pet-scholar-float {
+  0%, 100% { transform: translateY(0) scale(1); filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.4)); }
+  50% { transform: translateY(-4px) scale(1.02); filter: drop-shadow(0 0 16px rgba(168, 85, 247, 0.6)); }
+}
+
+.texcat-rig.state-qed-celebration {
+  animation: pet-qed-victory 2.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes pet-qed-victory {
+  0%, 100% { transform: translateY(0) scale(1); }
+  20% { transform: translateY(-16px) scale(1.15) rotate(10deg); }
+  40% { transform: translateY(-22px) scale(1.2) rotate(-8deg); }
+  60% { transform: translateY(-14px) scale(1.1) rotate(6deg); }
+  80% { transform: translateY(-4px) scale(1.04); }
+}
+
+/* Active Real-Time Laser Pointer Target Indicator & Dot */
+.pet-laser-target-dot {
+  position: fixed;
+  width: 14px;
+  height: 14px;
+  background: radial-gradient(circle, #ff2e63 0%, #ff0055 70%, rgba(255, 0, 85, 0) 100%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 99999;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 14px 4px rgba(255, 0, 85, 0.85), 0 0 28px 8px rgba(255, 46, 99, 0.45);
+  animation: laserPulseDot 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes laserPulseDot {
+  0% { transform: translate(-50%, -50%) scale(0.85); opacity: 0.85; }
+  100% { transform: translate(-50%, -50%) scale(1.25); opacity: 1; }
+}
+
+.pet-laser-ring {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 30px;
+  height: 30px;
+  border: 1px dashed rgba(255, 75, 110, 0.8);
+  border-radius: 50%;
+  animation: laserRingSpin 3s linear infinite;
+}
+
+@keyframes laserRingSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Companion Card Jukebox, XP & Annoyance styles */
+.companion-jukebox-container {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+  margin-top: 6px;
+}
+
+.companion-jukebox-container::-webkit-scrollbar {
+  width: 4px;
+}
+.companion-jukebox-container::-webkit-scrollbar-thumb {
+  background: var(--border-subtle, rgba(56, 189, 248, 0.3));
+  border-radius: 4px;
+}
+
+.companion-jukebox-section {
+  margin-bottom: 8px;
+}
+
+.companion-jukebox-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-cyan, #38bdf8);
+  margin-bottom: 4px;
+}
+
+.companion-jukebox-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.companion-jukebox-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  font-size: 10px;
+  color: var(--text-primary, #f8fafc);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  text-align: left;
+}
+
+.companion-jukebox-chip:hover {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.4);
+  transform: translateY(-1px);
+}
+
+.companion-jukebox-chip.is-active {
+  background: rgba(56, 189, 248, 0.3);
+  border-color: var(--accent-cyan, #38bdf8);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.35);
+  font-weight: 600;
+}
+
+.scholar-xp-container {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+}
+
+.scholar-xp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-secondary, #94a3b8);
+  margin-bottom: 4px;
+}
+
+.scholar-xp-title {
+  font-weight: 700;
+  color: #38bdf8;
+}
+
+.scholar-xp-bar {
+  width: 100%;
+  height: 5px;
+  background: rgba(30, 41, 59, 0.8);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.scholar-xp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #a855f7);
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+
+.annoyance-meter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(244, 63, 94, 0.18);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  color: #fb7185;
+}
+
 
 /* Bouncy Yarn Ball Simulation */
 @keyframes pet-bouncy-arc {
