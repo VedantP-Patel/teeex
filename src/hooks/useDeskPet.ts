@@ -549,7 +549,6 @@ export function useDeskPet({
           'typing-paws',
           'yarn-chase',
           'laser-chase',
-          'box-sit',
           'fish-feast',
           'knuth-check',
           'lifted-scruff',

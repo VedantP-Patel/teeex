@@ -10,17 +10,10 @@ import { texEngine } from './services/latexCompiler'
 // Kick off Service Worker immediately
 registerServiceWorker().catch(() => {});
 
-// Idle pre-warm WASM engine and PDF.js so initial frame renders in <200ms
-if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-  window.requestIdleCallback(() => {
-    texEngine.prewarm('pdflatex');
-    import('./services/pdfRenderer').then((m) => m.prewarmPdfRenderer()).catch(() => {});
-  }, { timeout: 1200 });
-} else {
-  setTimeout(() => {
-    texEngine.prewarm('pdflatex');
-    import('./services/pdfRenderer').then((m) => m.prewarmPdfRenderer()).catch(() => {});
-  }, 300);
+// Pre-warm WASM engine and PDF.js immediately in background worker so initial frame renders in <200ms
+if (typeof window !== 'undefined') {
+  texEngine.prewarm('pdflatex');
+  void import('./services/pdfRenderer').then((m) => m.prewarmPdfRenderer()).catch(() => {});
 }
 
 createRoot(document.getElementById('root')!).render(

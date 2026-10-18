@@ -155,6 +155,12 @@ export function useTexEngine({
         projectId: projectIdRef.current,
         compileMode: compileModeRef.current,
         citations: citationsRef.current,
+        onIntermediateResult: ({ pdf: pass1Pdf }) => {
+          // Pass-1 Instant Streaming: update active viewport PDF immediately!
+          if (pass1Pdf && pass1Pdf.byteLength > 0) {
+            setPdf(pass1Pdf);
+          }
+        },
       });
 
       if (result.superseded) return;
@@ -186,14 +192,14 @@ export function useTexEngine({
   const fingerprint = useMemo(() => fingerprintFiles(files), [files]);
 
   // Ultra-responsive adaptive debounce for live editing:
-  // Short docs: 300ms, medium: 450ms, large papers: 600ms.
-  // Cuts up to 550ms of dead-time lag while preserving typing fluidity.
+  // Short docs: 250ms, medium: 380ms, large papers: 500ms.
+  // Cuts up to 600ms of dead-time lag while preserving typing fluidity.
   const effectiveDebounceMs = useMemo(() => {
     if (debounceMs !== undefined) return debounceMs;
     const totalChars = files.reduce((acc, f) => acc + (f.content ? f.content.length : 0), 0);
-    if (totalChars < 5000) return 300;
-    if (totalChars < 25000) return 450;
-    return 600;
+    if (totalChars < 5000) return 250;
+    if (totalChars < 25000) return 380;
+    return 500;
   }, [debounceMs, files]);
 
   const isInitialMount = useRef(true);

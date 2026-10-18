@@ -55,6 +55,7 @@ export interface CompileInput {
   projectId?: string;
   compileMode?: CompileMode;
   citations?: string[];
+  onIntermediateResult?: (result: { pdf: Uint8Array; synctex?: Uint8Array | null }) => void;
 }
 
 export interface CompileOutcome {
@@ -149,6 +150,16 @@ function extractPreambleSig(files: ProjectFile[]): { sig: string; preambleText: 
   return { sig: hashString(preambleText), preambleText };
 }
 
+function extractAuxSignature(memfsFiles: Array<{ path: string; content: string | Uint8Array }>): string {
+  for (const f of memfsFiles) {
+    if (f.path.toLowerCase().endsWith('.aux')) {
+      const text = typeof f.content === 'string' ? f.content : new TextDecoder().decode(f.content);
+      return hashString(text);
+    }
+  }
+  return '';
+}
+
 interface QueuedRequest {
   input: CompileInput;
   requestId: number;
@@ -170,6 +181,7 @@ export class TexEngineService {
   private mountedPackagesByEngine = new Map<EngineId, Set<string>>();
   private registeredMissesByEngine = new Map<EngineId, Set<string>>();
   private lastBibSignature = new Map<string, string>();
+  private lastAuxSignature = new Map<string, string>();
   private hasSettledBbl = new Map<string, boolean>();
   private loadedAuxProjects = new Set<string>();
 
@@ -260,6 +272,7 @@ export class TexEngineService {
       const runner = new BusyTexRunner(config);
       await runner.initialize(true);
 
+      this.runners.set(engine, runner);
       this.setStatus({
         phase: 'ready',
         progress: 100,
@@ -290,7 +303,6 @@ export class TexEngineService {
         // Non-fatal
       }
 
-      this.runners.set(engine, runner);
       this.setStatus({ phase: 'ready', progress: 100, engine });
       return runner;
     } catch (cause) {
@@ -611,14 +623,43 @@ export class TexEngineService {
       let parsed = parseTexLog(log, { root: entry.name });
       let passes = 1;
 
+      // Pass-1 Instant PDF Streaming: provide rendered PDF to viewport immediately (< 1.1s)
+      if (result.pdf && result.pdf.byteLength > 0 && input.onIntermediateResult) {
+        try {
+          input.onIntermediateResult({
+            pdf: result.pdf,
+            synctex: result.synctex && result.synctex.byteLength > 0 ? result.synctex : null,
+          });
+        } catch {
+          // Non-fatal
+        }
+      }
+
       // Layer 8: Two-pass ceiling in 'fast' preview mode vs three-pass in 'publication' mode
       const maxPasses = input.compileMode === 'publication' ? MAX_COMPILE_PASSES : 2;
 
+      // Layer 9: Selective Second-Pass Bypass in 'fast' preview mode
+      let shouldBypassSecondPass = false;
+      if (input.compileMode !== 'publication' && parsed.rerunRequired) {
+        try {
+          const memfsFiles = await runner.readProjectFiles();
+          const auxSig = extractAuxSignature(memfsFiles);
+          const prevAuxSig = this.lastAuxSignature.get(projectKey);
+          if (auxSig && prevAuxSig && auxSig === prevAuxSig) {
+            // .aux contents are completely identical: all references and labels are already stable!
+            shouldBypassSecondPass = true;
+          }
+        } catch {
+          // Non-fatal
+        }
+      }
+
       /**
-       * Re-run while the log says cross-references are unresolved.
+       * Re-run while the log says cross-references are unresolved and not bypassed.
        */
       while (
         parsed.rerunRequired &&
+        !shouldBypassSecondPass &&
         passes < maxPasses &&
         // A newer edit is waiting: stop burning passes on output nobody will see.
         !this.queued &&
@@ -656,6 +697,10 @@ export class TexEngineService {
         void (async () => {
           try {
             const memfsFiles = await runner.readProjectFiles();
+            const auxSig = extractAuxSignature(memfsFiles);
+            if (auxSig) {
+              this.lastAuxSignature.set(projectKey, auxSig);
+            }
             const auxExtensions = ['.aux', '.bbl', '.toc', '.out', '.lot', '.lof', '.idx'];
             const auxToSave: AuxiliaryFileEntry[] = [];
             for (const f of memfsFiles) {
@@ -745,6 +790,7 @@ export class TexEngineService {
     this.mountedPackagesByEngine.clear();
     this.registeredMissesByEngine.clear();
     this.lastBibSignature.clear();
+    this.lastAuxSignature.clear();
     this.hasSettledBbl.clear();
     this.loadedAuxProjects.clear();
     this.setStatus({ phase: 'idle', progress: 0 });

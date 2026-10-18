@@ -19,6 +19,10 @@ const PRECACHE_STATIC_URLS = [
   '/',
   '/index.html',
   '/favicon.svg',
+  '/packages/IEEEtran.cls',
+  '/packages/booktabs.sty',
+  '/packages/microtype.sty',
+  '/packages/cite.sty',
 ];
 
 let swChannel = null;

@@ -247,9 +247,9 @@ export async function getCachedMisses(): Promise<string[]> {
   });
 }
 
-async function fetchPackageThrottled(
+export async function fetchPackageThrottled(
   items: BundledPackageDef[],
-  concurrency = 3,
+  concurrency = 16,
   onLoaded: (pkg: LoadedPackage) => void,
 ): Promise<LoadedPackage[]> {
   const queue = [...items];
@@ -303,7 +303,7 @@ export async function getBundledPackages(): Promise<LoadedPackage[]> {
 
     const missingCore = BUNDLED_PACKAGES.filter((p) => !resultsMap.has(p.name));
     if (missingCore.length > 0) {
-      const newlyFetched = await fetchPackageThrottled(missingCore, 3, (loaded) => {
+      const newlyFetched = await fetchPackageThrottled(missingCore, 16, (loaded) => {
         resultsMap.set(loaded.name, loaded);
         packageMemoryCache.set(loaded.name, loaded.content);
       });
