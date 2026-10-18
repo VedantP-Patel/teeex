@@ -1,16 +1,24 @@
 /**
  * Diff Service for Teeex
- * Computes high-performance line-by-line differences between file revisions
- * using Longest Common Subsequence (LCS).
+ * Computes high-performance line-by-line and intra-line word differences
+ * between file revisions using Longest Common Subsequence (LCS).
  */
 
+import type { ProjectFile } from '../types/latex';
+
 export type DiffType = 'added' | 'removed' | 'unchanged';
+
+export interface DiffToken {
+  text: string;
+  type: 'added' | 'removed' | 'unchanged';
+}
 
 export interface DiffLine {
   type: DiffType;
   oldLineNumber?: number;
   newLineNumber?: number;
   text: string;
+  tokens?: DiffToken[];
 }
 
 export interface SplitDiffRow {
@@ -18,11 +26,13 @@ export interface SplitDiffRow {
     lineNumber: number;
     text: string;
     type: 'removed' | 'unchanged';
+    tokens?: DiffToken[];
   };
   right?: {
     lineNumber: number;
     text: string;
     type: 'added' | 'unchanged';
+    tokens?: DiffToken[];
   };
 }
 
@@ -34,8 +44,94 @@ export interface DiffResult {
   unchanged: number;
 }
 
+export interface FileDiffSummary {
+  fileId: string;
+  fileName: string;
+  status: 'modified' | 'added' | 'deleted' | 'unchanged';
+  additions: number;
+  deletions: number;
+  oldContent: string;
+  newContent: string;
+  diff: DiffResult;
+}
+
 /**
- * Computes line-by-line diff using LCS
+ * Tokenizes a string into words, LaTeX control sequences, punctuation, and whitespace.
+ */
+function tokenizeWords(str: string): string[] {
+  if (!str) return [];
+  // Matches LaTeX commands (\section, \alpha), words, spaces, or individual punctuation
+  const regex = /(\\[a-zA-Z@]+|\s+|[a-zA-Z0-9_]+|[^\s\w\\])/g;
+  const tokens: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(str)) !== null) {
+    tokens.push(m[0]);
+  }
+  return tokens.length > 0 ? tokens : [str];
+}
+
+/**
+ * Computes word-level diff between two lines using LCS.
+ */
+export function computeWordDiff(
+  oldLine: string,
+  newLine: string
+): { oldTokens: DiffToken[]; newTokens: DiffToken[] } {
+  const tokA = tokenizeWords(oldLine);
+  const tokB = tokenizeWords(newLine);
+
+  const lenA = tokA.length;
+  const lenB = tokB.length;
+
+  // Bounded check for extremely long single lines (fallback to single token)
+  if (lenA > 250 || lenB > 250) {
+    return {
+      oldTokens: [{ text: oldLine, type: 'removed' }],
+      newTokens: [{ text: newLine, type: 'added' }],
+    };
+  }
+
+  // LCS Dynamic Programming table
+  const dp: number[][] = Array.from({ length: lenA + 1 }, () => new Array(lenB + 1).fill(0));
+  for (let i = 1; i <= lenA; i++) {
+    for (let j = 1; j <= lenB; j++) {
+      if (tokA[i - 1] === tokB[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  const oldTokensRev: DiffToken[] = [];
+  const newTokensRev: DiffToken[] = [];
+
+  let i = lenA;
+  let j = lenB;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && tokA[i - 1] === tokB[j - 1]) {
+      oldTokensRev.push({ text: tokA[i - 1], type: 'unchanged' });
+      newTokensRev.push({ text: tokB[j - 1], type: 'unchanged' });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      newTokensRev.push({ text: tokB[j - 1], type: 'added' });
+      j--;
+    } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
+      oldTokensRev.push({ text: tokA[i - 1], type: 'removed' });
+      i--;
+    }
+  }
+
+  return {
+    oldTokens: oldTokensRev.reverse(),
+    newTokens: newTokensRev.reverse(),
+  };
+}
+
+/**
+ * Computes line-by-line diff using LCS, enhancing replaced lines with intra-line word highlights.
  */
 export function computeLineDiff(oldContent: string, newContent: string): DiffResult {
   const linesA = oldContent === '' ? [] : oldContent.split('\n');
@@ -51,10 +147,11 @@ export function computeLineDiff(oldContent: string, newContent: string): DiffRes
       oldLineNumber: i + 1,
       newLineNumber: i + 1,
       text,
+      tokens: [{ text, type: 'unchanged' }],
     }));
     const splitRows: SplitDiffRow[] = linesA.map((text, i) => ({
-      left: { lineNumber: i + 1, text, type: 'unchanged' },
-      right: { lineNumber: i + 1, text, type: 'unchanged' },
+      left: { lineNumber: i + 1, text, type: 'unchanged', tokens: [{ text, type: 'unchanged' }] },
+      right: { lineNumber: i + 1, text, type: 'unchanged', tokens: [{ text, type: 'unchanged' }] },
     }));
     return {
       lines,
@@ -65,15 +162,16 @@ export function computeLineDiff(oldContent: string, newContent: string): DiffRes
     };
   }
 
-  // Handle completely empty old or new content
+  // Handle completely empty old content
   if (m === 0) {
     const lines: DiffLine[] = linesB.map((text, i) => ({
       type: 'added',
       newLineNumber: i + 1,
       text,
+      tokens: [{ text, type: 'added' }],
     }));
     const splitRows: SplitDiffRow[] = linesB.map((text, i) => ({
-      right: { lineNumber: i + 1, text, type: 'added' },
+      right: { lineNumber: i + 1, text, type: 'added', tokens: [{ text, type: 'added' }] },
     }));
     return {
       lines,
@@ -84,14 +182,16 @@ export function computeLineDiff(oldContent: string, newContent: string): DiffRes
     };
   }
 
+  // Handle completely empty new content
   if (n === 0) {
     const lines: DiffLine[] = linesA.map((text, i) => ({
       type: 'removed',
       oldLineNumber: i + 1,
       text,
+      tokens: [{ text, type: 'removed' }],
     }));
     const splitRows: SplitDiffRow[] = linesA.map((text, i) => ({
-      left: { lineNumber: i + 1, text, type: 'removed' },
+      left: { lineNumber: i + 1, text, type: 'removed', tokens: [{ text, type: 'removed' }] },
     }));
     return {
       lines,
@@ -167,7 +267,7 @@ export function computeLineDiff(oldContent: string, newContent: string): DiffRes
     else unchanged++;
   });
 
-  // Build paired split rows for Side-by-Side view
+  // Build paired split rows for Side-by-Side view with intra-line word diffs
   const splitRows: SplitDiffRow[] = [];
   let k = 0;
   while (k < lines.length) {
@@ -181,20 +281,28 @@ export function computeLineDiff(oldContent: string, newContent: string): DiffRes
     } else if (cur.type === 'removed') {
       // Check if followed by an added line (replacement)
       if (k + 1 < lines.length && lines[k + 1].type === 'added') {
+        const next = lines[k + 1];
+        // Compute intra-line word diff for this replacement pair
+        const { oldTokens, newTokens } = computeWordDiff(cur.text, next.text);
+        cur.tokens = oldTokens;
+        next.tokens = newTokens;
+
         splitRows.push({
-          left: { lineNumber: cur.oldLineNumber!, text: cur.text, type: 'removed' },
-          right: { lineNumber: lines[k + 1].newLineNumber!, text: lines[k + 1].text, type: 'added' },
+          left: { lineNumber: cur.oldLineNumber!, text: cur.text, type: 'removed', tokens: oldTokens },
+          right: { lineNumber: next.newLineNumber!, text: next.text, type: 'added', tokens: newTokens },
         });
         k += 2;
       } else {
+        cur.tokens = [{ text: cur.text, type: 'removed' }];
         splitRows.push({
-          left: { lineNumber: cur.oldLineNumber!, text: cur.text, type: 'removed' },
+          left: { lineNumber: cur.oldLineNumber!, text: cur.text, type: 'removed', tokens: cur.tokens },
         });
         k++;
       }
     } else if (cur.type === 'added') {
+      cur.tokens = [{ text: cur.text, type: 'added' }];
       splitRows.push({
-        right: { lineNumber: cur.newLineNumber!, text: cur.text, type: 'added' },
+        right: { lineNumber: cur.newLineNumber!, text: cur.text, type: 'added', tokens: cur.tokens },
       });
       k++;
     } else {
@@ -209,4 +317,65 @@ export function computeLineDiff(oldContent: string, newContent: string): DiffRes
     deletions,
     unchanged,
   };
+}
+
+/**
+ * Computes multi-file diff summary across two project file snapshots.
+ */
+export function computeProjectFileDiffs(
+  oldFiles: ProjectFile[],
+  newFiles: ProjectFile[]
+): FileDiffSummary[] {
+  const fileMap = new Map<string, { oldFile?: ProjectFile; newFile?: ProjectFile }>();
+
+  // Map old files
+  for (const f of oldFiles) {
+    fileMap.set(f.id, { oldFile: f });
+  }
+
+  // Match or add new files
+  for (const f of newFiles) {
+    const existing = fileMap.get(f.id) || Array.from(fileMap.values()).find(v => v.oldFile?.name === f.name);
+    if (existing) {
+      existing.newFile = f;
+    } else {
+      fileMap.set(f.id, { newFile: f });
+    }
+  }
+
+  const summaries: FileDiffSummary[] = [];
+
+  for (const [fileId, { oldFile, newFile }] of fileMap.entries()) {
+    const fileName = newFile?.name || oldFile?.name || 'file';
+    const oldContent = oldFile?.content || '';
+    const newContent = newFile?.content || '';
+
+    let status: 'modified' | 'added' | 'deleted' | 'unchanged' = 'unchanged';
+    if (!oldFile && newFile) {
+      status = 'added';
+    } else if (oldFile && !newFile) {
+      status = 'deleted';
+    } else if (oldContent !== newContent) {
+      status = 'modified';
+    }
+
+    const diff = computeLineDiff(oldContent, newContent);
+
+    summaries.push({
+      fileId,
+      fileName,
+      status,
+      additions: diff.additions,
+      deletions: diff.deletions,
+      oldContent,
+      newContent,
+      diff,
+    });
+  }
+
+  // Sort: Modified first, then Added, then Deleted, then Unchanged
+  const order = { modified: 0, added: 1, deleted: 2, unchanged: 3 };
+  summaries.sort((a, b) => order[a.status] - order[b.status] || a.fileName.localeCompare(b.fileName));
+
+  return summaries;
 }

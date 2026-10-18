@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { Checkpoint } from '../../services/checkpointsService';
+import type { Checkpoint, WorkingTreeStatus } from '../../services/checkpointsService';
 import type {
   ProjectFile,
   Collaborator,
@@ -145,6 +145,10 @@ export interface ModalContainerProps {
   onForwardSync?: () => void;
   isDeskPetEnabled?: boolean;
   onToggleDeskPet?: () => void;
+  workingTreeStatus?: WorkingTreeStatus;
+  handleCreateCommit?: (message: string, description?: string) => void;
+  handlePushCommits?: () => Promise<void>;
+  handlePullCommits?: () => Promise<void>;
 }
 
 export const ModalContainer: React.FC<ModalContainerProps> = ({
@@ -228,6 +232,10 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
   onForwardSync,
   isDeskPetEnabled,
   onToggleDeskPet,
+  workingTreeStatus,
+  handleCreateCommit,
+  handlePushCommits,
+  handlePullCommits,
 }) => {
   const isAnyModalOpen =
     isImageUploadOpen ||
@@ -296,12 +304,17 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
           onClose={() => setIsHistoryOpen(false)}
           checkpoints={checkpoints}
           currentFiles={files}
+          workingTreeStatus={workingTreeStatus}
+          onCreateCommit={handleCreateCommit}
           onCreateCheckpoint={handleCreateCheckpoint}
           onRestoreCheckpoint={handleRestoreCheckpoint}
           onRestoreSingleFile={handleRestoreSingleFile}
           onDeleteCheckpoint={handleDeleteCheckpoint}
+          onPushCommits={handlePushCommits}
+          onPullCommits={handlePullCommits}
           onSyncCloud={handleSyncCheckpointsCloud}
           isCloudConnected={isCloudConnected}
+          activeProjectId={activeProjectId || activeProject?.id}
         />
       )}
 

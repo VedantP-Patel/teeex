@@ -10,9 +10,11 @@ import type { Checkpoint } from './services/checkpointsService';
 import {
   loadProjectCheckpoints,
   createCheckpoint,
+  createCommit,
   deleteCheckpoint,
   fetchProjectCheckpointsFromCloud,
-  haveFilesChanged,
+  pushCommitsToCloud,
+  getWorkingTreeStatus,
 } from './services/checkpointsService';
 
 import { ModalContainer } from './components/modals/ModalContainer';
@@ -384,36 +386,17 @@ export function App() {
     }
   }, [activeProjectId, currentUser?.fullName]);
 
-  // Periodic autosaving of history (automatic checkpoints every 90s if files changed)
-  const lastAutoCheckpointTimeRef = useRef<number>(0);
-  const lastAutoCheckpointFilesRef = useRef<ProjectFile[]>(files);
-
+  // Ctrl+Shift+G Shortcut for Source Control & Git Version History
   useEffect(() => {
-    if (lastAutoCheckpointTimeRef.current === 0) {
-      lastAutoCheckpointTimeRef.current = Date.now();
-    }
-    const interval = setInterval(() => {
-      const now = Date.now();
-      const elapsed = now - lastAutoCheckpointTimeRef.current;
-      if (elapsed >= 90_000) {
-        if (haveFilesChanged(lastAutoCheckpointFilesRef.current, filesRef.current)) {
-          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          const autoCp = createCheckpoint(
-            activeProjectIdRef.current,
-            `Auto-save (${timeStr})`,
-            currentUser?.fullName || selfUser.name,
-            filesRef.current,
-            true
-          );
-          setCheckpoints(prev => [autoCp, ...prev.filter(c => c.id !== autoCp.id)]);
-          lastAutoCheckpointTimeRef.current = now;
-          lastAutoCheckpointFilesRef.current = filesRef.current;
-        }
+    const handleGitShortcut = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'g' || e.key === 'G')) {
+        e.preventDefault();
+        setIsHistoryOpen(prev => !prev);
       }
-    }, 15_000);
-
-    return () => clearInterval(interval);
-  }, [currentUser?.fullName, selfUser.name]);
+    };
+    window.addEventListener('keydown', handleGitShortcut);
+    return () => window.removeEventListener('keydown', handleGitShortcut);
+  }, []);
 
   // Active File reference
   const activeFile = useMemo(() => {
@@ -1072,6 +1055,61 @@ export function App() {
     }
     setToast(`Following ${peer.name}`);
   }, [handleSelectFile]);
+
+  const workingTreeStatus = useMemo(() => {
+    const head = checkpoints[0] || null;
+    return getWorkingTreeStatus(files, head);
+  }, [files, checkpoints]);
+
+  const handleCreateCommit = useCallback((message: string, description?: string) => {
+    const newCommit = createCommit(
+      activeProjectIdRef.current,
+      message,
+      currentUser?.fullName || selfUser.name,
+      filesRef.current,
+      description,
+      'main',
+      currentUser?.email || ''
+    );
+    setCheckpoints(prev => [newCommit, ...prev.filter(c => c.id !== newCommit.id)]);
+    setToast(`Committed: ${message} (${newCommit.shortSha})`);
+  }, [currentUser?.fullName, currentUser?.email, selfUser.name]);
+
+  const handlePushCommits = useCallback(async () => {
+    if (!isSupabaseConnected()) {
+      setToast('Supabase Cloud is not connected — commits saved locally');
+      return;
+    }
+    try {
+      const res = await pushCommitsToCloud(activeProjectIdRef.current);
+      if (res.success) {
+        setCheckpoints(loadProjectCheckpoints(activeProjectIdRef.current));
+        setToast(`Pushed ${res.pushedCount} commit${res.pushedCount === 1 ? '' : 's'} to Cloud`);
+      } else {
+        setToast(`Push failed: ${res.error || 'Network error'}`);
+      }
+    } catch (err: any) {
+      setToast(`Push failed: ${err?.message || 'Error'}`);
+    }
+  }, []);
+
+  const handlePullCommits = useCallback(async () => {
+    if (!isSupabaseConnected()) {
+      setToast('Supabase Cloud is not connected');
+      return;
+    }
+    try {
+      const res = await fetchProjectCheckpointsFromCloud(activeProjectIdRef.current);
+      if (res.success && res.checkpoints) {
+        setCheckpoints(res.checkpoints);
+        setToast(`Pulled ${res.checkpoints.length} versions from Cloud`);
+      } else {
+        setToast(`Pull failed: ${res.error || 'Network error'}`);
+      }
+    } catch (err: any) {
+      setToast(`Pull failed: ${err?.message || 'Error'}`);
+    }
+  }, []);
 
   const handleCreateCheckpoint = useCallback((name: string) => {
     const newCp = createCheckpoint(
@@ -2005,6 +2043,10 @@ export function App() {
         files={files}
         activeFile={activeFile}
         checkpoints={checkpoints}
+        workingTreeStatus={workingTreeStatus}
+        handleCreateCommit={handleCreateCommit}
+        handlePushCommits={handlePushCommits}
+        handlePullCommits={handlePullCommits}
         isCloudConnected={isCloudConnected}
         parsedDoc={parsedDoc}
         wordCount={wordCount}

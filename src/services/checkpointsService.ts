@@ -1,33 +1,85 @@
 /**
- * Teeex Studio — Version History & Checkpoints Service
- * Manages per-project snapshot history, automatic checkpoint autosaves,
- * local storage caching, and Supabase cloud synchronization.
+ * Teeex Studio — Version History & Git-Grade Checkpoints Service
+ * Manages per-project snapshot history, commit composer, working tree tracking,
+ * local storage caching, and Supabase cloud push/pull synchronization.
  */
 
 import type { ProjectFile } from '../types/latex';
 import { getSupabaseClient, isSupabaseConnected } from './supabaseClient';
+import { computeLineDiff } from './diffService';
+
+export interface CommitStats {
+  additions: number;
+  deletions: number;
+  filesChanged: number;
+}
 
 export interface Checkpoint {
-  id: string;
+  id: string; // Commit SHA (e.g. 40-char or deterministic hash)
+  shortSha: string; // 7-char short SHA (e.g. "a3f8c12")
   projectId: string;
-  name: string;
-  timestamp: string;
+  name: string; // Commit message title
+  message?: string; // Explicit message alias
+  description?: string; // Optional multiline commit notes
+  timestamp: string; // Human-friendly time
   author: string;
+  authorEmail?: string;
   files: ProjectFile[];
+  stats?: CommitStats;
+  parentId?: string | null;
+  branch?: string; // default "main"
+  isSyncedToCloud?: boolean;
   isAutoSave?: boolean;
   createdAt?: string;
 }
 
+export interface WorkingTreeFileStatus {
+  fileId: string;
+  fileName: string;
+  status: 'modified' | 'added' | 'deleted';
+  additions: number;
+  deletions: number;
+}
+
+export interface WorkingTreeStatus {
+  isClean: boolean;
+  files: WorkingTreeFileStatus[];
+  totalAdditions: number;
+  totalDeletions: number;
+}
+
+export interface SyncStatus {
+  ahead: number; // Local commits not yet pushed to cloud
+  behind: number; // Remote commits not yet pulled locally
+  isUpToDate: boolean;
+}
+
 const CHECKPOINTS_STORAGE_PREFIX = 'teeex_checkpoints_';
-const MAX_CHECKPOINTS_PER_PROJECT = 35;
+const MAX_CHECKPOINTS_PER_PROJECT = 50;
 
 function getStorageKey(projectId: string): string {
   return `${CHECKPOINTS_STORAGE_PREFIX}${projectId}`;
 }
 
 /**
- * Load all checkpoints for a given project from localStorage.
- * If none exist, generates an initial baseline snapshot.
+ * Generates a deterministic or pseudorandom 7-character Git-style SHA.
+ */
+export function generateShortSha(seed?: string): string {
+  if (seed) {
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) {
+      hash = (hash << 5) - hash + seed.charCodeAt(i);
+      hash |= 0;
+    }
+    const hex = Math.abs(hash).toString(16).padStart(7, '0');
+    return hex.slice(0, 7);
+  }
+  return Math.random().toString(16).slice(2, 9);
+}
+
+/**
+ * Load all checkpoints/commits for a given project from localStorage.
+ * If none exist, generates an initial baseline commit.
  */
 export function loadProjectCheckpoints(
   projectId: string,
@@ -42,16 +94,28 @@ export function loadProjectCheckpoints(
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((cp: any) => ({
-          id: cp.id || `cp-${Date.now()}`,
-          projectId: cp.projectId || projectId,
-          name: cp.name || 'Checkpoint',
-          timestamp: cp.timestamp || 'Just now',
-          author: cp.author || 'Author',
-          files: Array.isArray(cp.files) ? cp.files : [],
-          isAutoSave: Boolean(cp.isAutoSave),
-          createdAt: cp.createdAt || new Date().toISOString(),
-        }));
+        return parsed.map((cp: any) => {
+          const id = cp.id || `cp-${Date.now()}`;
+          const shortSha = cp.shortSha || id.replace(/^cp-/, '').slice(0, 7) || generateShortSha(id);
+          return {
+            id,
+            shortSha,
+            projectId: cp.projectId || projectId,
+            name: cp.name || cp.message || 'Commit',
+            message: cp.message || cp.name || 'Commit',
+            description: cp.description || '',
+            timestamp: cp.timestamp || 'Just now',
+            author: cp.author || 'Author',
+            authorEmail: cp.authorEmail || '',
+            files: Array.isArray(cp.files) ? cp.files : [],
+            stats: cp.stats || { additions: 0, deletions: 0, filesChanged: 0 },
+            parentId: cp.parentId ?? null,
+            branch: cp.branch || 'main',
+            isSyncedToCloud: cp.isSyncedToCloud ?? false,
+            isAutoSave: Boolean(cp.isAutoSave),
+            createdAt: cp.createdAt || new Date().toISOString(),
+          };
+        });
       }
     }
   } catch (err) {
@@ -60,15 +124,24 @@ export function loadProjectCheckpoints(
 
   // Create initial baseline snapshot if files are available
   if (currentFiles && currentFiles.length > 0) {
+    const now = new Date();
+    const sha = generateShortSha(`init-${projectId}-${now.toISOString()}`);
     const initialCp: Checkpoint = {
-      id: `cp-init-${projectId}`,
+      id: `commit-${sha}`,
+      shortSha: sha,
       projectId,
       name: 'Initial Baseline',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      message: 'Initial Baseline',
+      description: 'Initial project setup with root LaTeX documents and templates.',
+      timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       author: authorName,
       files: JSON.parse(JSON.stringify(currentFiles)),
+      stats: { additions: currentFiles.reduce((acc, f) => acc + (f.content?.split('\n').length || 0), 0), deletions: 0, filesChanged: currentFiles.length },
+      parentId: null,
+      branch: 'main',
+      isSyncedToCloud: false,
       isAutoSave: false,
-      createdAt: new Date().toISOString(),
+      createdAt: now.toISOString(),
     };
     saveProjectCheckpoints(projectId, [initialCp]);
     return [initialCp];
@@ -91,8 +164,118 @@ export function saveProjectCheckpoints(projectId: string, checkpoints: Checkpoin
 }
 
 /**
- * Create a new checkpoint (manual snapshot or automatic autosave),
- * persist locally, prune excess auto-saves, and push to Supabase cloud.
+ * Computes the delta statistics (additions, deletions, filesChanged)
+ * between a previous snapshot and a new set of files.
+ */
+export function computeCommitStats(
+  oldFiles: ProjectFile[] = [],
+  newFiles: ProjectFile[] = []
+): CommitStats {
+  let additions = 0;
+  let deletions = 0;
+  let filesChanged = 0;
+
+  const oldMap = new Map<string, string>();
+  for (const f of oldFiles) {
+    oldMap.set(f.name, f.content || '');
+  }
+
+  const seenNames = new Set<string>();
+
+  for (const nf of newFiles) {
+    seenNames.add(nf.name);
+    const oldContent = oldMap.get(nf.name);
+    if (oldContent === undefined) {
+      // Newly added file
+      const lines = nf.content ? nf.content.split('\n').length : 0;
+      additions += lines;
+      filesChanged++;
+    } else if (oldContent !== nf.content) {
+      // Modified file
+      const diff = computeLineDiff(oldContent, nf.content);
+      additions += diff.additions;
+      deletions += diff.deletions;
+      filesChanged++;
+    }
+  }
+
+  for (const [name, oldContent] of oldMap.entries()) {
+    if (!seenNames.has(name)) {
+      // Deleted file
+      const lines = oldContent.split('\n').length;
+      deletions += lines;
+      filesChanged++;
+    }
+  }
+
+  return { additions, deletions, filesChanged };
+}
+
+/**
+ * Creates an intentional Git-grade commit with commit message, description,
+ * author, calculated line change statistics, and short SHA.
+ */
+export function createCommit(
+  projectId: string,
+  message: string,
+  author: string,
+  files: ProjectFile[],
+  description = '',
+  branch = 'main',
+  authorEmail = ''
+): Checkpoint {
+  const current = loadProjectCheckpoints(projectId);
+  const headCommit = current[0] || null;
+
+  const now = new Date();
+  const sha = generateShortSha(`${projectId}-${message}-${now.getTime()}`);
+  const stats = computeCommitStats(headCommit ? headCommit.files : [], files);
+
+  const newCommit: Checkpoint = {
+    id: `commit-${sha}`,
+    shortSha: sha,
+    projectId,
+    name: message,
+    message,
+    description,
+    timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    author: author || 'Author',
+    authorEmail,
+    files: JSON.parse(JSON.stringify(files)),
+    stats,
+    parentId: headCommit ? headCommit.id : null,
+    branch,
+    isSyncedToCloud: false,
+    isAutoSave: false,
+    createdAt: now.toISOString(),
+  };
+
+  const updated = [newCommit, ...current.filter(c => c.id !== newCommit.id)];
+
+  // Prune excess if over limit
+  if (updated.length > MAX_CHECKPOINTS_PER_PROJECT) {
+    updated.length = MAX_CHECKPOINTS_PER_PROJECT;
+  }
+
+  saveProjectCheckpoints(projectId, updated);
+
+  // Background push to Supabase Cloud if connected
+  if (isSupabaseConnected()) {
+    pushCheckpointToCloud(projectId, newCommit).then(res => {
+      if (res.success) {
+        newCommit.isSyncedToCloud = true;
+        saveProjectCheckpoints(projectId, updated);
+      }
+    }).catch(err => {
+      console.warn('Background commit cloud push error:', err);
+    });
+  }
+
+  return newCommit;
+}
+
+/**
+ * Backward-compatible wrapper for createCheckpoint.
  */
 export function createCheckpoint(
   projectId: string,
@@ -101,45 +284,112 @@ export function createCheckpoint(
   files: ProjectFile[],
   isAutoSave = false
 ): Checkpoint {
+  if (!isAutoSave) {
+    return createCommit(projectId, name, author, files);
+  }
+
   const now = new Date();
+  const sha = generateShortSha(`auto-${projectId}-${now.getTime()}`);
   const newCp: Checkpoint = {
-    id: `cp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    id: `cp-${now.getTime()}-${sha}`,
+    shortSha: sha,
     projectId,
     name,
+    message: name,
     timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     author: author || 'Author',
     files: JSON.parse(JSON.stringify(files)),
-    isAutoSave,
+    isAutoSave: true,
     createdAt: now.toISOString(),
+    isSyncedToCloud: false,
   };
 
   const current = loadProjectCheckpoints(projectId);
-  let updated = [newCp, ...current];
-
-  // Prune if exceeds max limit (prefer removing oldest auto-saves first)
-  if (updated.length > MAX_CHECKPOINTS_PER_PROJECT) {
-    const manualCps = updated.filter(c => !c.isAutoSave);
-    const autoCps = updated.filter(c => c.isAutoSave);
-    
-    // Keep newest auto-saves
-    const trimmedAuto = autoCps.slice(0, Math.max(10, MAX_CHECKPOINTS_PER_PROJECT - manualCps.length));
-    updated = [...manualCps, ...trimmedAuto].sort((a, b) => {
-      const timeA = new Date(a.createdAt || 0).getTime();
-      const timeB = new Date(b.createdAt || 0).getTime();
-      return timeB - timeA;
-    });
-  }
-
+  const updated = [newCp, ...current];
   saveProjectCheckpoints(projectId, updated);
+  return newCp;
+}
 
-  // Background push to Supabase Cloud
-  if (isSupabaseConnected()) {
-    pushCheckpointToCloud(projectId, newCp).catch(err => {
-      console.warn('Background checkpoint cloud push error:', err);
-    });
+/**
+ * Computes the real-time working tree status (uncommitted changes compared to latest HEAD commit).
+ */
+export function getWorkingTreeStatus(
+  currentFiles: ProjectFile[],
+  headCommit: Checkpoint | null
+): WorkingTreeStatus {
+  if (!headCommit) {
+    const totalAdditions = currentFiles.reduce((acc, f) => acc + (f.content?.split('\n').length || 0), 0);
+    return {
+      isClean: false,
+      files: currentFiles.map(f => ({
+        fileId: f.id,
+        fileName: f.name,
+        status: 'added',
+        additions: f.content ? f.content.split('\n').length : 0,
+        deletions: 0,
+      })),
+      totalAdditions,
+      totalDeletions: 0,
+    };
   }
 
-  return newCp;
+  const headMap = new Map<string, string>();
+  for (const f of headCommit.files) {
+    headMap.set(f.name, f.content || '');
+  }
+
+  const filesStatus: WorkingTreeFileStatus[] = [];
+  const seenNames = new Set<string>();
+  let totalAdditions = 0;
+  let totalDeletions = 0;
+
+  for (const cf of currentFiles) {
+    seenNames.add(cf.name);
+    const headContent = headMap.get(cf.name);
+    if (headContent === undefined) {
+      const adds = cf.content ? cf.content.split('\n').length : 0;
+      filesStatus.push({
+        fileId: cf.id,
+        fileName: cf.name,
+        status: 'added',
+        additions: adds,
+        deletions: 0,
+      });
+      totalAdditions += adds;
+    } else if (headContent !== cf.content) {
+      const diff = computeLineDiff(headContent, cf.content);
+      filesStatus.push({
+        fileId: cf.id,
+        fileName: cf.name,
+        status: 'modified',
+        additions: diff.additions,
+        deletions: diff.deletions,
+      });
+      totalAdditions += diff.additions;
+      totalDeletions += diff.deletions;
+    }
+  }
+
+  for (const [name, headContent] of headMap.entries()) {
+    if (!seenNames.has(name)) {
+      const dels = headContent.split('\n').length;
+      filesStatus.push({
+        fileId: `del-${name}`,
+        fileName: name,
+        status: 'deleted',
+        additions: 0,
+        deletions: dels,
+      });
+      totalDeletions += dels;
+    }
+  }
+
+  return {
+    isClean: filesStatus.length === 0,
+    files: filesStatus,
+    totalAdditions,
+    totalDeletions,
+  };
 }
 
 /**
@@ -176,7 +426,7 @@ export async function pushCheckpointToCloud(
     const row = {
       id: checkpoint.id,
       project_id: projectId,
-      name: checkpoint.name,
+      name: checkpoint.name || checkpoint.message,
       timestamp: checkpoint.timestamp,
       author: checkpoint.author,
       files: checkpoint.files,
@@ -196,7 +446,33 @@ export async function pushCheckpointToCloud(
 }
 
 /**
- * Fetch remote checkpoints from Supabase and merge with local checkpoints.
+ * Push all un-synced local commits to Supabase Cloud.
+ */
+export async function pushCommitsToCloud(
+  projectId: string
+): Promise<{ success: boolean; pushedCount: number; error?: string }> {
+  const local = loadProjectCheckpoints(projectId);
+  const unsynced = local.filter(c => !c.isSyncedToCloud);
+
+  if (unsynced.length === 0) {
+    return { success: true, pushedCount: 0 };
+  }
+
+  let pushed = 0;
+  for (const cp of unsynced) {
+    const res = await pushCheckpointToCloud(projectId, cp);
+    if (res.success) {
+      cp.isSyncedToCloud = true;
+      pushed++;
+    }
+  }
+
+  saveProjectCheckpoints(projectId, local);
+  return { success: true, pushedCount: pushed };
+}
+
+/**
+ * Fetch remote checkpoints from Supabase and merge with local commits.
  */
 export async function fetchProjectCheckpointsFromCloud(
   projectId: string
@@ -221,22 +497,29 @@ export async function fetchProjectCheckpointsFromCloud(
       return { success: true, checkpoints: loadProjectCheckpoints(projectId) };
     }
 
-    const cloudCheckpoints: Checkpoint[] = data.map((r: any) => ({
-      id: r.id,
-      projectId: r.project_id || projectId,
-      name: r.name,
-      timestamp: r.timestamp,
-      author: r.author,
-      files: Array.isArray(r.files) ? r.files : [],
-      isAutoSave: r.name.toLowerCase().startsWith('auto-save'),
-      createdAt: r.created_at,
-    }));
+    const cloudCheckpoints: Checkpoint[] = data.map((r: any) => {
+      const id = r.id;
+      const shortSha = id.replace(/^(commit-|cp-)/, '').slice(0, 7) || generateShortSha(id);
+      return {
+        id,
+        shortSha,
+        projectId: r.project_id || projectId,
+        name: r.name,
+        message: r.name,
+        description: r.description || '',
+        timestamp: r.timestamp,
+        author: r.author,
+        files: Array.isArray(r.files) ? r.files : [],
+        isSyncedToCloud: true,
+        isAutoSave: r.name?.toLowerCase().startsWith('auto-save'),
+        createdAt: r.created_at,
+      };
+    });
 
     // Merge cloud and local checkpoints without duplicates
     const local = loadProjectCheckpoints(projectId);
     const map = new Map<string, Checkpoint>();
-    
-    // Cloud takes baseline, local supplements
+
     for (const cp of cloudCheckpoints) {
       map.set(cp.id, cp);
     }
@@ -260,6 +543,19 @@ export async function fetchProjectCheckpointsFromCloud(
     const e = err as { message?: string };
     return { success: false, checkpoints: loadProjectCheckpoints(projectId), error: e?.message || 'Fetch failed' };
   }
+}
+
+/**
+ * Calculates synchronization status (how many commits ahead or behind remote cloud).
+ */
+export function getSyncStatus(projectId: string): SyncStatus {
+  const local = loadProjectCheckpoints(projectId);
+  const ahead = local.filter(c => !c.isSyncedToCloud && !c.isAutoSave).length;
+  return {
+    ahead,
+    behind: 0,
+    isUpToDate: ahead === 0,
+  };
 }
 
 /**
