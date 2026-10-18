@@ -102,8 +102,9 @@ class BusytexPipeline {
             [BusytexPipeline.VerboseInfo]: { pdftex: [], xetex: [], luatex: [], luahbtex: [], xdvipdfmx: [], bibtex8: [], biber: [] },
             [BusytexPipeline.VerboseDebug]: { pdftex: [], xetex: [], luatex: [], luahbtex: [], xdvipdfmx: [], bibtex8: [], biber: [] },
         };
+        this.supported_drivers = ['xetex_bibtex8_dvipdfmx', 'pdftex_bibtex8', 'luahbtex_bibtex8', 'luatex_bibtex8'];
         this.biber_args = { biber_js, biber_wasm, biber_data };
-        this.biber = null;
+        this.biber = biber_js && biber_wasm && biber_data && typeof BusytexBiber != 'undefined' ? new BusytexBiber(biber_js, biber_wasm, biber_data, this.print, this.script_loader) : null;
         this._memfs_file_hashes = new Map();
 
         this.error_messages_fatal = ['Fatal error occurred', 'That was a fatal error', ':fatal:', '! Undefined control sequence.', 'undefined old font command'];
@@ -404,8 +405,11 @@ class BusytexPipeline {
     }
 
     async compile(files, main_tex_path, bibtex, biber = null, makeindex = null, rerun = null, verbose, driver, data_packages_js = [], remote_endpoint = '', shell_escape = false, clean = false) {
-        if (!this.supported_drivers.includes(driver))
+        const supported = this.supported_drivers || ['xetex_bibtex8_dvipdfmx', 'pdftex_bibtex8', 'luahbtex_bibtex8', 'luatex_bibtex8'];
+        const effectiveDriver = driver || 'pdftex_bibtex8';
+        if (!supported.includes(effectiveDriver))
             throw new Error(`Driver [${driver}] is not supported`);
+        driver = effectiveDriver;
 
         if (bibtex === null)
             bibtex = this.bibtex_resolver.resolve(files);

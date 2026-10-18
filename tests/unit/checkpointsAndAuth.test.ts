@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+vi.mock('../../src/services/supabaseClient', () => ({
+  getSupabaseClient: vi.fn(() => null),
+  isSupabaseConnected: vi.fn(() => false),
+}));
 import {
   loadProjectCheckpoints,
   saveProjectCheckpoints,

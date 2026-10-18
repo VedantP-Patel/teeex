@@ -18,10 +18,11 @@ const GOLDEN_DIGESTS: Record<string, GoldenSpec> = {
     sha256: '944f150cfa9b8282d06aa91b05fd9e82cc536c84f809f152d6beb4c358738e15',
   },
   'busytex_pipeline.js': {
-    bytes: [28013, 29296],
+    bytes: [28013, 29296, 29801],
     sha256: [
       'ee62f299d5b210332d3e4c7804451721c6b9889c214410b818e9d7807385548c',
       '5b36545cd90aa46bb162d0e2fe4bcc60782c3444148e7acb77330bd24c58c46a',
+      '741bdf9a4f8b2821c9e1b0d149e6037122a8be3cd6fe443ed51524ddd8c09aaf',
     ],
   },
   'busytex_biber.js': {
