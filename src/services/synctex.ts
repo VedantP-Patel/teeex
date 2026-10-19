@@ -42,6 +42,7 @@ export interface ForwardMatch {
   rects: Rect[];
   matchedLine: number;
   exact: boolean;
+  nonce?: number;
 }
 
 export interface InverseMatch {
@@ -257,15 +258,43 @@ export async function parseSyncTex(input: Uint8Array): Promise<SyncTexIndex> {
   return { version, files, pages, lineIndex, sortedLines };
 }
 
-function tagFor(index: SyncTexIndex, file: string): number | null {
+export function tagFor(index: SyncTexIndex, file: string): number | null {
   const wanted = normaliseTexPath(file);
+  const wantedLower = wanted.toLowerCase();
+  const wantedBase = wantedLower.split('/').pop() || wantedLower;
 
+  // 1. Exact normalized path match
   for (const [tag, path] of index.files) {
-    if (path === wanted) return tag;
+    if (path === wanted || path.toLowerCase() === wantedLower) return tag;
   }
+
+  // 2. Suffix / Subpath match (e.g. ./sections/intro.tex matching sections/intro.tex)
   for (const [tag, path] of index.files) {
-    if (path.endsWith(`/${wanted}`) || wanted.endsWith(`/${path}`)) return tag;
+    const pathLower = path.toLowerCase();
+    if (
+      pathLower.endsWith(`/${wantedLower}`) ||
+      wantedLower.endsWith(`/${pathLower}`) ||
+      pathLower.endsWith(wantedLower) ||
+      wantedLower.endsWith(pathLower)
+    ) {
+      return tag;
+    }
   }
+
+  // 3. Basename match (e.g. main.tex matching /home/web_user/project_dir/main.tex)
+  for (const [tag, path] of index.files) {
+    const pathBase = path.toLowerCase().split('/').pop();
+    if (pathBase && pathBase === wantedBase) {
+      return tag;
+    }
+  }
+
+  // 4. Fallback if index has only 1 file or main document
+  if (index.files.size === 1) {
+    const firstTag = index.files.keys().next().value;
+    if (typeof firstTag === 'number') return firstTag;
+  }
+
   return null;
 }
 
@@ -294,6 +323,7 @@ export function forwardSync(
   index: SyncTexIndex,
   file: string,
   line: number,
+  nonce?: number,
 ): ForwardMatch | null {
   const tag = tagFor(index, file);
   if (tag === null) return null;
@@ -326,6 +356,7 @@ export function forwardSync(
           rects: rectBoxes.slice(0, 6).map(boxToRect),
           matchedLine: targetLine,
           exact,
+          nonce,
         };
       }
     }
@@ -358,6 +389,7 @@ export function forwardSync(
     rects: best.boxes.slice(0, 6).map(boxToRect),
     matchedLine: best.line,
     exact: bestDistance === 0,
+    nonce,
   };
 }
 

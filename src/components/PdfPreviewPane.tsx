@@ -84,6 +84,7 @@ function PdfPageView({
   rasterZoom,
   active,
   highlights,
+  highlightNonce,
   onPointerSync,
   onInternalNavigate,
 }: {
@@ -93,6 +94,7 @@ function PdfPageView({
   rasterZoom: number;
   active: boolean;
   highlights: { x: number; y: number; width: number; height: number }[];
+  highlightNonce?: number;
   onPointerSync?: (pageNumber: number, xPt: number, yPt: number) => void;
   onInternalNavigate?: (dest: string | unknown[]) => void;
 }) {
@@ -309,7 +311,7 @@ function PdfPageView({
         <div className="pdf-highlight-layer" aria-hidden>
           {highlights.map((rect, index) => (
             <div
-              key={`${rect.x}-${rect.y}-${index}`}
+              key={`${rect.x}-${rect.y}-${index}-${highlightNonce ?? 0}`}
               className="pdf-highlight"
               style={{
                 left: rect.x * CSS_PX_PER_PT * displayZoom,
@@ -571,18 +573,30 @@ export function PdfPreviewPane({
     recomputeVisible();
   }, [offsets, recomputeVisible]);
 
+  const pendingScrollRef = useRef<{ page: number; yPt?: number; isFromBottomOrigin?: boolean } | null>(null);
+
   const scrollToPage = useCallback(
-    (pageNumber: number, yPt?: number) => {
+    (pageNumber: number, yPt?: number, isFromBottomOrigin = false) => {
       const container = scrollRef.current;
-      if (!container || offsets.length === 0) return;
+      if (!container || offsets.length === 0) {
+        pendingScrollRef.current = { page: pageNumber, yPt, isFromBottomOrigin };
+        return;
+      }
+      pendingScrollRef.current = null;
       const index = Math.min(Math.max(pageNumber, 1), offsets.length) - 1;
       const baseTop = offsets[index] ?? 0;
       let targetTop = baseTop;
 
       if (typeof yPt === 'number' && geometry[index]) {
-        // PDF point space (origin at bottom-left) to CSS pixel space (origin at top-left)
-        const pageHeightPt = geometry[index].height / CSS_PX_PER_PT;
-        const offsetFromPageTop = Math.max(0, (pageHeightPt - yPt) * CSS_PX_PER_PT * zoom);
+        let offsetFromPageTop = 0;
+        if (isFromBottomOrigin) {
+          // Native PDF point space (origin at bottom-left) to CSS pixel space (origin at top-left)
+          const pageHeightPt = geometry[index].height / CSS_PX_PER_PT;
+          offsetFromPageTop = Math.max(0, (pageHeightPt - yPt) * CSS_PX_PER_PT * zoom);
+        } else {
+          // SyncTeX point space (origin at top-left of page)
+          offsetFromPageTop = Math.max(0, yPt * CSS_PX_PER_PT * zoom);
+        }
         const viewportHeight = container.clientHeight;
         targetTop = Math.max(0, baseTop + offsetFromPageTop - viewportHeight / 2);
       }
@@ -595,27 +609,35 @@ export function PdfPreviewPane({
     [offsets, geometry, zoom],
   );
 
+  useEffect(() => {
+    if (pendingScrollRef.current && offsets.length > 0) {
+      const { page, yPt, isFromBottomOrigin } = pendingScrollRef.current;
+      pendingScrollRef.current = null;
+      scrollToPage(page, yPt, isFromBottomOrigin);
+    }
+  }, [offsets, scrollToPage]);
+
   const handleInternalNavigate = useCallback(
     async (dest: string | unknown[]) => {
       if (!doc) return;
       const target = await doc.resolveDestination(dest);
       if (target) {
-        scrollToPage(target.pageNumber, target.yPt);
+        scrollToPage(target.pageNumber, target.yPt, true);
       }
     },
     [doc, scrollToPage],
   );
 
   const highlightsByPage = useMemo(() => {
-    const map = new Map<number, ForwardMatch['rects']>();
-    if (forwardTarget) map.set(forwardTarget.page, forwardTarget.rects);
+    const map = new Map<number, { rects: ForwardMatch['rects']; nonce?: number }>();
+    if (forwardTarget) map.set(forwardTarget.page, { rects: forwardTarget.rects, nonce: forwardTarget.nonce });
     return map;
   }, [forwardTarget]);
 
   useEffect(() => {
     if (forwardTarget) {
       const firstRect = forwardTarget.rects?.[0];
-      scrollToPage(forwardTarget.page, firstRect?.y);
+      scrollToPage(forwardTarget.page, firstRect?.y, false);
     }
   }, [forwardTarget, scrollToPage]);
 
@@ -919,6 +941,7 @@ export function PdfPreviewPane({
               if (!activePages.has(page.pageNumber)) return null;
 
               const pageTop = offsets[index] ?? 0;
+              const targetHighlight = highlightsByPage.get(page.pageNumber);
               return (
                 <div
                   key={page.pageNumber}
@@ -936,7 +959,8 @@ export function PdfPreviewPane({
                     displayZoom={zoom}
                     rasterZoom={rasterZoom}
                     active={true}
-                    highlights={highlightsByPage.get(page.pageNumber) ?? []}
+                    highlights={targetHighlight?.rects ?? []}
+                    highlightNonce={targetHighlight?.nonce}
                     onPointerSync={onInverseSync ? handlePointerSync : undefined}
                     onInternalNavigate={handleInternalNavigate}
                   />

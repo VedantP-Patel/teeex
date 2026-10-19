@@ -448,7 +448,7 @@ export function App() {
   }, [bibContent]);
 
   const [targetLine, setTargetLine] = useState<number | null>(null);
-  const [forwardTargetLine, setForwardTargetLine] = useState<number | null>(null);
+  const [forwardTargetLine, setForwardTargetLine] = useState<{ line: number; nonce: number } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -589,8 +589,8 @@ export function App() {
   }, [texEngineView.outcome?.synctex]);
 
   const forwardTarget = useMemo<ForwardMatch | null>(() => {
-    if (!syncTexIndex || forwardTargetLine === null) return null;
-    return forwardSync(syncTexIndex, activeFile.name, forwardTargetLine);
+    if (!syncTexIndex || !forwardTargetLine) return null;
+    return forwardSync(syncTexIndex, activeFile.name, forwardTargetLine.line, forwardTargetLine.nonce);
   }, [syncTexIndex, forwardTargetLine, activeFile.name]);
 
   const handleInverseSync = useCallback(
@@ -1077,7 +1077,7 @@ export function App() {
     onToggleSidebar: () => setIsSidebarOpen((prev) => !prev),
     onFormatDocument: handleFormatDocument,
     onForwardSync: () => {
-      if (activeCursorLine) setForwardTargetLine(activeCursorLine);
+      if (activeCursorLine) setForwardTargetLine({ line: activeCursorLine, nonce: Date.now() });
     },
     onDismissModal: handleDismissModal,
     isModalOpen: isAnyModalActive,
@@ -1965,7 +1965,7 @@ export function App() {
               files={files}
               isSidebarOpen={isSidebarOpen}
               onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
-              onForwardSync={(line) => setForwardTargetLine(line)}
+              onForwardSync={(line) => setForwardTargetLine({ line, nonce: Date.now() })}
               trackedChanges={trackedChanges}
               onAcceptTrackedChange={handleAcceptTrackedChange}
               onRejectTrackedChange={handleRejectTrackedChange}
@@ -2216,7 +2216,7 @@ export function App() {
           setToast('Project checkpoint saved');
         }}
         onForwardSync={() => {
-          if (activeCursorLine) setForwardTargetLine(activeCursorLine);
+          if (activeCursorLine) setForwardTargetLine({ line: activeCursorLine, nonce: Date.now() });
         }}
         isDeskPetEnabled={deskPet.isEnabled}
         onToggleDeskPet={deskPet.toggleEnabled}

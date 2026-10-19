@@ -106,6 +106,18 @@ export function useLatexExtensions({
         ])
       : [];
 
+    const forwardSyncClickExtension = onForwardSync
+      ? EditorView.domEventHandlers({
+          click(event, view) {
+            const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+            if (pos !== null) {
+              const line = view.state.doc.lineAt(pos).number;
+              onForwardSync(line);
+            }
+          },
+        })
+      : [];
+
     const extensions: Extension[] = [
       lineNumbers(),
       highlightActiveLineGutter(),
@@ -123,6 +135,7 @@ export function useLatexExtensions({
       indentOnInput(),
       lintGutter(),
       peerDecorationsField,
+      forwardSyncClickExtension,
 
       // LaTeX language support with Lezer parser (disabled conflicting internal autocompletion)
       latex({

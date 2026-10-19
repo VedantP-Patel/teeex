@@ -121,7 +121,7 @@ export const Editor: React.FC<Props> = ({
   });
 
   const [autoSyncPreview, setAutoSyncPreview] = useState<boolean>(() => {
-    return localStorage.getItem('teeex_auto_sync_preview') === 'true';
+    return localStorage.getItem('teeex_auto_sync_preview') !== 'false';
   });
 
   const [isMinimapOpen, setIsMinimapOpen] = useState<boolean>(() => {
@@ -160,6 +160,12 @@ export const Editor: React.FC<Props> = ({
   const currentFile = files.find((f) => (activeFileId && f.id === activeFileId) || f.name === fileName);
   const isImageFile = currentFile?.type === 'image' || /\.(png|jpe?g|gif|svg|webp|ico)$/i.test(fileName);
 
+  const lastAutoSyncedLineRef = useRef<number>(1);
+  const handleDirectForwardSync = useCallback((line: number) => {
+    lastAutoSyncedLineRef.current = line;
+    onForwardSync?.(line);
+  }, [onForwardSync]);
+
   const extensions = useLatexExtensions({
     theme: syntaxTheme,
     isLight: isLightMode,
@@ -167,7 +173,7 @@ export const Editor: React.FC<Props> = ({
     labels: labelKeys,
     readOnly: role === 'viewer',
     onCompileShortcut,
-    onForwardSync,
+    onForwardSync: handleDirectForwardSync,
     onOpenCommandPalette,
     onSaveShortcut,
   });
@@ -226,8 +232,7 @@ export const Editor: React.FC<Props> = ({
     };
   }, [viewRef, isMinimapOpen]);
 
-  // Forward SyncTeX: Debounced tracking when cursor line changes
-  const lastAutoSyncedLineRef = useRef<number>(1);
+  // Forward SyncTeX: Debounced tracking when cursor line changes during typing
   useEffect(() => {
     if (!autoSyncPreview || !onForwardSync) return;
     if (currentCursorLine === lastAutoSyncedLineRef.current) return;
