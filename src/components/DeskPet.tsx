@@ -28,7 +28,6 @@ import {
   Award,
   Flame,
   Music,
-  Plus,
 } from 'lucide-react';
 
 export interface DeskPetProps {
@@ -463,18 +462,21 @@ export const DeskPet: React.FC<DeskPetProps> = ({
     triggerYarnChase?.();
   };
 
-  // Click-to-copy mathematical dream formula
+  // Click-to-copy & insert mathematical dream formula (Surprise Easter Egg)
   const handleCopyFormula = (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
         void navigator.clipboard.writeText(currentDreamFormula);
-        setHasCopiedFormula(true);
-        setTimeout(() => setHasCopiedFormula(false), 1600);
       }
     } catch {
       // Ignore
     }
+    if (onInsertFormula && currentDreamFormula) {
+      onInsertFormula(currentDreamFormula);
+    }
+    setHasCopiedFormula(true);
+    setTimeout(() => setHasCopiedFormula(false), 1600);
   };
 
   // Keyboard accessibility handler
@@ -1337,33 +1339,26 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             </div>
           )}
 
-          {/* High-DPI KaTeX Mathematical Dream Thought Bubble during Sleep (Click-to-Copy & Insert) */}
+          {/* High-DPI KaTeX Mathematical Dream Thought Bubble during Sleep (Surprise Click-to-Insert) */}
           {state === 'sleep' && (
             <div
               className="pet-dream-bubble"
-              aria-hidden="true"
+              role="button"
+              tabIndex={0}
               onClick={handleCopyFormula}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handleCopyFormula(e as unknown as React.MouseEvent);
+                }
+              }}
               style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-              title="Click to copy LaTeX formula"
+              title="✨ TeXCat's mathematical dream — click to insert into editor"
             >
               <span className="dream-formula" dangerouslySetInnerHTML={{ __html: renderedDreamHtml }} />
-              {onInsertFormula && (
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  style={{ padding: '2px 6px', fontSize: 9.5, color: '#38bdf8', display: 'inline-flex', alignItems: 'center', gap: 2, border: '1px solid rgba(56,189,248,0.3)', borderRadius: 4 }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onInsertFormula(currentDreamFormula);
-                  }}
-                  title="Insert formula into editor"
-                >
-                  <Plus size={9} /> Insert
-                </button>
-              )}
               {hasCopiedFormula && (
-                <span style={{ fontSize: 9, color: '#34d399', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                  <Check size={9} /> Copied!
+                <span className="dream-bubble-inserted-badge">
+                  <Sparkles size={9} /> Inserted!
                 </span>
               )}
               <div className="dream-dots">

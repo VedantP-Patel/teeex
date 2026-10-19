@@ -963,7 +963,7 @@ describe('TeXCat Desk Companion (useDeskPet & DeskPet)', () => {
       expect(mascotWrapper?.classList.contains('ghost-hover')).toBe(false);
     });
 
-    it('renders dream thought bubble with KaTeX math formula and triggers onInsertFormula when Insert is clicked', async () => {
+    it('renders clean dream thought bubble without explicit button and surprises user by inserting formula on bubble click', async () => {
       const mockInsert = vi.fn();
       await act(async () => {
         root.render(
@@ -984,13 +984,18 @@ describe('TeXCat Desk Companion (useDeskPet & DeskPet)', () => {
 
       const dreamBubble = container.querySelector('.pet-dream-bubble');
       expect(dreamBubble).not.toBeNull();
+      // Ensure no explicit "Insert" button is rendered
       const insertBtn = Array.from(dreamBubble?.querySelectorAll('button') || []).find(b => b.textContent?.includes('Insert'));
-      expect(insertBtn).toBeDefined();
+      expect(insertBtn).toBeUndefined();
 
+      // Clicking the dream bubble directly triggers onInsertFormula as a surprise
       await act(async () => {
-        insertBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        dreamBubble?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
       expect(mockInsert).toHaveBeenCalledWith('e^{i\\pi} + 1 = 0');
+
+      // Feedback badge appears
+      expect(dreamBubble?.textContent).toContain('Inserted!');
     });
 
     it('triggers click spam annoyance when clicked > 4 times rapidly within 1.2s', async () => {
