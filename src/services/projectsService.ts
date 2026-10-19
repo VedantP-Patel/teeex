@@ -571,23 +571,32 @@ export async function syncProjectsWithCloudBiDirectional(
     if (!existing) {
       projectMap.set(cp.id, cp);
     } else {
-      // Reconcile by comparing updatedAt timestamps (falling back to createdAt if updatedAt is non-ISO)
-      const parseTime = (ts?: string, fallback?: string) => {
+      // Reconcile by comparing updatedAt timestamps (accounting for _offlineSavedAt)
+      const parseTime = (ts?: string | number, fallback?: string | number) => {
+        if (typeof ts === 'number') return ts;
         const t = ts ? Date.parse(ts) : NaN;
         if (!Number.isNaN(t)) return t;
+        if (typeof fallback === 'number') return fallback;
         const f = fallback ? Date.parse(fallback) : NaN;
         return Number.isNaN(f) ? 0 : f;
       };
-      const localTime = parseTime(existing.updatedAt, existing.createdAt);
+      const localTime = Math.max(
+        parseTime((existing as unknown as { _offlineSavedAt?: number })._offlineSavedAt),
+        parseTime(existing.updatedAt, existing.createdAt)
+      );
       const cloudTime = parseTime(cp.updatedAt, cp.createdAt);
-      // Keep cloud if newer or equal
-      if (cloudTime >= localTime) {
+      // Keep cloud only if strictly newer than local
+      if (cloudTime > localTime) {
         projectMap.set(cp.id, {
           ...existing,
           ...cp,
           // Preserve local member display name if customized
           members: cp.members && cp.members.length > 0 ? cp.members : existing.members,
         });
+      } else {
+        // Local is newer or equal: preserve local edits and push them to cloud
+        pushProjectToCloud(existing).catch(() => { });
+        newlyPushed++;
       }
     }
   }

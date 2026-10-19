@@ -181,7 +181,7 @@ export function useTexEngine({
         win.__teeexCompileCount = (win.__teeexCompileCount ?? 0) + 1;
         win.__teeexLastOutcome = result;
       }
-      if (result.ok && result.pdf) {
+      if (result.pdf && result.pdf.byteLength > 0) {
         setPdf(result.pdf);
       }
     } finally {

@@ -36,6 +36,7 @@ import { downloadPdf } from './services/pdfExporter';
 import { applyDocumentClass, formatResolutionNotice, setTwoColumn, type PaperFormatId } from './services/paperFormats';
 import { verifyShareKey } from './services/shareSecurityService';
 import { useTexEngine } from './hooks/useTexEngine';
+import { texEngine } from './services/latexCompiler';
 import { parseSyncTex, forwardSync, type SyncTexIndex, type ForwardMatch } from './services/synctex';
 
 import type {
@@ -706,6 +707,25 @@ export function App() {
     setCompileState(prev => ({ ...prev, status: 'compiling' }));
     texEngineView.compile();
   }, [texEngineView]);
+
+  // Auto-recompile & cloud reconciliation when transitioning back online
+  const prevOfflineRef = useRef(isOffline);
+  useEffect(() => {
+    if (prevOfflineRef.current && !isOffline) {
+      texEngine.clearRegisteredMisses();
+      triggerCompile();
+      if (currentUser?.email) {
+        syncProjectsWithCloudBiDirectional(currentUser.email, currentUser.fullName)
+          .then(res => {
+            if (res.success && res.projects && res.projects.length > 0) {
+              setProjects(res.projects);
+            }
+          })
+          .catch(() => {});
+      }
+    }
+    prevOfflineRef.current = isOffline;
+  }, [isOffline, triggerCompile, currentUser]);
 
   // Stage 7: Real Yjs CRDT Collaboration Provider (over Supabase Realtime + local BroadcastChannel fallback)
   useEffect(() => {

@@ -84,12 +84,19 @@ export function toEngineFiles(
     let hash = '';
     if (typeof c === 'string') {
       let h = 0x811c9dc5;
-      for (let i = 0; i < Math.min(c.length, 300); i++) {
+      const cLen = c.length;
+      for (let i = 0; i < cLen; i++) {
         h = Math.imul(h ^ c.charCodeAt(i), 0x01000193);
       }
-      hash = `${c.length}:${(h >>> 0).toString(36)}`;
+      hash = `${cLen}:${(h >>> 0).toString(36)}`;
     } else {
-      hash = `${c.byteLength}:${c[0] ?? 0}_${c[c.byteLength - 1] ?? 0}`;
+      const bLen = c.byteLength;
+      let bHash = 0x811c9dc5;
+      const sampleLimit = Math.min(bLen, 65536);
+      for (let i = 0; i < sampleLimit; i++) {
+        bHash = Math.imul(bHash ^ c[i], 0x01000193);
+      }
+      hash = `${bLen}:${(bHash >>> 0).toString(36)}`;
     }
 
     out.push({ path: alias, content: entry.content, hash });

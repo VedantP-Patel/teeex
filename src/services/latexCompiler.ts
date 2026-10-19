@@ -86,6 +86,9 @@ const DEFAULT_REMOTE_ENDPOINT = 'https://texlive2026.texlyre.org';
 const MAX_COMPILE_PASSES = 3;
 
 function remoteEndpoint(): string | undefined {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return undefined;
+  }
   const configured = import.meta.env.VITE_TEXLIVE_REMOTE_ENDPOINT;
   if (configured === 'off') return undefined;
   if (configured) return configured.replace(/\/+$/, '');
@@ -210,6 +213,15 @@ export class TexEngineService {
       void getBundledPackages().catch(() => { });
     }
     void this.ensureRunner(engine).catch(() => { });
+  }
+
+  /**
+   * Clears transient package misses and preamble signatures.
+   * Call when returning online so newly accessible network can resolve packages.
+   */
+  clearRegisteredMisses(): void {
+    this.registeredMissesByEngine.clear();
+    this.lastPreambleSig.clear();
   }
 
   private async ensureRunner(engine: EngineId): Promise<BusyTexRunner> {

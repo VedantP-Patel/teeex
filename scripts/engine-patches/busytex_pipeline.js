@@ -464,16 +464,23 @@ class BusytexPipeline {
                     ? injectFastPdfFlags(contents)
                     : contents;
 
-                // Delta MEMFS write optimization: compute hash and skip FS.writeFile if unchanged
+                // Delta MEMFS write optimization: compute full-content hash and skip FS.writeFile if unchanged
                 let contentHash = '';
                 if (typeof toWrite === 'string') {
                     let h = 0x811c9dc5;
-                    for (let i = 0; i < Math.min(toWrite.length, 500); i++) {
+                    const strLen = toWrite.length;
+                    for (let i = 0; i < strLen; i++) {
                         h = Math.imul(h ^ toWrite.charCodeAt(i), 0x01000193);
                     }
-                    contentHash = `${toWrite.length}:${(h >>> 0).toString(36)}`;
+                    contentHash = `${strLen}:${(h >>> 0).toString(36)}`;
                 } else if (toWrite && toWrite.byteLength !== undefined) {
-                    contentHash = `${toWrite.byteLength}:${toWrite[0] || 0}_${toWrite[toWrite.byteLength - 1] || 0}`;
+                    const bLen = toWrite.byteLength;
+                    let bHash = 0x811c9dc5;
+                    const sampleLimit = Math.min(bLen, 65536);
+                    for (let i = 0; i < sampleLimit; i++) {
+                        bHash = Math.imul(bHash ^ toWrite[i], 0x01000193);
+                    }
+                    contentHash = `${bLen}:${(bHash >>> 0).toString(36)}`;
                 }
 
                 if (contentHash && this._memfs_file_hashes.get(absolute_path) === contentHash && FS.analyzePath(absolute_path).exists) {
