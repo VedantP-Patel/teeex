@@ -361,6 +361,24 @@ export function forwardSync(
   };
 }
 
+function isAuxiliaryMacroFile(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return (
+    lower.endsWith('.cls') ||
+    lower.endsWith('.sty') ||
+    lower.endsWith('.clo') ||
+    lower.endsWith('.aux') ||
+    lower.endsWith('.toc') ||
+    lower.endsWith('.bbl') ||
+    lower.endsWith('.blg') ||
+    lower.endsWith('.out') ||
+    lower.endsWith('.def') ||
+    lower.endsWith('.ldf') ||
+    lower.endsWith('.fd') ||
+    lower.endsWith('.log')
+  );
+}
+
 /**
  * Preview → source (`inverseSync`).
  * Matches horizontal text boxes (`hbox`) and inline nodes (`point`) on the clicked line,
@@ -376,9 +394,17 @@ export function inverseSync(
   const boxes = index.pages.get(page);
   if (!boxes || boxes.length === 0) return null;
 
+  // 1. Filter out internal class/package boxes BEFORE spatial pruning
+  // so external .cls/.sty definitions do not crowd out user document text
+  const validBoxes = boxes.filter((b) => {
+    const file = index.files.get(b.tag);
+    return file && !isAuxiliaryMacroFile(file);
+  });
+
   // Prefer hbox and point records over vbox containers
-  const primaryBoxes = boxes.filter((b) => b.kind !== 'vbox');
-  const candidates = primaryBoxes.length > 0 ? primaryBoxes : boxes;
+  const pool = validBoxes.length > 0 ? validBoxes : boxes;
+  const primaryBoxes = pool.filter((b) => b.kind !== 'vbox');
+  const candidates = primaryBoxes.length > 0 ? primaryBoxes : pool;
 
   // Spatial candidate pruning on dense pages: only test boxes within vertical reach (80pt)
   let candidateList = candidates;
@@ -394,14 +420,13 @@ export function inverseSync(
 
   for (const box of candidateList) {
     const file = index.files.get(box.tag);
-    // Ignore boxes originating from internal .aux / .toc / .sty / .cls files
-    if (!file || !file.endsWith('.tex')) continue;
+    if (!file || isAuxiliaryMacroFile(file)) continue;
 
     const rect = boxToRect(box);
 
-    // Expand vertical hit box slightly (2pt) for comfortable clicking on text lines
-    const insideX = x >= rect.x - 4 && x <= rect.x + rect.width + 4;
-    const insideY = y >= rect.y - 2 && y <= rect.y + rect.height + 2;
+    // Expand hit box slightly for comfortable clicking on text lines and equations
+    const insideX = x >= rect.x - 6 && x <= rect.x + rect.width + 6;
+    const insideY = y >= rect.y - 3 && y <= rect.y + rect.height + 3;
 
     if (insideX && insideY && box.kind === 'hbox' && rect.width > 4 && rect.height < 80) {
       // Score by vertical distance to box vertical center + small area tie-breaker

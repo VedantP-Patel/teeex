@@ -13,6 +13,7 @@ const STORE_PDF = 'pdf_snapshots';
 export interface StoredPdfSnapshot {
   projectId: string;
   pdf: Uint8Array;
+  synctex?: Uint8Array | null;
   timestamp: number;
 }
 
@@ -45,12 +46,13 @@ function openArtifactsDb(): Promise<IDBDatabase | null> {
 }
 
 /**
- * Persists the compiled PDF bytes to IndexedDB under the project ID.
+ * Persists the compiled PDF and optional SyncTeX bytes to IndexedDB under the project ID.
  * Uses relaxed durability for non-blocking asynchronous disk writes.
  */
 export async function saveCompiledPdfSnapshot(
   projectId: string,
   pdfBytes: Uint8Array,
+  synctexBytes?: Uint8Array | null,
 ): Promise<void> {
   if (!projectId || !pdfBytes || pdfBytes.byteLength === 0) return;
 
@@ -61,6 +63,7 @@ export async function saveCompiledPdfSnapshot(
     const record: StoredPdfSnapshot = {
       projectId,
       pdf: pdfBytes,
+      synctex: synctexBytes && synctexBytes.byteLength > 0 ? synctexBytes : null,
       timestamp: Date.now(),
     };
 
@@ -95,6 +98,17 @@ export async function saveCompiledPdfSnapshot(
 export async function loadCompiledPdfSnapshot(
   projectId: string,
 ): Promise<Uint8Array | null> {
+  const snapshot = await loadCompiledSnapshot(projectId);
+  return snapshot ? snapshot.pdf : null;
+}
+
+/**
+ * Loads the complete compiled snapshot (PDF and SyncTeX bytes) from IndexedDB.
+ * Returns null if no snapshot exists or if storage is unavailable.
+ */
+export async function loadCompiledSnapshot(
+  projectId: string,
+): Promise<{ pdf: Uint8Array; synctex: Uint8Array | null } | null> {
   if (!projectId) return null;
 
   const db = await openArtifactsDb();
@@ -109,8 +123,14 @@ export async function loadCompiledPdfSnapshot(
       req.onsuccess = () => {
         const res = req.result as StoredPdfSnapshot | undefined;
         if (res && res.pdf && res.pdf.byteLength > 0) {
-          const bytes = res.pdf instanceof Uint8Array ? res.pdf : new Uint8Array(res.pdf);
-          resolve(bytes);
+          const pdf = res.pdf instanceof Uint8Array ? res.pdf : new Uint8Array(res.pdf);
+          const synctex =
+            res.synctex && res.synctex.byteLength > 0
+              ? res.synctex instanceof Uint8Array
+                ? res.synctex
+                : new Uint8Array(res.synctex)
+              : null;
+          resolve({ pdf, synctex });
         } else {
           resolve(null);
         }
@@ -121,3 +141,4 @@ export async function loadCompiledPdfSnapshot(
     }
   });
 }
+

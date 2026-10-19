@@ -174,26 +174,65 @@ function PdfPageView({
     };
   }, [doc, geometry.pageNumber, rasterZoom, active]);
 
+  const [clickRipples, setClickRipples] = useState<Array<{ id: number; x: number; y: number }>>([]);
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
+
   const handleSyncJump = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       if (!onPointerSync) return;
+      const targetEl = event.target as HTMLElement | null;
+      if (targetEl && targetEl.closest('.pdf-link-annotation')) return;
+
       const bounds = event.currentTarget.getBoundingClientRect();
+      const clickX = event.clientX - bounds.left;
+      const clickY = event.clientY - bounds.top;
       const scale = CSS_PX_PER_PT * displayZoom;
+
+      const rippleId = Date.now() + Math.random();
+      setClickRipples((prev) => [...prev.slice(-3), { id: rippleId, x: clickX, y: clickY }]);
+      setTimeout(() => {
+        setClickRipples((prev) => prev.filter((r) => r.id !== rippleId));
+      }, 600);
+
       onPointerSync(
         geometry.pageNumber,
-        (event.clientX - bounds.left) / scale,
-        (event.clientY - bounds.top) / scale,
+        clickX / scale,
+        clickY / scale,
       );
     },
     [onPointerSync, geometry.pageNumber, displayZoom],
   );
 
+  const handleMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    mouseDownPosRef.current = { x: event.clientX, y: event.clientY };
+  }, []);
+
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
-      if (event.ctrlKey || event.metaKey) {
-        event.preventDefault();
-        handleSyncJump(event);
+      const targetEl = event.target as HTMLElement | null;
+      if (targetEl && targetEl.closest('.pdf-link-annotation')) return;
+
+      // Distinguish clean click from text drag-selection
+      const moved = mouseDownPosRef.current
+        ? Math.hypot(event.clientX - mouseDownPosRef.current.x, event.clientY - mouseDownPosRef.current.y)
+        : 0;
+      const hasSelection = typeof window !== 'undefined' && Boolean(window.getSelection()?.toString().trim());
+
+      // If user dragged to highlight text, allow text selection and don't jump unless modifier is pressed
+      if ((moved > 6 || hasSelection) && !event.ctrlKey && !event.metaKey) {
+        return;
       }
+
+      handleSyncJump(event);
+    },
+    [handleSyncJump],
+  );
+
+  const handleDoubleClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const targetEl = event.target as HTMLElement | null;
+      if (targetEl && targetEl.closest('.pdf-link-annotation')) return;
+      handleSyncJump(event);
     },
     [handleSyncJump],
   );
@@ -203,9 +242,10 @@ function PdfPageView({
       className={`pdf-page${painted ? ' is-painted' : ''}`}
       data-page={geometry.pageNumber}
       style={{ width, height }}
+      onMouseDown={handleMouseDown}
       onClick={handleClick}
-      onDoubleClick={handleSyncJump}
-      title="Double-click (or Ctrl+Click) to jump to corresponding LaTeX source line"
+      onDoubleClick={handleDoubleClick}
+      title="Click or double-click to jump to corresponding LaTeX source line (drag to select text)"
     >
       {active && (
         <canvas
@@ -281,6 +321,14 @@ function PdfPageView({
           ))}
         </div>
       )}
+      {clickRipples.map((ripple) => (
+        <div
+          key={ripple.id}
+          className="pdf-sync-ripple"
+          style={{ left: ripple.x, top: ripple.y }}
+          aria-hidden
+        />
+      ))}
     </div>
   );
 }
@@ -573,11 +621,15 @@ export function PdfPreviewPane({
 
   const handlePointerSync = useCallback(
     (pageNumber: number, xPt: number, yPt: number) => {
-      if (!syncTexIndex || !onInverseSync) return;
+      if (!onInverseSync) return;
+      if (!syncTexIndex) {
+        onCompile();
+        return;
+      }
       const match = inverseSync(syncTexIndex, pageNumber, xPt, yPt);
       if (match) onInverseSync(match.file, match.line);
     },
-    [syncTexIndex, onInverseSync],
+    [syncTexIndex, onInverseSync, onCompile],
   );
 
   const onKeyDown = useCallback(
@@ -885,7 +937,7 @@ export function PdfPreviewPane({
                     rasterZoom={rasterZoom}
                     active={true}
                     highlights={highlightsByPage.get(page.pageNumber) ?? []}
-                    onPointerSync={syncTexIndex ? handlePointerSync : undefined}
+                    onPointerSync={onInverseSync ? handlePointerSync : undefined}
                     onInternalNavigate={handleInternalNavigate}
                   />
                 </div>

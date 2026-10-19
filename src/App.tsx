@@ -37,7 +37,7 @@ import { applyDocumentClass, formatResolutionNotice, setTwoColumn, type PaperFor
 import { verifyShareKey } from './services/shareSecurityService';
 import { useTexEngine } from './hooks/useTexEngine';
 import { texEngine } from './services/latexCompiler';
-import { parseSyncTex, forwardSync, type SyncTexIndex, type ForwardMatch } from './services/synctex';
+import { parseSyncTex, forwardSync, normaliseTexPath, type SyncTexIndex, type ForwardMatch } from './services/synctex';
 
 import type {
   ProjectFile,
@@ -566,13 +566,22 @@ export function App() {
 
   const handleInverseSync = useCallback(
     (file: string, line: number) => {
+      const cleanFile = normaliseTexPath(file);
       const target =
         filesRef.current.find(f => f.name === file) ??
-        filesRef.current.find(f => f.name.endsWith(`/${file}`));
+        filesRef.current.find(f => normaliseTexPath(f.name) === cleanFile) ??
+        filesRef.current.find(f => f.name.endsWith(`/${cleanFile}`) || cleanFile.endsWith(`/${f.name}`)) ??
+        filesRef.current.find(f => {
+          const fBase = f.name.split('/').pop()?.replace(/\.[^/.]+$/, '');
+          const cleanBase = cleanFile.split('/').pop()?.replace(/\.[^/.]+$/, '');
+          return fBase && cleanBase && fBase === cleanBase;
+        }) ??
+        filesRef.current.find(f => f.isEntry || f.name === 'main.tex');
 
       if (target) {
         setActiveFileId(target.id);
         setOpenFileIds(open => (open.includes(target.id) ? open : [...open, target.id]));
+        setToast(`Jumped to line ${line} in ${target.name}`);
       }
       setTargetLine(line);
     },

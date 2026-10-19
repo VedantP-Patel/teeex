@@ -540,6 +540,34 @@
   }
 }
 
+/* --- Inverse SyncTeX click ripple -------------------------------------- */
+
+.pdf-sync-ripple {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  margin-top: -11px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--accent-cyan) 45%, transparent);
+  border: 1.5px solid var(--accent-cyan);
+  box-shadow: 0 0 12px color-mix(in oklab, var(--accent-cyan) 70%, transparent);
+  pointer-events: none;
+  z-index: 10;
+  animation: pdfRipple 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pdfRipple {
+  0% {
+    transform: scale(0.35);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
 /* --- Empty, loading and error states ------------------------------------ */
 
 .pdf-empty {

@@ -20,7 +20,7 @@ import {
   type EngineId,
   type EngineStatus,
 } from '../services/latexCompiler';
-import { loadCompiledPdfSnapshot } from '../services/pdfSnapshotCache';
+import { loadCompiledSnapshot } from '../services/pdfSnapshotCache';
 
 export interface UseTexEngineOptions {
   files: ProjectFile[];
@@ -135,9 +135,28 @@ export function useTexEngine({
   useEffect(() => {
     if (!projectId) return;
     let active = true;
-    void loadCompiledPdfSnapshot(projectId).then((cached) => {
-      if (active && cached && cached.byteLength > 0) {
-        setPdf((curr) => (curr ? curr : cached));
+    void loadCompiledSnapshot(projectId).then((cached) => {
+      if (active && cached && cached.pdf && cached.pdf.byteLength > 0) {
+        setPdf((curr) => (curr ? curr : cached.pdf));
+        if (cached.synctex && cached.synctex.byteLength > 0) {
+          setOutcome((prev) => {
+            if (prev) return prev;
+            return {
+              ok: true,
+              pdf: cached.pdf,
+              synctex: cached.synctex,
+              log: 'Restored from local snapshot cache.',
+              diagnostics: [],
+              missingPackages: [],
+              rerunRequired: false,
+              entryPath: 'main.tex',
+              engine: engineRef.current,
+              durationMs: 0,
+              requestId: 0,
+              superseded: false,
+            };
+          });
+        }
       }
     });
     return () => {

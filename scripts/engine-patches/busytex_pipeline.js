@@ -621,7 +621,10 @@ class BusytexPipeline {
         }
 
         const pdf = exit_code === 0 ? this.read_all_bytes(FS, pdf_path) : null;
-        const synctex = exit_code === 0 ? this.read_all_bytes(FS, tex_path.replace('.tex', '.synctex.gz')) : null;
+        let synctex = exit_code === 0 ? this.read_all_bytes(FS, tex_path.replace('.tex', '.synctex.gz')) : null;
+        if (!synctex || synctex.byteLength === 0) {
+            synctex = exit_code === 0 ? this.read_all_bytes(FS, tex_path.replace('.tex', '.synctex')) : null;
+        }
         const logcat = logs.map(({ log, stdout, stderr }) => [log, stdout, stderr].filter(Boolean).join('\n')).join('\n\n');
 
         this.Module = this.preload === false ? null : this.Module;

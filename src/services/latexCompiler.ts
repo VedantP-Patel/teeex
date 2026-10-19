@@ -704,7 +704,7 @@ export class TexEngineService {
 
       // Layer 1 & 5: Persist PDF snapshot and auxiliary artifacts to IndexedDB
       if (pdf && input.projectId) {
-        void saveCompiledPdfSnapshot(input.projectId, pdf).catch(() => {});
+        void saveCompiledPdfSnapshot(input.projectId, pdf, result.synctex).catch(() => {});
 
         void (async () => {
           try {
