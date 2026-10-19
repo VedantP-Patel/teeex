@@ -7,6 +7,7 @@
 import type { ProjectFile } from '../types/latex';
 import { getSupabaseClient, isSupabaseConnected } from './supabaseClient';
 import { computeLineDiff } from './diffService';
+import { saveCheckpointsOffline, loadCheckpointsOffline } from './offlineStorageService';
 
 export interface CommitStats {
   additions: number;
@@ -268,16 +269,51 @@ export function loadProjectCheckpoints(
 }
 
 /**
- * Persist checkpoints for a given project to localStorage.
+ * Persist checkpoints for a given project with dual-layer architecture:
+ * 1. Durable storage in IndexedDB (teeex_offline_db -> checkpoints_cache)
+ * 2. Synchronous cache in localStorage with quota-exceeded fallback.
  */
 export function saveProjectCheckpoints(projectId: string, checkpoints: Checkpoint[]): void {
   if (!projectId) return;
+  const trimmed = (checkpoints || []).slice(0, MAX_CHECKPOINTS_PER_PROJECT);
+
+  // 1. Durable write to IndexedDB
+  saveCheckpointsOffline(projectId, trimmed).catch(() => {});
+
+  // 2. Synchronous fast head cache in localStorage
   const key = getStorageKey(projectId);
   try {
-    localStorage.setItem(key, JSON.stringify(checkpoints));
+    localStorage.setItem(key, JSON.stringify(trimmed));
   } catch (err) {
-    console.warn(`Failed to persist checkpoints for project ${projectId}:`, err);
+    console.warn(`[CheckpointsService] localStorage quota exceeded for project ${projectId}. Checkpoints are safely persisted in IndexedDB:`, err);
+    try {
+      // Retain the top 10 most recent commits in localStorage if full
+      localStorage.setItem(key, JSON.stringify(trimmed.slice(0, 10)));
+    } catch {
+      // IndexedDB has the complete copy
+    }
   }
+}
+
+/**
+ * Hydrates checkpoints from IndexedDB if localStorage was cleared, missing,
+ * or truncated due to quota limits.
+ */
+export async function hydrateCheckpointsFromOffline(projectId: string): Promise<Checkpoint[] | null> {
+  if (!projectId) return null;
+  try {
+    const offlineCheckpoints = await loadCheckpointsOffline(projectId);
+    if (offlineCheckpoints && offlineCheckpoints.length > 0) {
+      const local = loadProjectCheckpoints(projectId);
+      if (local.length < offlineCheckpoints.length) {
+        saveProjectCheckpoints(projectId, offlineCheckpoints);
+        return offlineCheckpoints;
+      }
+    }
+  } catch {
+    // Ignore hydration errors
+  }
+  return null;
 }
 
 /**
@@ -687,4 +723,33 @@ export function haveFilesChanged(oldFiles: ProjectFile[], newFiles: ProjectFile[
     if (matched.content !== n.content) return true;
   }
   return false;
+}
+
+/**
+ * Creates an automatic version history milestone if files have changed significantly
+ * since the most recent checkpoint.
+ */
+export function createAutoSaveCheckpointIfNeeded(
+  projectId: string,
+  files: ProjectFile[],
+  author = 'Auto-Save'
+): Checkpoint | null {
+  if (!projectId || !files || files.length === 0) return null;
+  const current = loadProjectCheckpoints(projectId);
+  const latest = current[0];
+  if (!latest || haveFilesChanged(latest.files, files)) {
+    const stats = computeCommitStats(latest ? latest.files : [], files);
+    if (stats.additions + stats.deletions > 0 || stats.filesChanged > 0) {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return createCheckpoint(
+        projectId,
+        `Auto-save Milestone (${timeStr})`,
+        author,
+        files,
+        true
+      );
+    }
+  }
+  return null;
 }

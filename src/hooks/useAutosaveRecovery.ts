@@ -38,7 +38,7 @@ export interface AutosaveRecoveryResult {
   restoreRecoveredDraft: () => void;
   discardRecoveredDraft: () => void;
   saveNow: () => Promise<void>;
-  markDirty: () => void;
+  markDirty: (immediateFiles?: ProjectFile[]) => void;
 }
 
 export const EMERGENCY_DRAFT_PREFIX = 'teeex_emergency_draft_';
@@ -181,11 +181,16 @@ export function useAutosaveRecovery({
     }
   }, [activeProject]);
 
-  const markDirty = useCallback(() => {
+  const markDirty = useCallback((immediateFiles?: ProjectFile[]) => {
     setIsDirty(true);
-    // Write synchronous emergency mirror immediately
     const current = stateRef.current;
-    writeEmergencyDraft(current.projectId, current.files, current.folders, current.projectTitle);
+    const targetFiles = immediateFiles || current.files;
+    stateRef.current = {
+      ...current,
+      files: targetFiles,
+      isDirty: true,
+    };
+    writeEmergencyDraft(current.projectId, targetFiles, current.folders, current.projectTitle);
 
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);

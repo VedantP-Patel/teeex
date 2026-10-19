@@ -20,6 +20,8 @@ import {
   getProjectBranches,
   createBranch,
   deleteBranch,
+  hydrateCheckpointsFromOffline,
+  createAutoSaveCheckpointIfNeeded,
 } from './services/checkpointsService';
 
 import { ModalContainer } from './components/modals/ModalContainer';
@@ -30,7 +32,7 @@ import { useFileHandling } from './hooks/useFileHandling';
 
 import { formatLatexCode } from './services/latexFormatter';
 import { logAuditAction } from './services/auditService';
-import { saveProjectOffline } from './services/offlineStorageService';
+import { saveProjectOffline, requestDurableStorage } from './services/offlineStorageService';
 import { encryptText, decryptText } from './services/encryptionService';
 import { downloadPdf } from './services/pdfExporter';
 import { applyDocumentClass, formatResolutionNotice, setTwoColumn, type PaperFormatId } from './services/paperFormats';
@@ -226,7 +228,7 @@ export function App() {
     });
     setProjects(updatedProjects);
 
-    const currProj = projectsRef.current.find(p => p.id === pid);
+    const currProj = projectsRef.current.find(p => p.id === pid) || updatedProjects.find(p => p.id === pid);
     if (currProj) {
       saveProjectOffline({
         ...currProj,
@@ -378,10 +380,17 @@ export function App() {
   // Real-time peer presence driven by Yjs awareness and Supabase Realtime
   const [peers, setPeers] = useState<Collaborator[]>([]);
 
-  // Keep checkpoints in sync whenever activeProjectId changes, and pull from Supabase Cloud
+  // Keep checkpoints in sync whenever activeProjectId changes, hydrate from IndexedDB, and pull from Supabase Cloud
   useEffect(() => {
     const localCps = loadProjectCheckpoints(activeProjectId, filesRef.current, currentUser?.fullName || 'You');
     setCheckpoints(localCps);
+
+    // Hydrate from IndexedDB if localStorage was cleared or has fewer checkpoints
+    hydrateCheckpointsFromOffline(activeProjectId).then(offlineCps => {
+      if (offlineCps && offlineCps.length > localCps.length) {
+        setCheckpoints(offlineCps);
+      }
+    }).catch(() => { });
 
     if (isSupabaseConnected()) {
       fetchProjectCheckpointsFromCloud(activeProjectId).then(res => {
@@ -391,6 +400,26 @@ export function App() {
       }).catch(() => { });
     }
   }, [activeProjectId, currentUser?.fullName]);
+
+  // Request durable (persistent) browser storage on initial startup to guard against cache eviction
+  useEffect(() => {
+    requestDurableStorage().catch(() => { });
+  }, []);
+
+  // Periodic Autosave Milestone Checkpoints (every 5 minutes during active session)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const pid = activeProjectIdRef.current;
+      const currFiles = filesRef.current;
+      if (!pid || !currFiles || currFiles.length === 0) return;
+      const newCp = createAutoSaveCheckpointIfNeeded(pid, currFiles, currentUser?.fullName || selfUser.name);
+      if (newCp) {
+        setCheckpoints(prev => [newCp, ...prev.filter(c => c.id !== newCp.id)]);
+      }
+    }, 5 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [currentUser?.fullName, selfUser.name]);
 
   // Ctrl+Shift+G Shortcut for Source Control & Git Version History
   useEffect(() => {
@@ -919,11 +948,14 @@ export function App() {
     setIsEncryptionModalOpen(false);
   }, [currentUser, currentRole]);
 
-  // Fast, non-blocking file content update
+  // Fast, non-blocking file content update with immediate synchronous ref & draft sync
   const handleCodeChange = useCallback((newCode: string) => {
     pulseTyping();
     const currentId = activeFileIdRef.current;
-    setFiles(prev => prev.map(f => f.id === currentId ? { ...f, content: newCode } : f));
+    const updatedFiles = filesRef.current.map(f => f.id === currentId ? { ...f, content: newCode } : f);
+    filesRef.current = updatedFiles;
+    setFiles(updatedFiles);
+
     if (providerRef.current) {
       const yText = providerRef.current.getText(currentId);
       if (yText.toString() !== newCode) {
@@ -933,7 +965,7 @@ export function App() {
         }, 'local-editor');
       }
     }
-    markDirty();
+    markDirty(updatedFiles);
   }, [markDirty, pulseTyping]);
 
   // Cursor change: Broadcasts via throttled awareness to peers, throttles local UI outline update to 200ms

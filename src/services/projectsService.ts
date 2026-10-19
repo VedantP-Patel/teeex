@@ -4,6 +4,7 @@ import { getAuthUid, getSupabaseClient } from './supabaseClient';
 import { getStoredSession } from './authService';
 import { verifyShareKey } from './shareSecurityService';
 import { safePostTask } from '../utils/scheduler';
+import { saveProjectOffline, loadProjectOffline } from './offlineStorageService';
 
 const PROJECTS_STORAGE_KEY = 'teeex_saved_projects';
 const ACTIVE_PROJECT_ID_KEY = 'teeex_active_project_id';
@@ -272,9 +273,62 @@ export function loadProjects(userEmail?: string, userName?: string): Project[] {
   }));
 }
 
+function pruneLocalStorageQuota(): void {
+  try {
+    const activeId = localStorage.getItem(ACTIVE_PROJECT_ID_KEY);
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('teeex_emergency_draft_') && (!activeId || !key.includes(activeId))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(k => {
+      try { localStorage.removeItem(k); } catch {}
+    });
+  } catch {}
+}
+
 export function saveProjects(projects: Project[]): void {
   const sanitized = projects.filter(p => p.id !== 'proj-guest' && p.title !== 'Sign In Required');
-  localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(sanitized));
+
+  // 1. Always mirror all sanitized projects to IndexedDB offline storage
+  for (const p of sanitized) {
+    saveProjectOffline(p).catch(() => {});
+  }
+
+  // 2. Persist to localStorage with quota-safe fallback
+  try {
+    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(sanitized));
+  } catch (err) {
+    console.warn('[ProjectsService] Primary localStorage save failed or exceeded quota. Pruning and retrying...', err);
+    pruneLocalStorageQuota();
+    try {
+      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(sanitized));
+    } catch (retryErr) {
+      console.warn('[ProjectsService] Quota still exceeded. Falling back to active project retention in localStorage:', retryErr);
+      try {
+        const activeId = localStorage.getItem(ACTIVE_PROJECT_ID_KEY);
+        const slim = sanitized.map(p => {
+          if (p.id === activeId) return p;
+          return {
+            ...p,
+            files: p.files.map(f => ({
+              ...f,
+              content: f.content.length > 500 ? f.content.slice(0, 200) + '... [Persisted in IndexedDB]' : f.content,
+            })),
+          };
+        });
+        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(slim));
+      } catch (finalErr) {
+        console.error('[ProjectsService] Critical: localStorage is completely exhausted. Manuscript is persisted in IndexedDB.', finalErr);
+      }
+    }
+  }
+}
+
+export async function hydrateProjectFromOffline(projectId: string): Promise<Project | null> {
+  return await loadProjectOffline(projectId);
 }
 
 export function getActiveProjectId(projects: Project[]): string {
