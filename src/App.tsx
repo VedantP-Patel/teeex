@@ -15,6 +15,11 @@ import {
   fetchProjectCheckpointsFromCloud,
   pushCommitsToCloud,
   getWorkingTreeStatus,
+  getActiveBranch,
+  setActiveBranch,
+  getProjectBranches,
+  createBranch,
+  deleteBranch,
 } from './services/checkpointsService';
 
 import { ModalContainer } from './components/modals/ModalContainer';
@@ -1061,14 +1066,64 @@ export function App() {
     return getWorkingTreeStatus(files, head);
   }, [files, checkpoints]);
 
+  const [activeBranch, setActiveBranchState] = useState<string>(() => {
+    return getActiveBranch(activeProjectId) || 'main';
+  });
+  const [projectBranches, setProjectBranches] = useState<string[]>(() => {
+    return getProjectBranches(activeProjectId);
+  });
+
+  useEffect(() => {
+    setActiveBranchState(getActiveBranch(activeProjectId));
+    setProjectBranches(getProjectBranches(activeProjectId));
+  }, [activeProjectId]);
+
+  const handleSwitchBranch = useCallback((branchName: string, checkoutHead = false) => {
+    setActiveBranch(activeProjectIdRef.current, branchName);
+    setActiveBranchState(branchName);
+    setToast(`Switched to branch "${branchName}"`);
+
+    if (checkoutHead) {
+      const cps = loadProjectCheckpoints(activeProjectIdRef.current);
+      const branchHead = cps.find(c => (c.branch || 'main') === branchName) || cps[0];
+      if (branchHead && branchHead.files.length > 0) {
+        setFiles(branchHead.files);
+        setToast(`Checked out branch "${branchName}" (${branchHead.shortSha})`);
+      }
+    }
+  }, []);
+
+  const handleCreateBranch = useCallback((branchName: string) => {
+    const res = createBranch(activeProjectIdRef.current, branchName);
+    if (res.success) {
+      const updated = getProjectBranches(activeProjectIdRef.current);
+      setProjectBranches(updated);
+      setActiveBranchState(branchName.trim().replace(/\s+/g, '-').toLowerCase());
+      setToast(`Created and switched to branch "${branchName}"`);
+    } else {
+      setToast(`Failed to create branch: ${res.error || 'Error'}`);
+    }
+  }, []);
+
+  const handleDeleteBranch = useCallback((branchName: string) => {
+    const res = deleteBranch(activeProjectIdRef.current, branchName);
+    if (res.success) {
+      setProjectBranches(getProjectBranches(activeProjectIdRef.current));
+      setToast(`Deleted branch "${branchName}"`);
+    } else {
+      setToast(`Failed to delete branch: ${res.error || 'Error'}`);
+    }
+  }, []);
+
   const handleCreateCommit = useCallback((message: string, description?: string) => {
+    const currentBranch = getActiveBranch(activeProjectIdRef.current) || 'main';
     const newCommit = createCommit(
       activeProjectIdRef.current,
       message,
       currentUser?.fullName || selfUser.name,
       filesRef.current,
       description,
-      'main',
+      currentBranch,
       currentUser?.email || ''
     );
     setCheckpoints(prev => [newCommit, ...prev.filter(c => c.id !== newCommit.id)]);
@@ -2047,6 +2102,11 @@ export function App() {
         handleCreateCommit={handleCreateCommit}
         handlePushCommits={handlePushCommits}
         handlePullCommits={handlePullCommits}
+        activeBranch={activeBranch}
+        branches={projectBranches}
+        onSwitchBranch={handleSwitchBranch}
+        onCreateBranch={handleCreateBranch}
+        onDeleteBranch={handleDeleteBranch}
         isCloudConnected={isCloudConnected}
         parsedDoc={parsedDoc}
         wordCount={wordCount}

@@ -149,6 +149,11 @@ export interface ModalContainerProps {
   handleCreateCommit?: (message: string, description?: string) => void;
   handlePushCommits?: () => Promise<void>;
   handlePullCommits?: () => Promise<void>;
+  activeBranch?: string;
+  branches?: string[];
+  onSwitchBranch?: (branchName: string, checkoutHead?: boolean) => void;
+  onCreateBranch?: (branchName: string) => void;
+  onDeleteBranch?: (branchName: string) => void;
 }
 
 export const ModalContainer: React.FC<ModalContainerProps> = ({
@@ -236,6 +241,11 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
   handleCreateCommit,
   handlePushCommits,
   handlePullCommits,
+  activeBranch,
+  branches,
+  onSwitchBranch,
+  onCreateBranch,
+  onDeleteBranch,
 }) => {
   const isAnyModalOpen =
     isImageUploadOpen ||
@@ -315,6 +325,11 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
           onSyncCloud={handleSyncCheckpointsCloud}
           isCloudConnected={isCloudConnected}
           activeProjectId={activeProjectId || activeProject?.id}
+          activeBranch={activeBranch}
+          branches={branches}
+          onSwitchBranch={onSwitchBranch}
+          onCreateBranch={onCreateBranch}
+          onDeleteBranch={onDeleteBranch}
         />
       )}
 

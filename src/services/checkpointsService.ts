@@ -55,10 +55,127 @@ export interface SyncStatus {
 }
 
 const CHECKPOINTS_STORAGE_PREFIX = 'teeex_checkpoints_';
+const BRANCHES_STORAGE_PREFIX = 'teeex_branches_';
+const ACTIVE_BRANCH_STORAGE_PREFIX = 'teeex_active_branch_';
 const MAX_CHECKPOINTS_PER_PROJECT = 50;
 
 function getStorageKey(projectId: string): string {
   return `${CHECKPOINTS_STORAGE_PREFIX}${projectId}`;
+}
+
+function getBranchesStorageKey(projectId: string): string {
+  return `${BRANCHES_STORAGE_PREFIX}${projectId}`;
+}
+
+function getActiveBranchStorageKey(projectId: string): string {
+  return `${ACTIVE_BRANCH_STORAGE_PREFIX}${projectId}`;
+}
+
+/**
+ * Retrieves the list of branch names for a project (defaults to ['main']).
+ */
+export function getProjectBranches(projectId: string): string[] {
+  if (!projectId) return ['main'];
+  try {
+    const raw = localStorage.getItem(getBranchesStorageKey(projectId));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return Array.from(new Set(['main', ...parsed.filter(Boolean)]));
+      }
+    }
+  } catch (err) {
+    console.warn(`Failed to read branches for project ${projectId}:`, err);
+  }
+  return ['main'];
+}
+
+/**
+ * Returns the active branch name for a project (defaults to 'main').
+ */
+export function getActiveBranch(projectId: string): string {
+  if (!projectId) return 'main';
+  try {
+    const active = localStorage.getItem(getActiveBranchStorageKey(projectId));
+    if (active && typeof active === 'string') {
+      return active;
+    }
+  } catch {
+    // fallback
+  }
+  return 'main';
+}
+
+/**
+ * Sets the active branch for a project.
+ */
+export function setActiveBranch(projectId: string, branchName: string): void {
+  if (!projectId || !branchName) return;
+  try {
+    const branches = getProjectBranches(projectId);
+    if (!branches.includes(branchName)) {
+      branches.push(branchName);
+      localStorage.setItem(getBranchesStorageKey(projectId), JSON.stringify(branches));
+    }
+    localStorage.setItem(getActiveBranchStorageKey(projectId), branchName);
+  } catch (err) {
+    console.warn(`Failed to set active branch for project ${projectId}:`, err);
+  }
+}
+
+/**
+ * Creates a new branch for a project.
+ */
+export function createBranch(
+  projectId: string,
+  branchName: string,
+  _sourceCommitId?: string
+): { success: boolean; error?: string } {
+  if (!projectId) return { success: false, error: 'Invalid project ID' };
+  const cleanName = branchName.trim().replace(/\s+/g, '-').toLowerCase();
+  if (!cleanName) return { success: false, error: 'Branch name cannot be empty' };
+  if (!/^[a-z0-9_\-\/\.]+$/.test(cleanName)) {
+    return { success: false, error: 'Branch name can only contain lowercase alphanumeric, -, _, /, and .' };
+  }
+
+  const branches = getProjectBranches(projectId);
+  if (branches.includes(cleanName)) {
+    return { success: false, error: `Branch "${cleanName}" already exists` };
+  }
+
+  branches.push(cleanName);
+  try {
+    localStorage.setItem(getBranchesStorageKey(projectId), JSON.stringify(branches));
+    localStorage.setItem(getActiveBranchStorageKey(projectId), cleanName);
+    return { success: true };
+  } catch (err: unknown) {
+    const e = err as { message?: string };
+    return { success: false, error: e?.message || 'Failed to save branch' };
+  }
+}
+
+/**
+ * Deletes a branch from a project.
+ */
+export function deleteBranch(
+  projectId: string,
+  branchName: string
+): { success: boolean; error?: string } {
+  if (!projectId || !branchName) return { success: false, error: 'Invalid arguments' };
+  if (branchName === 'main') return { success: false, error: 'Cannot delete default branch "main"' };
+  if (branchName === getActiveBranch(projectId)) {
+    return { success: false, error: 'Cannot delete currently active branch. Switch to another branch first.' };
+  }
+
+  const branches = getProjectBranches(projectId);
+  const updated = branches.filter(b => b !== branchName);
+  try {
+    localStorage.setItem(getBranchesStorageKey(projectId), JSON.stringify(updated));
+    return { success: true };
+  } catch (err: unknown) {
+    const e = err as { message?: string };
+    return { success: false, error: e?.message || 'Failed to delete branch' };
+  }
 }
 
 /**
@@ -221,11 +338,12 @@ export function createCommit(
   author: string,
   files: ProjectFile[],
   description = '',
-  branch = 'main',
+  branch?: string,
   authorEmail = ''
 ): Checkpoint {
   const current = loadProjectCheckpoints(projectId);
   const headCommit = current[0] || null;
+  const resolvedBranch = branch || getActiveBranch(projectId) || 'main';
 
   const now = new Date();
   const sha = generateShortSha(`${projectId}-${message}-${now.getTime()}`);
@@ -244,7 +362,7 @@ export function createCommit(
     files: JSON.parse(JSON.stringify(files)),
     stats,
     parentId: headCommit ? headCommit.id : null,
-    branch,
+    branch: resolvedBranch,
     isSyncedToCloud: false,
     isAutoSave: false,
     createdAt: now.toISOString(),

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   X,
   GitCommit,
@@ -16,6 +16,10 @@ import {
   Download,
   Search,
   Undo2,
+  Copy,
+  FileText,
+  ChevronDown,
+  Plus,
 } from 'lucide-react';
 import type { ProjectFile } from '../../types/latex';
 import {
@@ -24,9 +28,13 @@ import {
   type DiffResult,
   type FileDiffSummary,
 } from '../../services/diffService';
-import type {
-  Checkpoint,
-  WorkingTreeStatus,
+import {
+  getProjectBranches,
+  getActiveBranch,
+  setActiveBranch,
+  createBranch,
+  type Checkpoint,
+  type WorkingTreeStatus,
 } from '../../services/checkpointsService';
 import { readEmergencyDraft, type RecoveredDraftInfo } from '../../hooks/useAutosaveRecovery';
 
@@ -38,6 +46,11 @@ interface Props {
   checkpoints: Checkpoint[];
   currentFiles: ProjectFile[];
   workingTreeStatus?: WorkingTreeStatus;
+  activeBranch?: string;
+  branches?: string[];
+  onSwitchBranch?: (branchName: string, checkoutHead?: boolean) => void;
+  onCreateBranch?: (branchName: string) => void;
+  onDeleteBranch?: (branchName: string) => void;
   onCreateCommit?: (message: string, description?: string) => void;
   onCreateCheckpoint: (name: string) => void;
   onRestoreCheckpoint: (checkpoint: Checkpoint) => void;
@@ -50,12 +63,20 @@ interface Props {
   activeProjectId?: string;
 }
 
+const ROW_HEIGHT = 22;
+const OVERSCAN = 15;
+
 export const VersionHistoryModal: React.FC<Props> = ({
   isOpen,
   onClose,
   checkpoints = [],
   currentFiles = [],
   workingTreeStatus,
+  activeBranch,
+  branches,
+  onSwitchBranch,
+  onCreateBranch,
+  onDeleteBranch,
   onCreateCommit,
   onCreateCheckpoint,
   onRestoreCheckpoint,
@@ -71,11 +92,22 @@ export const VersionHistoryModal: React.FC<Props> = ({
   const safeCurrentFiles = useMemo(() => currentFiles || [], [currentFiles]);
   const headCommit = safeCheckpoints[0] || null;
 
+  // Branch management
+  const effectiveActiveBranch = activeBranch || getActiveBranch(activeProjectId) || 'main';
+  const safeBranches = branches || getProjectBranches(activeProjectId) || ['main'];
+  const [isBranchPopoverOpen, setIsBranchPopoverOpen] = useState(false);
+  const [branchSearchQuery, setBranchSearchQuery] = useState('');
+  const [branchFilter, setBranchFilter] = useState<'all' | 'current'>('all');
+
   // Derive working tree if not passed
-  const isWorkingClean = workingTreeStatus ? workingTreeStatus.isClean : safeCheckpoints.length > 0 && safeCheckpoints[0].files.length === safeCurrentFiles.length && safeCurrentFiles.every(f => {
-    const matched = safeCheckpoints[0].files.find(cf => cf.name === f.name);
-    return matched && matched.content === f.content;
-  });
+  const isWorkingClean = workingTreeStatus
+    ? workingTreeStatus.isClean
+    : safeCheckpoints.length > 0 &&
+      safeCheckpoints[0].files.length === safeCurrentFiles.length &&
+      safeCurrentFiles.every(f => {
+        const matched = safeCheckpoints[0].files.find(cf => cf.name === f.name);
+        return matched && matched.content === f.content;
+      });
 
   const [activeTab, setActiveTab] = useState<'changes' | 'commits' | 'drafts'>(() => {
     return !isWorkingClean ? 'changes' : 'commits';
@@ -85,7 +117,14 @@ export const VersionHistoryModal: React.FC<Props> = ({
   const [selectedCheckpointId, setSelectedCheckpointId] = useState<string>(
     safeCheckpoints.length > 0 ? safeCheckpoints[0].id : ''
   );
+
+  // View mode: 'diff' (what changed) vs 'snapshot' (full older version file reader)
+  const [viewMode, setViewMode] = useState<'diff' | 'snapshot'>('diff');
+  // Diff sub-mode: 'unified' vs 'split'
   const [diffMode, setDiffMode] = useState<'split' | 'unified'>('unified');
+  // Comparison target: 'parent' (compare commit to parent) vs 'current' (compare commit to current working tree)
+  const [comparisonTarget, setComparisonTarget] = useState<'parent' | 'current'>('parent');
+
   const [selectedFileName, setSelectedFileName] = useState<string>(() => {
     return safeCurrentFiles.find(f => f.name.endsWith('.tex'))?.name || safeCurrentFiles[0]?.name || 'main.tex';
   });
@@ -97,6 +136,33 @@ export const VersionHistoryModal: React.FC<Props> = ({
   const [isSyncing, setIsSyncing] = useState(false);
   const [restoredToast, setRestoredToast] = useState<'commit' | 'file' | 'draft' | null>(null);
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState(false);
+
+  // Virtualization Scroll & Viewport Measurement
+  const virtualViewportRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(600);
+
+  useEffect(() => {
+    const el = virtualViewportRef.current;
+    if (!el) return;
+
+    const onScroll = () => {
+      setScrollTop(el.scrollTop);
+    };
+    const onResize = () => {
+      setViewportHeight(el.clientHeight);
+    };
+
+    onResize();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [viewMode, diffMode, selectedFileName]);
 
   // Emergency crash draft
   const [emergencyDraft, setEmergencyDraft] = useState<RecoveredDraftInfo | null>(null);
@@ -115,23 +181,49 @@ export const VersionHistoryModal: React.FC<Props> = ({
     if (inspectingWorkingTree) {
       const oldFiles = headCommit ? headCommit.files : [];
       const newFiles = safeCurrentFiles;
-      return { oldFiles, newFiles, labelOld: headCommit ? `HEAD (${headCommit.shortSha || 'head'})` : 'Initial', labelNew: 'Working Tree (Uncommitted)' };
+      return {
+        oldFiles,
+        newFiles,
+        labelOld: headCommit ? `HEAD (${headCommit.shortSha || 'head'})` : 'Initial',
+        labelNew: 'Working Tree (Uncommitted)',
+        isRootBaseline: false,
+      };
     }
 
     if (!selectedCheckpoint) {
-      return { oldFiles: [], newFiles: safeCurrentFiles, labelOld: 'Base', labelNew: 'Current' };
+      return {
+        oldFiles: [],
+        newFiles: safeCurrentFiles,
+        labelOld: 'Base',
+        labelNew: 'Current',
+        isRootBaseline: false,
+      };
     }
 
+    if (comparisonTarget === 'current') {
+      return {
+        oldFiles: selectedCheckpoint.files,
+        newFiles: safeCurrentFiles,
+        labelOld: `${selectedCheckpoint.name} (${selectedCheckpoint.shortSha || selectedCheckpoint.id.slice(0, 7)})`,
+        labelNew: 'Current Working Tree',
+        isRootBaseline: false,
+      };
+    }
+
+    // Default 'parent' comparison
     const parent = selectedCheckpoint.parentId ? safeCheckpoints.find(c => c.id === selectedCheckpoint.parentId) : null;
+    const isRoot = !parent;
     const oldFiles = parent ? parent.files : [];
     const newFiles = selectedCheckpoint.files;
+
     return {
       oldFiles,
       newFiles,
-      labelOld: parent ? `${parent.name} (${parent.shortSha})` : 'Root / Init',
+      labelOld: parent ? `${parent.name} (${parent.shortSha})` : 'Root / Init (Baseline)',
       labelNew: `${selectedCheckpoint.name} (${selectedCheckpoint.shortSha || selectedCheckpoint.id.slice(0, 7)})`,
+      isRootBaseline: isRoot,
     };
-  }, [inspectingWorkingTree, headCommit, safeCurrentFiles, selectedCheckpoint, safeCheckpoints]);
+  }, [inspectingWorkingTree, headCommit, safeCurrentFiles, selectedCheckpoint, safeCheckpoints, comparisonTarget]);
 
   // Compute multi-file diff summary
   const projectDiffSummaries: FileDiffSummary[] = useMemo(() => {
@@ -150,10 +242,91 @@ export const VersionHistoryModal: React.FC<Props> = ({
     return computeLineDiff('', '');
   }, [activeFileDiff]);
 
+  // Full file snapshot content for "View Older Version"
+  const snapshotContent = useMemo(() => {
+    if (inspectingWorkingTree) {
+      return safeCurrentFiles.find(f => f.name === selectedFileName)?.content || '';
+    }
+    return selectedCheckpoint?.files.find(f => f.name === selectedFileName)?.content || '';
+  }, [inspectingWorkingTree, safeCurrentFiles, selectedCheckpoint, selectedFileName]);
+
+  const snapshotLines = useMemo(() => {
+    if (!snapshotContent) return [];
+    return snapshotContent.split('\n');
+  }, [snapshotContent]);
+
+  // Virtualization window calculations
+  const virtualUnifiedWindow = useMemo(() => {
+    const totalCount = activeDiffResult.lines.length;
+    const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+    const endIndex = Math.min(totalCount, Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN);
+    return {
+      totalCount,
+      startIndex,
+      endIndex,
+      topPadding: startIndex * ROW_HEIGHT,
+      bottomPadding: Math.max(0, (totalCount - endIndex) * ROW_HEIGHT),
+      visibleItems: activeDiffResult.lines.slice(startIndex, endIndex),
+    };
+  }, [activeDiffResult.lines, scrollTop, viewportHeight]);
+
+  const virtualSplitWindow = useMemo(() => {
+    const totalCount = activeDiffResult.splitRows.length;
+    const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+    const endIndex = Math.min(totalCount, Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN);
+    return {
+      totalCount,
+      startIndex,
+      endIndex,
+      topPadding: startIndex * ROW_HEIGHT,
+      bottomPadding: Math.max(0, (totalCount - endIndex) * ROW_HEIGHT),
+      visibleItems: activeDiffResult.splitRows.slice(startIndex, endIndex),
+    };
+  }, [activeDiffResult.splitRows, scrollTop, viewportHeight]);
+
+  const virtualSnapshotWindow = useMemo(() => {
+    const totalCount = snapshotLines.length;
+    const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+    const endIndex = Math.min(totalCount, Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN);
+    return {
+      totalCount,
+      startIndex,
+      endIndex,
+      topPadding: startIndex * ROW_HEIGHT,
+      bottomPadding: Math.max(0, (totalCount - endIndex) * ROW_HEIGHT),
+      visibleItems: snapshotLines.slice(startIndex, endIndex),
+    };
+  }, [snapshotLines, scrollTop, viewportHeight]);
+
   // Calculate sync status (ahead commits)
   const aheadCount = useMemo(() => {
     return safeCheckpoints.filter(c => !c.isSyncedToCloud && !c.isAutoSave).length;
   }, [safeCheckpoints]);
+
+  // Filtered branches for switcher
+  const filteredBranches = useMemo(() => {
+    if (!branchSearchQuery.trim()) return safeBranches;
+    const q = branchSearchQuery.toLowerCase();
+    return safeBranches.filter(b => b.toLowerCase().includes(q));
+  }, [safeBranches, branchSearchQuery]);
+
+  const handleSwitchToBranch = (b: string) => {
+    if (onSwitchBranch) {
+      onSwitchBranch(b, true);
+    } else {
+      setActiveBranch(activeProjectId, b);
+    }
+  };
+
+  const handleCreateNewBranch = (name: string) => {
+    if (onCreateBranch) {
+      onCreateBranch(name);
+    } else {
+      createBranch(activeProjectId, name);
+    }
+    setBranchSearchQuery('');
+    setIsBranchPopoverOpen(false);
+  };
 
   // Commit submission
   const handleCommitSubmit = (e: React.FormEvent) => {
@@ -209,7 +382,6 @@ export const VersionHistoryModal: React.FC<Props> = ({
     setRestoredToast('commit');
     setTimeout(() => {
       setRestoredToast(null);
-      onClose();
     }, 1200);
   };
 
@@ -246,7 +418,6 @@ export const VersionHistoryModal: React.FC<Props> = ({
     setRestoredToast('draft');
     setTimeout(() => {
       setRestoredToast(null);
-      onClose();
     }, 1200);
   };
 
@@ -301,9 +472,117 @@ export const VersionHistoryModal: React.FC<Props> = ({
                 <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
                   Source Control &amp; Git Version History
                 </h2>
-                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, backgroundColor: isCloudConnected ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-surface-2)', color: isCloudConnected ? '#10b981' : '#38bdf8', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                  branch: main {isCloudConnected ? '(cloud)' : '(local)'}
-                </span>
+
+                {/* Interactive Branch Switcher Popover Trigger */}
+                <div style={{ position: 'relative' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsBranchPopoverOpen(prev => !prev)}
+                    className="btn-ghost"
+                    style={{
+                      fontSize: 11,
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      backgroundColor: isCloudConnected ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-surface-2)',
+                      color: isCloudConnected ? '#10b981' : '#38bdf8',
+                      fontFamily: 'var(--font-mono)',
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      border: '1px solid var(--border-subtle)',
+                    }}
+                    title="Switch or create Git branches"
+                  >
+                    <GitBranch size={12} />
+                    <span>branch: {effectiveActiveBranch}</span>
+                    <ChevronDown size={11} style={{ transform: isBranchPopoverOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                  </button>
+
+                  {/* Branch Dropdown Popover */}
+                  {isBranchPopoverOpen && (
+                    <div className="git-branch-dropdown-popover">
+                      <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>Switch Branch</span>
+                        <button
+                          type="button"
+                          onClick={() => setIsBranchPopoverOpen(false)}
+                          className="btn-ghost"
+                          style={{ padding: '1px 4px', fontSize: 11, color: 'var(--text-muted)' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      <div style={{ padding: 6, borderBottom: '1px solid var(--border-subtle)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', backgroundColor: 'var(--bg-app)', borderRadius: 4, border: '1px solid var(--border-subtle)' }}>
+                          <Search size={11} color="var(--text-muted)" />
+                          <input
+                            type="text"
+                            placeholder="Find or create branch..."
+                            value={branchSearchQuery}
+                            onChange={(e) => setBranchSearchQuery(e.target.value)}
+                            style={{ border: 'none', outline: 'none', background: 'transparent', color: 'var(--text-primary)', fontSize: 11, width: '100%' }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ maxHeight: 180, overflowY: 'auto', padding: 4 }}>
+                        {filteredBranches.map(b => {
+                          const isActive = b === effectiveActiveBranch;
+                          return (
+                            <div
+                              key={b}
+                              className={`git-branch-item ${isActive ? 'is-active' : ''}`}
+                              onClick={() => {
+                                handleSwitchToBranch(b);
+                                setIsBranchPopoverOpen(false);
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <GitBranch size={12} />
+                                <span>{b}</span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                {isActive && <Check size={12} color="#38bdf8" />}
+                                {b !== 'main' && !isActive && onDeleteBranch && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (window.confirm(`Delete branch "${b}"?`)) {
+                                        onDeleteBranch(b);
+                                      }
+                                    }}
+                                    className="btn-ghost"
+                                    style={{ padding: '1px 3px', color: 'var(--text-muted)' }}
+                                    title="Delete branch"
+                                  >
+                                    <Trash2 size={10} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {branchSearchQuery.trim() && !safeBranches.includes(branchSearchQuery.trim().toLowerCase()) && (
+                        <div style={{ padding: '6px 8px', borderTop: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-surface-0)' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleCreateNewBranch(branchSearchQuery.trim())}
+                            className="btn-primary"
+                            style={{ width: '100%', fontSize: 11, padding: '4px 8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+                          >
+                            <Plus size={12} />
+                            <span>Create branch: {branchSearchQuery.trim().toLowerCase()}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
               <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>
                 High-fidelity green/red diffs, Git-style commit log, and remote cloud synchronization
@@ -366,7 +645,7 @@ export const VersionHistoryModal: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Content Body: Left Control Panel | Right Diff Viewer */}
+        {/* Content Body: Left Control Panel | Right Diff & Snapshot Viewer */}
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           {/* Left Panel: Tabs for Changes, Commits, and Emergency Drafts */}
           <div style={sidebarPanelStyle}>
@@ -377,30 +656,26 @@ export const VersionHistoryModal: React.FC<Props> = ({
                 onClick={() => {
                   setActiveTab('changes');
                   setInspectingWorkingTree(true);
+                  setViewMode('diff');
                 }}
                 style={{
                   flex: 1,
                   padding: '5px 8px',
                   fontSize: 11,
-                  fontWeight: activeTab === 'changes' ? 700 : 500,
+                  fontWeight: 600,
                   borderRadius: 4,
                   border: 'none',
                   cursor: 'pointer',
+                  backgroundColor: activeTab === 'changes' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+                  color: activeTab === 'changes' ? '#38bdf8' : 'var(--text-secondary)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 5,
-                  backgroundColor: activeTab === 'changes' ? 'rgba(56, 189, 248, 0.16)' : 'transparent',
-                  color: activeTab === 'changes' ? '#38bdf8' : 'var(--text-muted)',
                 }}
               >
-                <GitCommit size={12} />
+                <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: isWorkingClean ? '#10b981' : '#f59e0b' }} />
                 <span>Changes</span>
-                {!isWorkingClean && (
-                  <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 999, backgroundColor: '#f59e0b', color: '#000', fontWeight: 700 }}>
-                    {workingTreeStatus?.files.length || '!'}
-                  </span>
-                )}
               </button>
 
               <button
@@ -413,77 +688,69 @@ export const VersionHistoryModal: React.FC<Props> = ({
                   flex: 1,
                   padding: '5px 8px',
                   fontSize: 11,
-                  fontWeight: activeTab === 'commits' ? 700 : 500,
+                  fontWeight: 600,
                   borderRadius: 4,
                   border: 'none',
                   cursor: 'pointer',
+                  backgroundColor: activeTab === 'commits' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+                  color: activeTab === 'commits' ? '#38bdf8' : 'var(--text-secondary)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 5,
-                  backgroundColor: activeTab === 'commits' ? 'rgba(56, 189, 248, 0.16)' : 'transparent',
-                  color: activeTab === 'commits' ? '#38bdf8' : 'var(--text-muted)',
                 }}
               >
-                <Clock size={12} />
-                <span>Commits ({safeCheckpoints.filter(c => !c.isAutoSave).length})</span>
+                <GitCommit size={12} />
+                <span>Commits ({safeCheckpoints.length})</span>
               </button>
 
-              {emergencyDraft && (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('drafts')}
-                  style={{
-                    padding: '5px 8px',
-                    fontSize: 11,
-                    fontWeight: activeTab === 'drafts' ? 700 : 500,
-                    borderRadius: 4,
-                    border: 'none',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    backgroundColor: activeTab === 'drafts' ? 'rgba(239, 68, 68, 0.18)' : 'transparent',
-                    color: activeTab === 'drafts' ? '#f87171' : 'var(--text-muted)',
-                  }}
-                  title="Crash-recovery safety draft"
-                >
-                  <ShieldAlert size={12} />
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setActiveTab('drafts')}
+                style={{
+                  padding: '5px 8px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  borderRadius: 4,
+                  border: 'none',
+                  cursor: 'pointer',
+                  backgroundColor: activeTab === 'drafts' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
+                  color: activeTab === 'drafts' ? '#f87171' : 'var(--text-muted)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4,
+                }}
+                title="Emergency crash drafts (accident recovery)"
+              >
+                <ShieldAlert size={12} />
+              </button>
             </div>
 
-            {/* TAB 1: CHANGES & COMMIT FORM */}
+            {/* TAB 1: CHANGES (WORKING TREE & COMMIT COMPOSER) */}
             {activeTab === 'changes' && (
-              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflowY: 'auto' }}>
-                {/* Working Tree Changes List */}
-                <div style={{ padding: '10px 12px 6px', borderBottom: '1px solid var(--border-subtle)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      Working Tree Changes
-                    </span>
-                    {workingTreeStatus && (
-                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)' }}>
-                        <span style={{ color: '#10b981', fontWeight: 700 }}>+{workingTreeStatus.totalAdditions}</span>{' '}
-                        <span style={{ color: '#f43f5e', fontWeight: 700 }}>-{workingTreeStatus.totalDeletions}</span>
-                      </span>
-                    )}
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+                {/* Working Tree File Status List */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 6px', fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    <span>Working Tree</span>
+                    <span>{isWorkingClean ? 'Clean' : `${projectDiffSummaries.filter(d => d.status !== 'unchanged').length} changed`}</span>
                   </div>
 
                   {isWorkingClean ? (
-                    <div style={{ padding: '16px 8px', textAlign: 'center', color: '#10b981', fontSize: 11.5, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                      <Check size={20} />
-                      <span>Working tree clean. All changes committed to main.</span>
+                    <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                      <Check size={20} color="#10b981" style={{ margin: '0 auto 6px auto', display: 'block' }} />
+                      <span>Working tree is clean. No uncommitted modifications.</span>
                     </div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {projectDiffSummaries.filter(f => f.status !== 'unchanged').map(f => {
-                        const isSelected = selectedFileName === f.fileName && inspectingWorkingTree;
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+                      {projectDiffSummaries.map((diff) => {
+                        const isSelected = selectedFileName === diff.fileName;
                         return (
                           <div
-                            key={f.fileName}
+                            key={diff.fileId}
                             onClick={() => {
-                              setSelectedFileName(f.fileName);
+                              setSelectedFileName(diff.fileName);
                               setInspectingWorkingTree(true);
                             }}
                             style={{
@@ -493,22 +760,23 @@ export const VersionHistoryModal: React.FC<Props> = ({
                               padding: '5px 8px',
                               borderRadius: 4,
                               cursor: 'pointer',
-                              backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.14)' : 'var(--bg-surface-0)',
-                              border: `1px solid ${isSelected ? '#38bdf8' : 'var(--border-subtle)'}`,
+                              backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+                              border: `1px solid ${isSelected ? '#38bdf8' : 'transparent'}`,
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                              <span className={`file-status-pill-${f.status[0]}`}>
-                                {f.status[0].toUpperCase()}
+                              <span className={diff.status === 'modified' ? 'file-status-pill-m' : diff.status === 'added' ? 'file-status-pill-a' : 'file-status-pill-d'}>
+                                {diff.status === 'modified' ? 'M' : diff.status === 'added' ? 'A' : 'D'}
                               </span>
-                              <span style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: isSelected ? '#38bdf8' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {f.fileName}
+                              <span style={{ fontSize: 11.5, color: isSelected ? '#38bdf8' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {diff.fileName}
                               </span>
                             </div>
-                            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
-                              <span style={{ color: '#10b981' }}>+{f.additions}</span>{' '}
-                              <span style={{ color: '#f43f5e' }}>-{f.deletions}</span>
-                            </div>
+
+                            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', display: 'inline-flex', gap: 4 }}>
+                              {diff.additions > 0 && <span style={{ color: '#10b981' }}>+{diff.additions}</span>}
+                              {diff.deletions > 0 && <span style={{ color: '#f43f5e' }}>-{diff.deletions}</span>}
+                            </span>
                           </div>
                         );
                       })}
@@ -516,113 +784,136 @@ export const VersionHistoryModal: React.FC<Props> = ({
                   )}
                 </div>
 
-                {/* Commit Composer Box */}
-                <form onSubmit={handleCommitSubmit} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, marginTop: 'auto', borderTop: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-surface-0)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      Commit Message
-                    </span>
-                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>Ctrl+Enter to commit</span>
+                {/* Commit Composer Form */}
+                <form
+                  onSubmit={handleCommitSubmit}
+                  style={{
+                    padding: 10,
+                    borderTop: '1px solid var(--border-subtle)',
+                    backgroundColor: 'var(--bg-surface-0)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}
+                >
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>Commit Composer</span>
+                    <span style={{ color: 'var(--text-faint)' }}>branch: {effectiveActiveBranch}</span>
                   </div>
 
                   <input
                     type="text"
-                    placeholder="e.g. feat: write experimental evaluation"
+                    placeholder="Commit message (e.g. feat: solve equations)"
                     value={commitMessage}
                     onChange={e => setCommitMessage(e.target.value)}
-                    style={{
-                      padding: '7px 10px',
-                      fontSize: 12,
-                      backgroundColor: 'var(--bg-app)',
-                      border: '1px solid var(--border-medium)',
-                      borderRadius: 4,
-                      color: 'var(--text-primary)',
-                      fontFamily: 'var(--font-sans)',
-                    }}
+                    className="modal-input"
+                    style={{ fontSize: 11.5, padding: '5px 8px' }}
+                    required
                   />
 
                   <textarea
-                    placeholder="Extended commit description (optional notes for collaborators)..."
+                    placeholder="Optional description / extended notes..."
                     value={commitDescription}
                     onChange={e => setCommitDescription(e.target.value)}
+                    className="modal-input"
                     rows={2}
-                    style={{
-                      padding: '6px 10px',
-                      fontSize: 11,
-                      backgroundColor: 'var(--bg-app)',
-                      border: '1px solid var(--border-medium)',
-                      borderRadius: 4,
-                      color: 'var(--text-primary)',
-                      fontFamily: 'var(--font-sans)',
-                      resize: 'none',
-                    }}
+                    style={{ fontSize: 11, padding: '4px 8px', resize: 'none' }}
                   />
 
-                  <button
-                    type="submit"
-                    disabled={!commitMessage.trim()}
-                    className="btn-primary"
-                    style={{
-                      padding: '8px 12px',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 6,
-                      opacity: commitMessage.trim() ? 1 : 0.5,
-                      cursor: commitMessage.trim() ? 'pointer' : 'not-allowed',
-                    }}
-                  >
-                    <GitCommit size={14} />
-                    <span>Commit to main</span>
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Ctrl+Enter to commit</span>
+                    <button
+                      type="submit"
+                      disabled={!commitMessage.trim()}
+                      className="btn-primary"
+                      style={{ fontSize: 11, padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                    >
+                      <GitCommit size={12} />
+                      <span>Commit to {effectiveActiveBranch}</span>
+                    </button>
+                  </div>
                 </form>
               </div>
             )}
 
-            {/* TAB 2: COMMIT LOG & TIMELINE GRAPH */}
+            {/* TAB 2: COMMITS (GIT TIMELINE GRAPH & RESTORE ACTIONS) */}
             {activeTab === 'commits' && (
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-                {/* Search Bar */}
-                <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-subtle)', position: 'relative' }}>
-                  <Search size={12} color="var(--text-muted)" style={{ position: 'absolute', left: 20, top: 16 }} />
-                  <input
-                    type="text"
-                    placeholder="Search commits by message, SHA or author..."
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
+                {/* Branch Filter Pills */}
+                <div style={{ display: 'flex', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-surface-0)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setBranchFilter('all')}
                     style={{
-                      width: '100%',
-                      padding: '5px 8px 5px 28px',
-                      fontSize: 11,
-                      backgroundColor: 'var(--bg-surface-0)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 4,
-                      color: 'var(--text-primary)',
+                      padding: '2px 8px',
+                      fontSize: 10.5,
+                      borderRadius: 12,
+                      border: 'none',
+                      cursor: 'pointer',
+                      backgroundColor: branchFilter === 'all' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                      color: branchFilter === 'all' ? '#38bdf8' : 'var(--text-muted)',
+                      fontWeight: branchFilter === 'all' ? 700 : 500,
                     }}
-                  />
+                  >
+                    All ({safeCheckpoints.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBranchFilter('current')}
+                    style={{
+                      padding: '2px 8px',
+                      fontSize: 10.5,
+                      borderRadius: 12,
+                      border: 'none',
+                      cursor: 'pointer',
+                      backgroundColor: branchFilter === 'current' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                      color: branchFilter === 'current' ? '#38bdf8' : 'var(--text-muted)',
+                      fontWeight: branchFilter === 'current' ? 700 : 500,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <GitBranch size={10} />
+                    <span>{effectiveActiveBranch} ({safeCheckpoints.filter(c => (c.branch || 'main') === effectiveActiveBranch).length})</span>
+                  </button>
                 </div>
 
-                {/* Timeline List */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {/* Search Bar */}
+                <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', backgroundColor: 'var(--bg-surface-0)', borderRadius: 4, border: '1px solid var(--border-subtle)' }}>
+                    <Search size={11} color="var(--text-muted)" />
+                    <input
+                      type="text"
+                      placeholder="Search commits by message, SHA or author..."
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      style={{ border: 'none', outline: 'none', background: 'transparent', color: 'var(--text-primary)', fontSize: 11, width: '100%' }}
+                    />
+                  </div>
+                </div>
+
+                {/* Commit Timeline Graph */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {(() => {
-                    const filtered = safeCheckpoints.filter(c => {
-                      if (c.isAutoSave) return false; // Strictly omit noisy autosaves from clean commit log
-                      if (!searchQuery.trim()) return true;
+                    let filtered = safeCheckpoints;
+                    if (branchFilter === 'current') {
+                      filtered = filtered.filter(cp => (cp.branch || 'main') === effectiveActiveBranch);
+                    }
+                    if (searchQuery.trim()) {
                       const q = searchQuery.toLowerCase();
-                      return (
-                        c.name.toLowerCase().includes(q) ||
-                        (c.description && c.description.toLowerCase().includes(q)) ||
-                        c.author.toLowerCase().includes(q) ||
-                        c.shortSha?.toLowerCase().includes(q)
+                      filtered = filtered.filter(cp =>
+                        cp.name?.toLowerCase().includes(q) ||
+                        cp.message?.toLowerCase().includes(q) ||
+                        cp.author?.toLowerCase().includes(q) ||
+                        cp.shortSha?.toLowerCase().includes(q)
                       );
-                    });
+                    }
 
                     if (filtered.length === 0) {
                       return (
                         <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
-                          {searchQuery ? 'No commits match your search query.' : 'No commits recorded yet. Make your first commit on the Changes tab!'}
+                          {searchQuery ? 'No commits match your search query.' : 'No commits on this branch. Make your first commit on the Changes tab!'}
                         </div>
                       );
                     }
@@ -636,6 +927,10 @@ export const VersionHistoryModal: React.FC<Props> = ({
                           onClick={() => {
                             setSelectedCheckpointId(cp.id);
                             setInspectingWorkingTree(false);
+                            // If commit has no parent (like initial baseline), default to Snapshot View for clean readability
+                            if (!cp.parentId && safeCheckpoints[safeCheckpoints.length - 1]?.id === cp.id) {
+                              setViewMode('snapshot');
+                            }
                           }}
                           style={{
                             padding: '8px 10px',
@@ -740,358 +1035,514 @@ export const VersionHistoryModal: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Right Panel: High-Contrast Visual Diff Viewer */}
-          <div style={diffPanelStyle}>
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-              {/* Diff Sub-Header: Comparison context + File Tabs + View Switcher + Actions */}
-              <div style={diffSubHeaderStyle}>
-                {/* File Selector Tabs */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto', flex: 1 }}>
-                  {projectDiffSummaries.map(f => {
-                    const isFileSelected = f.fileName === selectedFileName;
-                    return (
+          {/* Right Panel: High-Performance Virtualized Diff Viewer & Historical Snapshot Viewer */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: 'var(--bg-app)' }}>
+            {/* Top Toolbar: File Selector, View Mode Switcher, Comparison Switcher, Actions */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-surface-1)', gap: 8, flexWrap: 'wrap' }}>
+              {/* File Pill Selector */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflowX: 'auto', maxWidth: '40%' }}>
+                {projectDiffSummaries.map((diff) => {
+                  const isSelected = selectedFileName === diff.fileName;
+                  return (
+                    <button
+                      key={diff.fileId}
+                      type="button"
+                      onClick={() => setSelectedFileName(diff.fileName)}
+                      style={{
+                        padding: '3px 8px',
+                        fontSize: 11,
+                        borderRadius: 4,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        border: `1px solid ${isSelected ? '#38bdf8' : 'var(--border-subtle)'}`,
+                        backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.15)' : 'var(--bg-surface-0)',
+                        color: isSelected ? '#38bdf8' : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span className={diff.status === 'modified' ? 'file-status-pill-m' : diff.status === 'added' ? 'file-status-pill-a' : 'file-status-pill-d'}>
+                        {diff.status === 'modified' ? 'M' : diff.status === 'added' ? 'A' : 'D'}
+                      </span>
+                      <span>{diff.fileName}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* View Mode & Comparison Controls */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* View Mode Toggle: [ Diff View | Snapshot View ] */}
+                <div style={{ display: 'inline-flex', padding: 2, borderRadius: 4, backgroundColor: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('diff')}
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: 10.5,
+                      borderRadius: 3,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      border: 'none',
+                      cursor: 'pointer',
+                      backgroundColor: viewMode === 'diff' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                      color: viewMode === 'diff' ? '#38bdf8' : 'var(--text-muted)',
+                      fontWeight: viewMode === 'diff' ? 700 : 500,
+                    }}
+                    title="View green additions and red deletions"
+                  >
+                    <GitCommit size={11} /> Diff
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('snapshot')}
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: 10.5,
+                      borderRadius: 3,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      border: 'none',
+                      cursor: 'pointer',
+                      backgroundColor: viewMode === 'snapshot' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                      color: viewMode === 'snapshot' ? '#38bdf8' : 'var(--text-muted)',
+                      fontWeight: viewMode === 'snapshot' ? 700 : 500,
+                    }}
+                    title="View older version as complete document"
+                  >
+                    <FileText size={11} /> View Older Version
+                  </button>
+                </div>
+
+                {viewMode === 'diff' && (
+                  <>
+                    {/* Unified vs Side-by-Side */}
+                    <div style={{ display: 'inline-flex', padding: 2, borderRadius: 4, backgroundColor: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)' }}>
                       <button
-                        key={f.fileName}
                         type="button"
-                        onClick={() => setSelectedFileName(f.fileName)}
+                        onClick={() => setDiffMode('unified')}
                         style={{
+                          padding: '3px 7px',
+                          fontSize: 10.5,
+                          borderRadius: 3,
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: 6,
-                          padding: '4px 8px',
-                          fontSize: 11,
-                          fontFamily: 'var(--font-mono)',
-                          borderRadius: 4,
-                          border: `1px solid ${isFileSelected ? '#38bdf8' : 'var(--border-subtle)'}`,
-                          backgroundColor: isFileSelected ? 'rgba(56, 189, 248, 0.14)' : 'var(--bg-surface-1)',
-                          color: isFileSelected ? '#38bdf8' : 'var(--text-muted)',
+                          gap: 3,
+                          border: 'none',
                           cursor: 'pointer',
+                          backgroundColor: diffMode === 'unified' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                          color: diffMode === 'unified' ? '#38bdf8' : 'var(--text-muted)',
+                          fontWeight: diffMode === 'unified' ? 700 : 500,
                         }}
                       >
-                        <span className={`file-status-pill-${f.status[0]}`}>{f.status[0].toUpperCase()}</span>
-                        <span>{f.fileName}</span>
+                        <AlignLeft size={11} /> Unified
                       </button>
-                    );
-                  })}
-                </div>
-
-                {/* Diff Stats Badge */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontFamily: 'var(--font-mono)', padding: '2px 8px', borderRadius: 4, backgroundColor: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)' }}>
-                    <span style={{ color: '#10b981', fontWeight: 700 }}>+{activeDiffResult.additions}</span>
-                    <span style={{ color: '#f43f5e', fontWeight: 700 }}>-{activeDiffResult.deletions}</span>
-                    <span style={{ color: 'var(--text-muted)' }}>{activeDiffResult.unchanged} unchanged</span>
-                  </div>
-
-                  {/* Unified vs Side-by-Side Switch */}
-                  <div style={{ display: 'inline-flex', backgroundColor: 'var(--bg-surface-1)', borderRadius: 4, padding: 2, border: '1px solid var(--border-subtle)' }}>
-                    <button
-                      type="button"
-                      onClick={() => setDiffMode('unified')}
-                      style={{
-                        padding: '3px 8px',
-                        fontSize: 10.5,
-                        borderRadius: 3,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        border: 'none',
-                        cursor: 'pointer',
-                        backgroundColor: diffMode === 'unified' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                        color: diffMode === 'unified' ? '#38bdf8' : 'var(--text-muted)',
-                        fontWeight: diffMode === 'unified' ? 700 : 500,
-                      }}
-                      title="Unified inline diff view"
-                    >
-                      <AlignLeft size={11} /> Unified
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDiffMode('split')}
-                      style={{
-                        padding: '3px 8px',
-                        fontSize: 10.5,
-                        borderRadius: 3,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        border: 'none',
-                        cursor: 'pointer',
-                        backgroundColor: diffMode === 'split' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                        color: diffMode === 'split' ? '#38bdf8' : 'var(--text-muted)',
-                        fontWeight: diffMode === 'split' ? 700 : 500,
-                      }}
-                      title="Side-by-side split diff view"
-                    >
-                      <Columns size={11} /> Side-by-Side
-                    </button>
-                  </div>
-
-                  {/* Actions for this file / commit */}
-                  {onRestoreSingleFile && !inspectingWorkingTree && (
-                    <button
-                      type="button"
-                      onClick={handleRestoreFile}
-                      className="btn-ghost"
-                      style={{ padding: '3px 7px', fontSize: 10.5, display: 'inline-flex', alignItems: 'center', gap: 3, color: '#38bdf8' }}
-                      title="Restore only this file from this commit"
-                    >
-                      <Undo2 size={11} /> Restore File
-                    </button>
-                  )}
-
-                  {!inspectingWorkingTree && selectedCheckpoint && (
-                    <button
-                      type="button"
-                      onClick={handleRestoreCommit}
-                      className="btn-primary"
-                      style={{ padding: '3px 9px', fontSize: 10.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                      title="Roll back entire project to this commit"
-                    >
-                      <Undo2 size={11} /> Checkout Commit
-                    </button>
-                  )}
-
-                  {!inspectingWorkingTree && selectedCheckpoint && (
-                    <button
-                      type="button"
-                      onClick={handleDownloadZip}
-                      className="btn-ghost"
-                      style={{ padding: '3px 7px', fontSize: 10.5, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-                      title="Download ZIP at this commit"
-                    >
-                      <Download size={11} /> ZIP
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Comparison Legend Context Banner */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 12px', fontSize: 10, backgroundColor: 'var(--bg-surface-0)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span>Comparing:</span>
-                  <span style={{ color: '#f43f5e', fontWeight: 600 }}>{comparison.labelOld}</span>
-                  <ArrowRight size={10} />
-                  <span style={{ color: '#10b981', fontWeight: 600 }}>{comparison.labelNew}</span>
-                </div>
-                <div>{activeFileDiff?.fileName || 'No file selected'}</div>
-              </div>
-
-              {/* Diff Code Container */}
-              <div style={{ flex: 1, overflowY: 'auto', backgroundColor: 'var(--bg-app)', fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.6 }}>
-                {diffMode === 'unified' ? (
-                  /* UNIFIED INLINE VIEW */
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    {activeDiffResult.lines.map((line, idx) => {
-                      const isAdded = line.type === 'added';
-                      const isRemoved = line.type === 'removed';
-
-                      return (
-                        <div
-                          key={idx}
-                          className={isAdded ? 'diff-line-added' : isRemoved ? 'diff-line-removed' : ''}
-                          style={{
-                            display: 'flex',
-                            padding: '1px 8px',
-                            backgroundColor: isAdded
-                              ? 'rgba(16, 185, 129, 0.12)'
-                              : isRemoved
-                              ? 'rgba(244, 63, 94, 0.12)'
-                              : 'transparent',
-                            borderLeft: isAdded
-                              ? '3px solid #10b981'
-                              : isRemoved
-                              ? '3px solid #f43f5e'
-                              : '3px solid transparent',
-                          }}
-                        >
-                          {/* Line numbers */}
-                          <span style={{ width: 34, textAlign: 'right', paddingRight: 6, color: 'var(--text-faint)', userSelect: 'none', flexShrink: 0 }}>
-                            {line.oldLineNumber || ''}
-                          </span>
-                          <span style={{ width: 34, textAlign: 'right', paddingRight: 6, color: 'var(--text-faint)', userSelect: 'none', flexShrink: 0, borderRight: '1px solid var(--border-subtle)' }}>
-                            {line.newLineNumber || ''}
-                          </span>
-                          {/* Marker */}
-                          <span style={{ width: 18, textAlign: 'center', fontWeight: 700, userSelect: 'none', color: isAdded ? '#10b981' : isRemoved ? '#f43f5e' : 'var(--text-faint)', flexShrink: 0 }}>
-                            {isAdded ? '+' : isRemoved ? '−' : ' '}
-                          </span>
-                          {/* Code Content with Word Highlighting */}
-                          <span style={{ flex: 1, color: isAdded ? '#34d399' : isRemoved ? '#f87171' : 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                            {line.tokens && line.tokens.length > 0 ? (
-                              line.tokens.map((tok, tIdx) => {
-                                if (tok.type === 'added') {
-                                  return (
-                                    <span key={tIdx} className="diff-word-added">
-                                      {tok.text}
-                                    </span>
-                                  );
-                                }
-                                if (tok.type === 'removed') {
-                                  return (
-                                    <span key={tIdx} className="diff-word-removed">
-                                      {tok.text}
-                                    </span>
-                                  );
-                                }
-                                return <span key={tIdx}>{tok.text}</span>;
-                              })
-                            ) : (
-                              line.text
-                            )}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  /* SIDE-BY-SIDE SPLIT VIEW */
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-surface-0)', position: 'sticky', top: 0, zIndex: 2 }}>
-                      <div style={{ flex: 1, padding: '4px 12px', fontSize: 10, fontWeight: 700, color: '#f43f5e', borderRight: '1px solid var(--border-subtle)' }}>
-                        OLD: {comparison.labelOld}
-                      </div>
-                      <div style={{ flex: 1, padding: '4px 12px', fontSize: 10, fontWeight: 700, color: '#10b981' }}>
-                        NEW: {comparison.labelNew}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDiffMode('split')}
+                        style={{
+                          padding: '3px 7px',
+                          fontSize: 10.5,
+                          borderRadius: 3,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 3,
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: diffMode === 'split' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                          color: diffMode === 'split' ? '#38bdf8' : 'var(--text-muted)',
+                          fontWeight: diffMode === 'split' ? 700 : 500,
+                        }}
+                      >
+                        <Columns size={11} /> Split
+                      </button>
                     </div>
 
-                    {activeDiffResult.splitRows.map((row, idx) => {
-                      const left = row.left;
-                      const right = row.right;
+                    {/* Comparison Target: [ vs Parent | vs Current ] */}
+                    {!inspectingWorkingTree && (
+                      <div style={{ display: 'inline-flex', padding: 2, borderRadius: 4, backgroundColor: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)' }}>
+                        <button
+                          type="button"
+                          onClick={() => setComparisonTarget('parent')}
+                          style={{
+                            padding: '3px 7px',
+                            fontSize: 10,
+                            borderRadius: 3,
+                            border: 'none',
+                            cursor: 'pointer',
+                            backgroundColor: comparisonTarget === 'parent' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                            color: comparisonTarget === 'parent' ? '#38bdf8' : 'var(--text-muted)',
+                            fontWeight: comparisonTarget === 'parent' ? 700 : 500,
+                          }}
+                          title="Compare with parent commit"
+                        >
+                          vs Parent
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setComparisonTarget('current')}
+                          style={{
+                            padding: '3px 7px',
+                            fontSize: 10,
+                            borderRadius: 3,
+                            border: 'none',
+                            cursor: 'pointer',
+                            backgroundColor: comparisonTarget === 'current' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                            color: comparisonTarget === 'current' ? '#38bdf8' : 'var(--text-muted)',
+                            fontWeight: comparisonTarget === 'current' ? 700 : 500,
+                          }}
+                          title="Compare with current working editor"
+                        >
+                          vs Current
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
 
-                      return (
-                        <div key={idx} style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
-                          {/* Left Column (Old) */}
-                          <div
-                            style={{
-                              flex: 1,
-                              display: 'flex',
-                              padding: '1px 6px',
-                              borderRight: '1px solid var(--border-subtle)',
-                              backgroundColor: left?.type === 'removed' ? 'rgba(244, 63, 94, 0.12)' : 'transparent',
-                              borderLeft: left?.type === 'removed' ? '3px solid #f43f5e' : '3px solid transparent',
-                              color: left?.type === 'removed' ? '#f87171' : 'var(--text-secondary)',
-                              minWidth: 0,
-                            }}
-                          >
-                            <span style={{ width: 30, textAlign: 'right', paddingRight: 6, color: 'var(--text-faint)', userSelect: 'none', flexShrink: 0 }}>
-                              {left?.lineNumber || ''}
-                            </span>
-                            <span style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                              {left?.tokens && left.tokens.length > 0 ? (
-                                left.tokens.map((tok, tIdx) => (
-                                  <span key={tIdx} className={tok.type === 'removed' ? 'diff-word-removed' : ''}>
-                                    {tok.text}
-                                  </span>
-                                ))
-                              ) : (
-                                left?.text || ''
-                              )}
-                            </span>
-                          </div>
+                {/* Actions for this file / commit */}
+                {viewMode === 'snapshot' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!navigator.clipboard) return;
+                      navigator.clipboard.writeText(snapshotContent);
+                      setCopiedCode(true);
+                      setTimeout(() => setCopiedCode(false), 1400);
+                    }}
+                    className="btn-ghost"
+                    style={{ padding: '3px 8px', fontSize: 10.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    title="Copy full document code"
+                  >
+                    {copiedCode ? <Check size={11} color="#10b981" /> : <Copy size={11} />}
+                    <span>{copiedCode ? 'Copied!' : 'Copy Code'}</span>
+                  </button>
+                )}
 
-                          {/* Right Column (New) */}
-                          <div
-                            style={{
-                              flex: 1,
-                              display: 'flex',
-                              padding: '1px 6px',
-                              backgroundColor: right?.type === 'added' ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
-                              borderLeft: right?.type === 'added' ? '3px solid #10b981' : '3px solid transparent',
-                              color: right?.type === 'added' ? '#34d399' : 'var(--text-primary)',
-                              minWidth: 0,
-                            }}
-                          >
-                            <span style={{ width: 30, textAlign: 'right', paddingRight: 6, color: 'var(--text-faint)', userSelect: 'none', flexShrink: 0 }}>
-                              {right?.lineNumber || ''}
-                            </span>
-                            <span style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                              {right?.tokens && right.tokens.length > 0 ? (
-                                right.tokens.map((tok, tIdx) => (
-                                  <span key={tIdx} className={tok.type === 'added' ? 'diff-word-added' : ''}>
-                                    {tok.text}
-                                  </span>
-                                ))
-                              ) : (
-                                right?.text || ''
-                              )}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                {onRestoreSingleFile && !inspectingWorkingTree && (
+                  <button
+                    type="button"
+                    onClick={handleRestoreFile}
+                    className="btn-ghost"
+                    style={{ padding: '3px 7px', fontSize: 10.5, display: 'inline-flex', alignItems: 'center', gap: 3, color: '#38bdf8' }}
+                    title="Restore only this file from this commit"
+                  >
+                    <Undo2 size={11} /> Restore File
+                  </button>
+                )}
+
+                {!inspectingWorkingTree && selectedCheckpoint && (
+                  <button
+                    type="button"
+                    onClick={handleRestoreCommit}
+                    className="btn-primary"
+                    style={{ padding: '3px 9px', fontSize: 10.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    title="Roll back entire project to this commit"
+                  >
+                    <Undo2 size={11} /> Checkout Commit
+                  </button>
+                )}
+
+                {!inspectingWorkingTree && selectedCheckpoint && (
+                  <button
+                    type="button"
+                    onClick={handleDownloadZip}
+                    className="btn-ghost"
+                    style={{ padding: '3px 7px', fontSize: 10.5, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                    title="Download ZIP at this commit"
+                  >
+                    <Download size={11} /> ZIP
+                  </button>
                 )}
               </div>
             </div>
+
+            {/* Comparison Legend Context Banner */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 12px', fontSize: 10, backgroundColor: 'var(--bg-surface-0)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>{viewMode === 'diff' ? 'Comparing:' : 'Viewing:'}</span>
+                {viewMode === 'diff' ? (
+                  <>
+                    <span style={{ color: '#f43f5e', fontWeight: 600 }}>{comparison.labelOld}</span>
+                    <ArrowRight size={10} />
+                    <span style={{ color: '#10b981', fontWeight: 600 }}>{comparison.labelNew}</span>
+                  </>
+                ) : (
+                  <span style={{ color: '#38bdf8', fontWeight: 600 }}>
+                    {inspectingWorkingTree ? 'Current Working Editor' : `${selectedCheckpoint?.name} (${selectedCheckpoint?.shortSha})`}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span>{selectedFileName}</span>
+                {viewMode === 'diff' ? (
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>
+                    <span style={{ color: '#10b981' }}>+{activeDiffResult.additions}</span>{' '}
+                    <span style={{ color: '#f43f5e' }}>-{activeDiffResult.deletions}</span>
+                  </span>
+                ) : (
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{snapshotLines.length} lines</span>
+                )}
+              </div>
+            </div>
+
+            {/* Root Baseline Helper Alert (When selecting baseline commit in diff mode) */}
+            {viewMode === 'diff' && comparison.isRootBaseline && comparisonTarget === 'parent' && (
+              <div style={{ padding: '8px 12px', backgroundColor: 'rgba(56, 189, 248, 0.08)', borderBottom: '1px solid rgba(56, 189, 248, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#38bdf8' }}>
+                  <Clock size={13} />
+                  <span>Initial Project Baseline (no earlier parent). Switch to Snapshot View to inspect the full document, or Compare vs Current Editor.</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('snapshot')}
+                    className="btn-primary"
+                    style={{ fontSize: 10.5, padding: '2px 8px' }}
+                  >
+                    View Document
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setComparisonTarget('current')}
+                    className="btn-ghost"
+                    style={{ fontSize: 10.5, padding: '2px 8px' }}
+                  >
+                    Compare vs Current
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* High-Performance Virtualized Container */}
+            <div
+              ref={virtualViewportRef}
+              className="virtual-diff-viewport"
+              style={{ flex: 1, backgroundColor: 'var(--bg-app)', fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: `${ROW_HEIGHT}px` }}
+            >
+              {viewMode === 'snapshot' ? (
+                /* SNAPSHOT FULL FILE CODE READER (VIRTUALIZED) */
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ height: virtualSnapshotWindow.topPadding }} />
+                  {virtualSnapshotWindow.visibleItems.map((lineText, idx) => {
+                    const lineNum = virtualSnapshotWindow.startIndex + idx + 1;
+                    return (
+                      <div key={lineNum} className="snapshot-line">
+                        <span className="snapshot-line-num">{lineNum}</span>
+                        <span className="snapshot-line-code">{lineText || ' '}</span>
+                      </div>
+                    );
+                  })}
+                  <div style={{ height: virtualSnapshotWindow.bottomPadding }} />
+                </div>
+              ) : diffMode === 'unified' ? (
+                /* UNIFIED INLINE DIFF VIEW (VIRTUALIZED) */
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ height: virtualUnifiedWindow.topPadding }} />
+                  {virtualUnifiedWindow.visibleItems.map((line, idx) => {
+                    const absIdx = virtualUnifiedWindow.startIndex + idx;
+                    const isAdded = line.type === 'added';
+                    const isRemoved = line.type === 'removed';
+
+                    return (
+                      <div
+                        key={absIdx}
+                        className={isAdded ? 'diff-line-added' : isRemoved ? 'diff-line-removed' : ''}
+                        style={{
+                          display: 'flex',
+                          height: ROW_HEIGHT,
+                          boxSizing: 'border-box',
+                          padding: '0 8px',
+                          alignItems: 'center',
+                          backgroundColor: isAdded
+                            ? 'rgba(16, 185, 129, 0.12)'
+                            : isRemoved
+                            ? 'rgba(244, 63, 94, 0.12)'
+                            : 'transparent',
+                          borderLeft: isAdded
+                            ? '3px solid #10b981'
+                            : isRemoved
+                            ? '3px solid #f43f5e'
+                            : '3px solid transparent',
+                        }}
+                      >
+                        {/* Line numbers */}
+                        <span style={{ width: 34, textAlign: 'right', paddingRight: 6, color: 'var(--text-faint)', userSelect: 'none', flexShrink: 0 }}>
+                          {line.oldLineNumber || ''}
+                        </span>
+                        <span style={{ width: 34, textAlign: 'right', paddingRight: 6, color: 'var(--text-faint)', userSelect: 'none', flexShrink: 0, borderRight: '1px solid var(--border-subtle)' }}>
+                          {line.newLineNumber || ''}
+                        </span>
+                        {/* Marker */}
+                        <span style={{ width: 18, textAlign: 'center', fontWeight: 700, userSelect: 'none', color: isAdded ? '#10b981' : isRemoved ? '#f43f5e' : 'var(--text-faint)', flexShrink: 0 }}>
+                          {isAdded ? '+' : isRemoved ? '−' : ' '}
+                        </span>
+                        {/* Code Content with Intra-Line Word Highlighting */}
+                        <span style={{ flex: 1, color: isAdded ? '#34d399' : isRemoved ? '#f87171' : 'var(--text-primary)', whiteSpace: 'pre', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {line.tokens && line.tokens.length > 0 ? (
+                            line.tokens.map((tok, tIdx) => {
+                              if (tok.type === 'added') {
+                                return (
+                                  <span key={tIdx} className="diff-word-added">
+                                    {tok.text}
+                                  </span>
+                                );
+                              }
+                              if (tok.type === 'removed') {
+                                return (
+                                  <span key={tIdx} className="diff-word-removed">
+                                    {tok.text}
+                                  </span>
+                                );
+                              }
+                              return <span key={tIdx}>{tok.text}</span>;
+                            })
+                          ) : (
+                            line.text
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <div style={{ height: virtualUnifiedWindow.bottomPadding }} />
+                </div>
+              ) : (
+                /* SIDE-BY-SIDE SPLIT VIEW (VIRTUALIZED) */
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-surface-0)', position: 'sticky', top: 0, zIndex: 2 }}>
+                    <div style={{ flex: 1, padding: '3px 8px', fontSize: 10, color: '#f43f5e', borderRight: '1px solid var(--border-subtle)', fontWeight: 600 }}>
+                      Original: {comparison.labelOld}
+                    </div>
+                    <div style={{ flex: 1, padding: '3px 8px', fontSize: 10, color: '#10b981', fontWeight: 600 }}>
+                      Modified: {comparison.labelNew}
+                    </div>
+                  </div>
+
+                  <div style={{ height: virtualSplitWindow.topPadding }} />
+                  {virtualSplitWindow.visibleItems.map((row, idx) => {
+                    const absIdx = virtualSplitWindow.startIndex + idx;
+                    const leftRemoved = row.left?.type === 'removed';
+                    const rightAdded = row.right?.type === 'added';
+
+                    return (
+                      <div key={absIdx} style={{ display: 'flex', height: ROW_HEIGHT, boxSizing: 'border-box' }}>
+                        {/* Left column (old) */}
+                        <div
+                          style={{
+                            flex: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            padding: '0 6px',
+                            backgroundColor: leftRemoved ? 'rgba(244, 63, 94, 0.12)' : 'transparent',
+                            borderRight: '1px solid var(--border-subtle)',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <span style={{ width: 30, textAlign: 'right', paddingRight: 6, color: 'var(--text-faint)', userSelect: 'none', flexShrink: 0 }}>
+                            {row.left?.lineNumber || ''}
+                          </span>
+                          <span style={{ flex: 1, color: leftRemoved ? '#f87171' : 'var(--text-muted)', whiteSpace: 'pre', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {row.left?.tokens ? (
+                              row.left.tokens.map((tok, tIdx) => (
+                                <span key={tIdx} className={tok.type === 'removed' ? 'diff-word-removed' : ''}>
+                                  {tok.text}
+                                </span>
+                              ))
+                            ) : (
+                              row.left?.text || ''
+                            )}
+                          </span>
+                        </div>
+
+                        {/* Right column (new) */}
+                        <div
+                          style={{
+                            flex: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            padding: '0 6px',
+                            backgroundColor: rightAdded ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <span style={{ width: 30, textAlign: 'right', paddingRight: 6, color: 'var(--text-faint)', userSelect: 'none', flexShrink: 0 }}>
+                            {row.right?.lineNumber || ''}
+                          </span>
+                          <span style={{ flex: 1, color: rightAdded ? '#34d399' : 'var(--text-primary)', whiteSpace: 'pre', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {row.right?.tokens ? (
+                              row.right.tokens.map((tok, tIdx) => (
+                                <span key={tIdx} className={tok.type === 'added' ? 'diff-word-added' : ''}>
+                                  {tok.text}
+                                </span>
+                              ))
+                            ) : (
+                              row.right?.text || ''
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{ height: virtualSplitWindow.bottomPadding }} />
+                </div>
+              )}
+            </div>
           </div>
         </div>
-
-        {/* Floating Toast Notification */}
-        {restoredToast && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 24,
-              right: 24,
-              backgroundColor: '#10b981',
-              color: '#000',
-              padding: '8px 16px',
-              borderRadius: 6,
-              fontSize: 12,
-              fontWeight: 700,
-              boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              zIndex: 100,
-            }}
-          >
-            <Check size={14} />
-            <span>
-              {restoredToast === 'commit'
-                ? 'Project checked out to historical commit!'
-                : restoredToast === 'draft'
-                ? 'Emergency crash draft restored!'
-                : 'File restored successfully!'}
-            </span>
-          </div>
-        )}
       </div>
+
+      {/* Restored Toast Feedback */}
+      {restoredToast && (
+        <div style={{ position: 'fixed', bottom: 30, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#10b981', color: '#fff', padding: '8px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, boxShadow: '0 10px 25px rgba(0,0,0,0.4)', zIndex: 9999 }}>
+          <Check size={14} />
+          <span>
+            {restoredToast === 'commit'
+              ? 'Project successfully checked out to this commit!'
+              : restoredToast === 'file'
+              ? `File "${selectedFileName}" restored from revision!`
+              : 'Emergency draft restored!'}
+          </span>
+        </div>
+      )}
     </div>
   );
 };
 
-// Layout Styles
+// Styling Constants
 const backdropStyle: React.CSSProperties = {
   position: 'fixed',
-  inset: 0,
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
   backgroundColor: 'rgba(0, 0, 0, 0.72)',
-  backdropFilter: 'blur(4px)',
-  zIndex: 1100,
+  backdropFilter: 'blur(5px)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  padding: 24,
+  zIndex: 1050,
+  padding: 16,
 };
 
 const modalStyle: React.CSSProperties = {
-  width: '100%',
-  maxWidth: 1200,
+  width: '95vw',
+  maxWidth: 1280,
   height: '88vh',
-  backgroundColor: 'var(--bg-surface-0)',
+  maxHeight: 900,
+  backgroundColor: 'var(--bg-surface-1)',
+  borderRadius: 12,
   border: '1px solid var(--border-medium)',
-  borderRadius: 10,
-  boxShadow: '0 20px 45px rgba(0, 0, 0, 0.55)',
+  boxShadow: '0 24px 48px -12px rgba(0, 0, 0, 0.65)',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
-  position: 'relative',
 };
 
 const headerStyle: React.CSSProperties = {
-  padding: '12px 18px',
+  padding: '12px 16px',
   borderBottom: '1px solid var(--border-subtle)',
   display: 'flex',
   alignItems: 'center',
@@ -1102,38 +1553,20 @@ const headerStyle: React.CSSProperties = {
 const closeBtnStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
-  cursor: 'pointer',
   color: 'var(--text-muted)',
+  cursor: 'pointer',
   padding: 4,
+  borderRadius: 4,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  borderRadius: 4,
 };
 
 const sidebarPanelStyle: React.CSSProperties = {
-  width: 330,
+  width: 320,
   borderRight: '1px solid var(--border-subtle)',
-  backgroundColor: 'var(--bg-surface-0)',
+  backgroundColor: 'var(--bg-surface-1)',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
-  flexShrink: 0,
-};
-
-const diffPanelStyle: React.CSSProperties = {
-  flex: 1,
-  display: 'flex',
-  flexDirection: 'column',
-  overflow: 'hidden',
-  backgroundColor: 'var(--bg-app)',
-};
-
-const diffSubHeaderStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  borderBottom: '1px solid var(--border-subtle)',
-  backgroundColor: 'var(--bg-surface-0)',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 12,
 };
