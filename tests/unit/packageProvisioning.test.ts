@@ -1,12 +1,129 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   validatePackagePayload,
+  validatePackageAgainstManifest,
+  readResponseLimited,
+  provisionPackages,
   computeSha256,
   MAX_PACKAGE_SIZE,
   MIN_PACKAGE_SIZE,
 } from '../../scripts/download-essential-packages.mjs';
 
-describe('Essential Package Provisioning Validation (packageProvisioning)', () => {
+function createMockResponse({
+  headers = {},
+  chunks = [],
+}: {
+  headers?: Record<string, string>;
+  chunks?: Uint8Array[];
+}) {
+  let chunkIndex = 0;
+  const headerMap = new Map(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+
+  const stream = new ReadableStream({
+    pull(controller) {
+      if (chunkIndex < chunks.length) {
+        controller.enqueue(chunks[chunkIndex++]);
+      } else {
+        controller.close();
+      }
+    },
+  });
+
+  return {
+    headers: {
+      get: (k: string) => headerMap.get(k.toLowerCase()) ?? null,
+    },
+    body: stream,
+  } as unknown as Response;
+}
+
+describe('Stage 2: Package Provisioning & Cryptographic Integrity', () => {
+  describe('readResponseLimited (Streaming Bounds)', () => {
+    it('rejects responses whose advertised Content-Length exceeds 8 MiB before reading body', async () => {
+      const oversizedLen = (8 * 1024 * 1024 + 1).toString();
+      const mockRes = createMockResponse({
+        headers: { 'Content-Length': oversizedLen },
+        chunks: [new Uint8Array([1, 2, 3])],
+      });
+
+      await expect(
+        readResponseLimited(mockRes, 8 * 1024 * 1024)
+      ).rejects.toThrow(/Content-Length.*exceeds limit/i);
+    });
+
+    it('cancels reading immediately when accumulated body exceeds 8 MiB during streaming', async () => {
+      const chunk1 = new Uint8Array(4 * 1024 * 1024); // 4 MiB
+      const chunk2 = new Uint8Array(5 * 1024 * 1024); // 5 MiB -> 9 MiB total
+      const mockRes = createMockResponse({
+        chunks: [chunk1, chunk2],
+      });
+
+      await expect(
+        readResponseLimited(mockRes, 8 * 1024 * 1024)
+      ).rejects.toThrow(/exceeded limit.*while streaming/i);
+    });
+
+    it('returns complete bytes after body has finished within limit', async () => {
+      const chunk1 = new TextEncoder().encode('\\ProvidesPackage{test}');
+      const chunk2 = new TextEncoder().encode('[2026/01/01]');
+      const mockRes = createMockResponse({
+        chunks: [chunk1, chunk2],
+      });
+
+      const result = await readResponseLimited(mockRes, 8 * 1024 * 1024);
+      expect(result.toString('utf8')).toBe('\\ProvidesPackage{test}[2026/01/01]');
+    });
+  });
+
+  describe('Manifest Integrity Verification (validatePackageAgainstManifest)', () => {
+    const validSample = Buffer.from('\\ProvidesPackage{sample}[2026/01/01 Sample]\n');
+    const mockManifest = {
+      'sample.sty': {
+        bytes: validSample.length,
+        sha256: computeSha256(validSample),
+      },
+    };
+
+    it('accepts package whose byte count and SHA-256 match manifest', () => {
+      const res = validatePackageAgainstManifest('sample.sty', validSample, mockManifest);
+      expect(res.valid).toBe(true);
+    });
+
+    it('rejects package when byte count does not match manifest', () => {
+      const tamperedBuf = Buffer.from('\\ProvidesPackage{sample}[2026/01/01 Sample]\nEXTRA');
+      const res = validatePackageAgainstManifest('sample.sty', tamperedBuf, mockManifest);
+      expect(res.valid).toBe(false);
+      expect(res.reason).toContain('Byte count mismatch');
+    });
+
+    it('rejects package when SHA-256 digest does not match manifest (hash mismatch)', () => {
+      // Same byte length but altered content
+      const alteredBuf = Buffer.from('\\ProvidesPackage{sample}[2026/01/01 Xample]\n');
+      expect(alteredBuf.length).toBe(validSample.length);
+
+      const res = validatePackageAgainstManifest('sample.sty', alteredBuf, mockManifest);
+      expect(res.valid).toBe(false);
+      expect(res.reason).toContain('SHA-256 digest mismatch');
+    });
+
+    it('rejects packages not registered in the manifest', () => {
+      const unlistedBuf = Buffer.from('\\ProvidesPackage{unlisted}[2026/01/01 Unlisted]\n');
+      const res = validatePackageAgainstManifest('unlisted.sty', unlistedBuf, mockManifest);
+      expect(res.valid).toBe(false);
+      expect(res.reason).toContain('not registered in integrity manifest');
+    });
+  });
+
+  describe('Concurrency Configuration Validation', () => {
+    it('rejects invalid concurrency values (< 1, > 16, non-integer)', async () => {
+      await expect(provisionPackages({ concurrency: 0 })).rejects.toThrow(/Invalid concurrency "0"/);
+      await expect(provisionPackages({ concurrency: -5 })).rejects.toThrow(/Invalid concurrency "-5"/);
+      await expect(provisionPackages({ concurrency: 20 })).rejects.toThrow(/Invalid concurrency "20"/);
+      await expect(provisionPackages({ concurrency: 2.5 as any })).rejects.toThrow(/Invalid concurrency/);
+      await expect(provisionPackages({ concurrency: NaN as any })).rejects.toThrow(/Invalid concurrency/);
+    });
+  });
+
   describe('HTML and Upstream Error Rejection', () => {
     it('rejects HTML error content served with misleading binary payload', () => {
       const htmlPayload = Buffer.from(
@@ -51,7 +168,6 @@ describe('Essential Package Provisioning Validation (packageProvisioning)', () =
     });
 
     it('rejects payloads exceeding the 8 MiB size limit', () => {
-      // Create a lightweight mock buffer object with byteLength > 8 MiB
       const oversized = {
         length: MAX_PACKAGE_SIZE + 1,
         toString: () => '\\ProvidesPackage{large}',
@@ -134,18 +250,6 @@ describe('Essential Package Provisioning Validation (packageProvisioning)', () =
 
       expect(result.valid).toBe(false);
       expect(result.reason).toContain('Missing expected BibTeX style markers');
-    });
-  });
-
-  describe('SHA-256 Digest Computation', () => {
-    it('computes consistent 64-char hex SHA-256 digests', () => {
-      const sample = Buffer.from('hello-teeex-package');
-      const hash1 = computeSha256(sample);
-      const hash2 = computeSha256(sample);
-
-      expect(hash1).toHaveLength(64);
-      expect(hash1).toBe(hash2);
-      expect(/^[0-9a-f]{64}$/.test(hash1)).toBe(true);
     });
   });
 });

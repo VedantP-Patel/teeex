@@ -69,7 +69,7 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'sn-basic.bst', format: 26 },
 ];
 
-const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
+export const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
 
 export interface LoadedPackage {
   name: string;
@@ -82,6 +82,9 @@ const DB_NAME = 'teeex_packages_db';
 const DB_VERSION = 1;
 const STORE_PACKAGES = 'packages';
 const STORE_MISSES = 'misses';
+
+export const MAX_PACKAGE_SIZE = 8 * 1024 * 1024; // 8 MiB
+export const RESOLVE_CONCURRENCY = 8;
 
 /**
  * Sniffs response headers and binary payload to reject HTML error pages (e.g. 404 SPA fallbacks)
@@ -101,6 +104,65 @@ export function isHtmlResponse(buf: Uint8Array, contentType?: string | null): bo
 }
 
 /**
+ * Reads a Fetch Response with strict streaming limits.
+ * Avoids response.arrayBuffer() on untrusted bodies by:
+ * 1. Rejecting advertised Content-Length > maxBytes immediately.
+ * 2. Streaming chunks via reader and cancelling immediately if accumulated bytes > maxBytes.
+ */
+export async function readResponseLimited(
+  res: Response,
+  maxBytes = MAX_PACKAGE_SIZE,
+): Promise<Uint8Array> {
+  const advertised = res.headers?.get?.('content-length');
+  if (advertised !== null && advertised !== undefined) {
+    const len = parseInt(advertised, 10);
+    if (!Number.isNaN(len) && len > maxBytes) {
+      throw new Error(`Package Content-Length ${len} exceeds limit of ${maxBytes} bytes`);
+    }
+  }
+
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    if (typeof res.arrayBuffer === 'function') {
+      const buf = await res.arrayBuffer();
+      if (buf.byteLength > maxBytes) {
+        throw new Error(`Package response body exceeded limit of ${maxBytes} bytes`);
+      }
+      return new Uint8Array(buf);
+    }
+    throw new Error('Response body is null');
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        totalBytes += value.byteLength;
+        if (totalBytes > maxBytes) {
+          await reader.cancel();
+          throw new Error(`Package response body exceeded limit of ${maxBytes} bytes while streaming`);
+        }
+        chunks.push(value);
+      }
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+
+  const merged = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
+}
+
+/**
  * Bounds on dependency resolution. Depth 4 covers the chains real documents
  * produce (class -> package -> driver .def -> font .cfg); the file cap stops a
  * pathological preamble from issuing hundreds of requests before the first
@@ -108,19 +170,25 @@ export function isHtmlResponse(buf: Uint8Array, contentType?: string | null): bo
  * still resolves it at compile time, just more slowly.
  */
 const MAX_DEPENDENCY_DEPTH = 4;
-const MAX_PRELOADED_FILES = 160;
+export const MAX_PRELOADED_FILES = 160;
 
 /**
- * Long enough that a cold CDN edge is not mistaken for a missing file. The
- * previous 2 s, combined with treating any failure as a permanent miss, turned
- * a slow response into a package that could never load again this session.
+ * Long enough that a cold CDN edge is not mistaken for a missing file.
  */
 const PACKAGE_FETCH_TIMEOUT_MS = 10_000;
 
 const packageMemoryCache = new Map<string, Uint8Array>();
 const failedFetchCache = new Set<string>();
+const inFlightFetches = new Map<string, Promise<LoadedPackage | null>>();
 let loadPromise: Promise<LoadedPackage[]> | null = null;
 let dbPromise: Promise<IDBDatabase | null> | null = null;
+
+export function _resetPackageCachesForTesting(): void {
+  packageMemoryCache.clear();
+  failedFetchCache.clear();
+  inFlightFetches.clear();
+  loadPromise = null;
+}
 
 function openPackagesDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null);
@@ -159,17 +227,21 @@ async function getAllFromIndexedDb(): Promise<LoadedPackage[]> {
       const req = store.getAll();
       req.onsuccess = () => {
         const rows = (req.result || []) as Array<{ name: string; format: number; content: Uint8Array }>;
-        resolve(
-          rows.map((r) => {
-            const bytes = r.content instanceof Uint8Array ? r.content : new Uint8Array(r.content);
-            return {
-              name: r.name,
-              format: r.format,
-              content: bytes,
-              contents: bytes,
-            };
-          }),
-        );
+        const valid: LoadedPackage[] = [];
+        for (const r of rows) {
+          const bytes = r.content instanceof Uint8Array ? r.content : new Uint8Array(r.content);
+          // Skip empty, oversized (> 8 MiB), or HTML-like cache entries
+          if (bytes.length === 0 || bytes.length > MAX_PACKAGE_SIZE || isHtmlResponse(bytes)) {
+            continue;
+          }
+          valid.push({
+            name: r.name,
+            format: r.format,
+            content: bytes,
+            contents: bytes,
+          });
+        }
+        resolve(valid);
       };
       req.onerror = () => resolve([]);
     } catch {
@@ -185,7 +257,6 @@ export async function saveBatchToIndexedDb(pkgs: LoadedPackage[]): Promise<void>
 
   return new Promise((resolve) => {
     try {
-      // Use relaxed durability to bypass physical disk sync blocking on cached assets
       const tx = (db as any).transaction(
         STORE_PACKAGES,
         'readwrite',
@@ -260,10 +331,10 @@ export async function fetchPackageThrottled(
       const pkg = queue.shift();
       if (!pkg) break;
       try {
-        const res = await fetch(`/packages/${pkg.name}`);
+        const res = await fetch(`/packages/${encodeURIComponent(pkg.name)}`);
         if (res.ok) {
-          const buf = new Uint8Array(await res.arrayBuffer());
-          const ct = res.headers.get('content-type');
+          const buf = await readResponseLimited(res, MAX_PACKAGE_SIZE);
+          const ct = res.headers?.get?.('content-type');
           if (buf.length > 0 && !isHtmlResponse(buf, ct)) {
             const loaded: LoadedPackage = {
               name: pkg.name,
@@ -325,13 +396,6 @@ export function getCachedPackageContent(name: string): Uint8Array | undefined {
 /**
  * Extracts the files a TeX source references, so a package's own dependencies
  * can be fetched before the engine asks for them.
- *
- * `\usepackage{a,b}` in the document is only the first level: `microtype.sty`
- * pulls `microtype-pdftex.def`, a class pulls the packages it builds on, and so
- * on. Resolving only the first level left every deeper file to kpathsea, which
- * requests them one at a time over *synchronous* XHR from inside the WASM
- * worker — serial, blocking, and the reason the compiler used to rewrite
- * documents to avoid `microtype` and `lmodern` altogether.
  */
 function extractRequirements(text: string): Array<{ name: string; format: number }> {
   const out: Array<{ name: string; format: number }> = [];
@@ -362,15 +426,12 @@ function extractRequirements(text: string): Array<{ name: string; format: number
     add(m[1], '.cls');
   }
 
-  // `\input`/`\InputIfFileExists`/`\file_input:n` carry .def, .cfg, and .ltd files,
-  // which is how font, driver, and data support reaches packages like microtype and lipsum.
   for (const m of text.matchAll(
     /\\(?:input|InputIfFileExists|file_input:n|file_input:N)\s*\{([^}]+)\}/g,
   )) {
     add(m[1], '.tex');
   }
 
-  // Bibliography style files (\bibliographystyle{...})
   for (const m of text.matchAll(/\\bibliographystyle\s*\{([^}]+)\}/g)) {
     const style = m[1]?.trim();
     if (style && !style.includes('\\')) {
@@ -381,8 +442,6 @@ function extractRequirements(text: string): Array<{ name: string; format: number
     }
   }
 
-  // JIT pre-fetching of companion font metrics for common academic packages:
-  // Prevents the WASM worker from pausing on serial, synchronous XMLHttpRequest roundtrips.
   if (text.includes('IEEEtran') || text.includes('times') || text.includes('newtx') || text.includes('acmart')) {
     const timesMetrics = [
       'ot1ptm.fd', 't1ptm.fd', 'omlptm.fd', 'omsptm.fd',
@@ -411,7 +470,65 @@ function extractRequirements(text: string): Array<{ name: string; format: number
   return out;
 }
 
-/** Fetches one batch of files in parallel, returning those that resolved. */
+/**
+ * Fetches a single package with in-flight deduplication.
+ * Reuses the pending fetch promise if another caller is concurrently requesting the same package.
+ */
+async function fetchSinglePackage(
+  target: { name: string; format: number },
+  endpoint: string,
+): Promise<LoadedPackage | null> {
+  const key = `${target.format}/${target.name}`;
+  const inFlight = inFlightFetches.get(key);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const fetchPromise = (async (): Promise<LoadedPackage | null> => {
+    try {
+      const isBundled = BUNDLED_PACKAGE_NAMES.has(target.name);
+      const url = isBundled
+        ? `/packages/${encodeURIComponent(target.name)}`
+        : `${endpoint}/${target.format}/${encodeURIComponent(target.name)}`;
+
+      const res = await fetch(url, { signal: AbortSignal.timeout(PACKAGE_FETCH_TIMEOUT_MS) });
+
+      if (res.ok) {
+        const buf = await readResponseLimited(res, MAX_PACKAGE_SIZE);
+        const ct = res.headers?.get?.('content-type');
+        if (buf.length > 0 && !isHtmlResponse(buf, ct)) {
+          const loaded: LoadedPackage = {
+            name: target.name,
+            format: target.format,
+            content: buf,
+            contents: buf,
+          };
+          packageMemoryCache.set(target.name, buf);
+          return loaded;
+        }
+      }
+
+      // Only a definitive 404 is remembered as missing.
+      // Transient 5xx errors or network drops remain retryable.
+      if (res.status === 404) {
+        failedFetchCache.add(target.name);
+      }
+      return null;
+    } catch {
+      // Network error, timeout, or streaming size limit: remain retryable!
+      return null;
+    }
+  })();
+
+  inFlightFetches.set(key, fetchPromise);
+  try {
+    return await fetchPromise;
+  } finally {
+    inFlightFetches.delete(key);
+  }
+}
+
+/** Fetches one batch of files with bounded concurrency (8 workers) and deduplication. */
 async function resolveBatch(
   targets: Array<{ name: string; format: number }>,
   endpoint: string,
@@ -419,54 +536,42 @@ async function resolveBatch(
   const resolved: LoadedPackage[] = [];
   const newlyFetched: LoadedPackage[] = [];
 
-  await Promise.all(
-    targets.map(async (target) => {
-      const cached = packageMemoryCache.get(target.name);
-      if (cached) {
-        resolved.push({
-          name: target.name,
-          format: target.format,
-          content: cached,
-          contents: cached,
-        });
-        return;
-      }
+  const needed: Array<{ name: string; format: number }> = [];
 
-      try {
-        const isBundled = BUNDLED_PACKAGE_NAMES.has(target.name);
-        const url = isBundled
-          ? `/packages/${encodeURIComponent(target.name)}`
-          : `${endpoint}/${target.format}/${encodeURIComponent(target.name)}`;
+  for (const target of targets) {
+    const cached = packageMemoryCache.get(target.name);
+    if (cached) {
+      resolved.push({
+        name: target.name,
+        format: target.format,
+        content: cached,
+        contents: cached,
+      });
+    } else {
+      needed.push(target);
+    }
+  }
 
-        const res = await fetch(url, { signal: AbortSignal.timeout(PACKAGE_FETCH_TIMEOUT_MS) });
+  if (needed.length > 0) {
+    let index = 0;
+    const workers = Array.from(
+      { length: Math.min(RESOLVE_CONCURRENCY, needed.length) },
+      async () => {
+        while (index < needed.length) {
+          const target = needed[index++];
+          if (!target) break;
 
-        if (res.ok) {
-          const buf = new Uint8Array(await res.arrayBuffer());
-          const ct = res.headers.get('content-type');
-          if (buf.length > 0 && !isHtmlResponse(buf, ct)) {
-            const loaded: LoadedPackage = {
-              name: target.name,
-              format: target.format,
-              content: buf,
-              contents: buf,
-            };
-            packageMemoryCache.set(target.name, buf);
+          const loaded = await fetchSinglePackage(target, endpoint);
+          if (loaded) {
             newlyFetched.push(loaded);
             resolved.push(loaded);
-            return;
           }
         }
+      },
+    );
 
-        // Only a definitive 404 is remembered. A timeout or a 5xx used to be
-        // recorded the same way, so one slow response permanently poisoned the
-        // package for the rest of the session and every later compile failed
-        // with "File not found" for a package that exists.
-        if (res.status === 404) failedFetchCache.add(target.name);
-      } catch {
-        // Network error or timeout: leave it retryable.
-      }
-    }),
-  );
+    await Promise.all(workers);
+  }
 
   if (newlyFetched.length > 0) {
     void saveBatchToIndexedDb(newlyFetched);
@@ -490,7 +595,6 @@ export async function preloadDocumentPackages(
   const resolvedByName = new Map<string, LoadedPackage>();
   const seen = new Set<string>();
 
-  /** True for files the engine already has locally, or known not to exist. */
   const skip = (name: string): boolean =>
     seen.has(name) ||
     TEXLIVE_BASIC_PACKAGES.has(name.toLowerCase()) ||
@@ -502,11 +606,22 @@ export async function preloadDocumentPackages(
     return true;
   });
 
+  // Cap initial frontier to MAX_PRELOADED_FILES
+  if (frontier.length > MAX_PRELOADED_FILES) {
+    frontier = frontier.slice(0, MAX_PRELOADED_FILES);
+  }
+
   const decoder = new TextDecoder('utf-8', { fatal: false });
   const db = await openPackagesDb();
 
   for (let depth = 0; depth < MAX_DEPENDENCY_DEPTH && frontier.length > 0; depth++) {
-    if (resolvedByName.size >= MAX_PRELOADED_FILES) break;
+    const remainingBudget = MAX_PRELOADED_FILES - resolvedByName.size;
+    if (remainingBudget <= 0) break;
+
+    // Enforce budget on each depth frontier
+    if (frontier.length > remainingBudget) {
+      frontier = frontier.slice(0, remainingBudget);
+    }
 
     // Check IndexedDB for the whole level before touching the network.
     if (db) {
@@ -526,7 +641,9 @@ export async function preloadDocumentPackages(
                     if (stored) {
                       const buf =
                         stored instanceof Uint8Array ? stored : new Uint8Array(stored);
-                      packageMemoryCache.set(target.name, buf);
+                      if (buf.length > 0 && buf.length <= MAX_PACKAGE_SIZE && !isHtmlResponse(buf)) {
+                        packageMemoryCache.set(target.name, buf);
+                      }
                     }
                     resolve();
                   };
@@ -545,8 +662,8 @@ export async function preloadDocumentPackages(
     for (const file of batch) {
       resolvedByName.set(file.name, file);
 
-      // Only text files can declare further dependencies; .tfm and friends are
-      // binary and decoding them would be wasted work.
+      if (resolvedByName.size >= MAX_PRELOADED_FILES) break;
+
       if (!/\.(sty|cls|def|cfg|tex|clo|fd)$/i.test(file.name)) continue;
 
       for (const req of extractRequirements(decoder.decode(file.content))) {

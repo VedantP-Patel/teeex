@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { safePostTask } from '../../src/utils/scheduler';
 
-describe('safePostTask Cooperative Scheduler', () => {
+describe('Stage 5: safePostTask Cooperative Scheduler & Fallback Hardening', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -31,7 +31,7 @@ describe('safePostTask Cooperative Scheduler', () => {
 
   it('executes an asynchronous task and resolves properly', async () => {
     const result = await safePostTask(async () => {
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       return 'completed';
     });
     expect(result).toBe('completed');
@@ -69,15 +69,13 @@ describe('safePostTask Cooperative Scheduler', () => {
 
     const taskPromise = safePostTask(fn, { delay: 60, signal: controller.signal });
 
-    // Abort after 15ms while waiting for the 60ms delay
     setTimeout(() => {
       controller.abort(new Error('Cancelled during delay'));
     }, 15);
 
     await expect(taskPromise).rejects.toThrow('Cancelled during delay');
 
-    // Wait past the 60ms delay to confirm callback was never executed
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await new Promise((resolve) => setTimeout(resolve, 80));
     expect(fn).not.toHaveBeenCalled();
   });
 
@@ -90,21 +88,40 @@ describe('safePostTask Cooperative Scheduler', () => {
     expect(elapsed).toBeGreaterThanOrEqual(30);
   });
 
-  it('runs tasks with background priority via timer when requestIdleCallback is absent', async () => {
-    const originalIdle = (window as any).requestIdleCallback;
-    delete (window as any).requestIdleCallback;
+  it('normalizes negative and non-finite delays (NaN, Infinity, -100) to safe immediate execution', async () => {
+    const fn1 = vi.fn().mockReturnValue('negative');
+    const fn2 = vi.fn().mockReturnValue('nan');
+    const fn3 = vi.fn().mockReturnValue('inf');
+
+    const res1 = await safePostTask(fn1, { delay: -500 });
+    const res2 = await safePostTask(fn2, { delay: NaN });
+    const res3 = await safePostTask(fn3, { delay: Infinity });
+
+    expect(res1).toBe('negative');
+    expect(res2).toBe('nan');
+    expect(res3).toBe('inf');
+    expect(fn1).toHaveBeenCalledTimes(1);
+    expect(fn2).toHaveBeenCalledTimes(1);
+    expect(fn3).toHaveBeenCalledTimes(1);
+  });
+
+  it('safely falls back to timer when requestIdleCallback is a non-callable object', async () => {
+    // Some buggy polyfills or runtimes define window.requestIdleCallback as a non-function
+    (window as any).requestIdleCallback = { notAFunction: true };
+    (window as any).cancelIdleCallback = 'also-not-a-function';
 
     try {
-      const fn = vi.fn().mockReturnValue('bg-timer');
+      const fn = vi.fn().mockReturnValue('non-callable-safe');
       const res = await safePostTask(fn, { priority: 'background' });
-      expect(res).toBe('bg-timer');
+      expect(res).toBe('non-callable-safe');
       expect(fn).toHaveBeenCalledTimes(1);
     } finally {
-      if (originalIdle) (window as any).requestIdleCallback = originalIdle;
+      delete (window as any).requestIdleCallback;
+      delete (window as any).cancelIdleCallback;
     }
   });
 
-  it('uses requestIdleCallback for background work when available, honoring delay and cancellation', async () => {
+  it('uses requestIdleCallback for background work when callable, honoring delay and cancellation', async () => {
     let idleCb: (() => void) | null = null;
     const cancelIdleMock = vi.fn();
     const requestIdleMock = vi.fn().mockImplementation((cb: () => void) => {
@@ -143,6 +160,29 @@ describe('safePostTask Cooperative Scheduler', () => {
       delete (window as any).requestIdleCallback;
       delete (window as any).cancelIdleCallback;
     }
+  });
+
+  it('guarantees that a stale callback firing after cancellation cannot execute work', async () => {
+    let capturedCallback: (() => void) | null = null;
+    vi.spyOn(global, 'setTimeout').mockImplementation((cb: any) => {
+      capturedCallback = cb;
+      return 999 as any;
+    });
+
+    const workFn = vi.fn().mockReturnValue('stale work');
+    const controller = new AbortController();
+
+    const promise = safePostTask(workFn, { signal: controller.signal });
+    expect(capturedCallback).not.toBeNull();
+
+    // Cancel before the callback executes
+    controller.abort(new Error('Cancelled'));
+    await expect(promise).rejects.toThrow('Cancelled');
+
+    // Simulate delayed or rogue firing of the timeout callback
+    capturedCallback!();
+
+    expect(workFn).not.toHaveBeenCalled();
   });
 
   it('ensures callback is executed at most once', async () => {

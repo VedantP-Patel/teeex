@@ -46,8 +46,12 @@ export function safePostTask<T>(
         clearTimeout(timerId);
         timerId = null;
       }
-      if (idleId !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-        window.cancelIdleCallback(idleId);
+      if (
+        idleId !== null &&
+        typeof window !== 'undefined' &&
+        typeof (window as any).cancelIdleCallback === 'function'
+      ) {
+        (window as any).cancelIdleCallback(idleId);
         idleId = null;
       }
     };
@@ -64,7 +68,7 @@ export function safePostTask<T>(
     }
 
     const run = async () => {
-      if (isSettled) return;
+      if (isSettled || signal?.aborted) return;
       isSettled = true;
       cleanup();
       try {
@@ -74,15 +78,21 @@ export function safePostTask<T>(
       }
     };
 
-    const delay = Math.max(0, options?.delay || 0);
+    // Normalize delay: negative, NaN, or infinite delays become safe 0
+    const rawDelay = options?.delay;
+    const delay =
+      typeof rawDelay === 'number' && Number.isFinite(rawDelay)
+        ? Math.max(0, rawDelay)
+        : 0;
 
     const scheduleWork = () => {
+      if (isSettled || signal?.aborted) return;
       if (
         options?.priority === 'background' &&
         typeof window !== 'undefined' &&
-        'requestIdleCallback' in window
+        typeof (window as any).requestIdleCallback === 'function'
       ) {
-        idleId = window.requestIdleCallback(() => run(), { timeout: 2000 });
+        idleId = (window as any).requestIdleCallback(() => run(), { timeout: 2000 });
       } else {
         timerId = setTimeout(run, 0);
       }

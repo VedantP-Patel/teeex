@@ -27,7 +27,7 @@ export function createPackageServer({
     fs.mkdirSync(resolvedCacheDir, { recursive: true });
   }
 
-  return http.createServer(async (req, res) => {
+  return http.createServer((req, res) => {
     // 1. CORS and nosniff headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
@@ -56,16 +56,42 @@ export function createPackageServer({
     }
 
     const rawUrl = req.url || '';
+    // Exclude query string from filesystem path checks
+    const rawPathOnly = rawUrl.split('?')[0];
 
     // 4. Raw Path Traversal & Segment Validation
-    if (
-      /[\r\n\0]/.test(rawUrl) ||
-      /%0[0a-fA-F]|%0[dD]/.test(rawUrl) ||
-      /\\|%5[cC]/.test(rawUrl) ||
-      /%2[eE]%2[eE]|%2[eE]\.|\.%2[eE]|\.\./.test(rawUrl)
-    ) {
+    // Malformed percent escapes (e.g. %zz, %2, trailing %)
+    if (/%(?![0-9a-fA-F]{2})/.test(rawPathOnly)) {
       res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Bad Request: Invalid URL characters or path traversal sequence detected');
+      res.end('Bad Request: Malformed percent escape');
+      return;
+    }
+
+    // Control characters: NUL, CR, LF
+    if (/[\r\n\0]/.test(rawPathOnly) || /%0[0a-fA-F]|%0[dD]/.test(rawPathOnly)) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Bad Request: Invalid URL characters detected');
+      return;
+    }
+
+    // Backslashes or encoded backslashes
+    if (/\\|%5[cC]/.test(rawPathOnly)) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Bad Request: Backslash path separator detected');
+      return;
+    }
+
+    // Multi-encoded traversals or slashes (%252e, %252f, %255c)
+    if (/%25(?:2[eE]|2[fF]|5[cC])/i.test(rawPathOnly) || /%2525/i.test(rawPathOnly)) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Bad Request: Multi-encoded path traversal detected');
+      return;
+    }
+
+    // Traversal segments (.. or %2e%2e)
+    if (/(?:^|\/|%2[fF])(?:\.\.|%2[eE]%2[eE]|%2[eE]\.|\.%2[eE])(?:\/|%2[fF]|$)/.test(rawPathOnly)) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Bad Request: Path traversal sequence detected');
       return;
     }
 
@@ -120,6 +146,21 @@ export function createPackageServer({
 
     // 8. Cache Miss -> Fetch from Upstream
     const upstreamUrl = `${upstream}${pathname}`;
+    const tempFile = path.join(resolvedCacheDir, `.tmp.${Date.now()}.${crypto.randomUUID()}.tmp`);
+    let tempWriteStream = null;
+    let isClientClosed = false;
+
+    req.on('close', () => {
+      isClientClosed = true;
+      if (!res.writableEnded) {
+        upstreamReq.destroy();
+        if (tempWriteStream && !tempWriteStream.destroyed) {
+          tempWriteStream.destroy();
+        }
+        try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch {}
+      }
+    });
+
     const upstreamReq = https.request(
       upstreamUrl,
       {
@@ -127,13 +168,30 @@ export function createPackageServer({
         timeout: timeoutMs,
       },
       (upstreamRes) => {
+        if (isClientClosed) {
+          upstreamRes.destroy();
+          return;
+        }
+
         const statusCode = upstreamRes.statusCode || 502;
 
+        // Reject upstream redirects (301, 302, 303, 307, 308)
+        if ([301, 302, 303, 307, 308].includes(statusCode)) {
+          try { upstreamRes.destroy(); } catch {}
+          if (!res.headersSent) {
+            res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8', 'X-Cache': 'MISS' });
+            res.end('Bad Gateway: Upstream redirects are prohibited');
+          }
+          return;
+        }
+
         if (statusCode !== 200) {
-          res.writeHead(statusCode, {
-            'Content-Type': upstreamRes.headers['content-type'] || 'text/plain; charset=utf-8',
-            'X-Cache': 'MISS',
-          });
+          if (!res.headersSent) {
+            res.writeHead(statusCode, {
+              'Content-Type': upstreamRes.headers['content-type'] || 'text/plain; charset=utf-8',
+              'X-Cache': 'MISS',
+            });
+          }
           if (req.method === 'HEAD') {
             res.end();
             return;
@@ -146,25 +204,27 @@ export function createPackageServer({
         const advertisedLen = parseInt(upstreamRes.headers['content-length'] || '0', 10);
         if (advertisedLen > maxSize) {
           upstreamRes.destroy();
-          res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8', 'X-Cache': 'MISS' });
-          res.end(`Bad Gateway: Upstream payload exceeds ${maxSize} bytes limit`);
+          if (!res.headersSent) {
+            res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8', 'X-Cache': 'MISS' });
+            res.end(`Bad Gateway: Upstream payload exceeds ${maxSize} bytes limit`);
+          }
           return;
         }
 
         if (req.method === 'HEAD') {
-          res.writeHead(200, {
-            'Content-Type': upstreamRes.headers['content-type'] || 'application/octet-stream',
-            'Content-Length': upstreamRes.headers['content-length'],
-            'Cache-Control': 'public, max-age=31536000, immutable',
-            'X-Cache': 'MISS',
-          });
+          if (!res.headersSent) {
+            res.writeHead(200, {
+              'Content-Type': upstreamRes.headers['content-type'] || 'application/octet-stream',
+              'Content-Length': upstreamRes.headers['content-length'],
+              'Cache-Control': 'public, max-age=31536000, immutable',
+              'X-Cache': 'MISS',
+            });
+          }
           res.end();
           return;
         }
 
         // GET: Stream to client while writing to temporary cache file
-        const tempFile = path.join(resolvedCacheDir, `.tmp.${Date.now()}.${crypto.randomUUID()}.tmp`);
-        let tempWriteStream = null;
         try {
           fs.mkdirSync(path.dirname(localFile), { recursive: true });
           tempWriteStream = fs.createWriteStream(tempFile);
@@ -175,11 +235,13 @@ export function createPackageServer({
         let streamedBytes = 0;
         let isOversized = false;
 
-        res.writeHead(200, {
-          'Content-Type': upstreamRes.headers['content-type'] || 'application/octet-stream',
-          'Cache-Control': 'public, max-age=31536000, immutable',
-          'X-Cache': 'MISS',
-        });
+        if (!res.headersSent) {
+          res.writeHead(200, {
+            'Content-Type': upstreamRes.headers['content-type'] || 'application/octet-stream',
+            'Cache-Control': 'public, max-age=31536000, immutable',
+            'X-Cache': 'MISS',
+          });
+        }
 
         upstreamRes.on('data', (chunk) => {
           streamedBytes += chunk.length;
@@ -194,10 +256,34 @@ export function createPackageServer({
             return;
           }
 
-          if (tempWriteStream && !tempWriteStream.destroyed) {
-            tempWriteStream.write(chunk);
+          const canWriteTemp = tempWriteStream && !tempWriteStream.destroyed ? tempWriteStream.write(chunk) : true;
+          const canWriteRes = res.write(chunk);
+
+          // Apply stream backpressure if buffer full
+          if (!canWriteTemp || !canWriteRes) {
+            upstreamRes.pause();
+            let drainedTemp = canWriteTemp;
+            let drainedRes = canWriteRes;
+
+            const checkDrain = () => {
+              if (drainedTemp && drainedRes) {
+                upstreamRes.resume();
+              }
+            };
+
+            if (!canWriteRes) {
+              res.once('drain', () => {
+                drainedRes = true;
+                checkDrain();
+              });
+            }
+            if (!canWriteTemp && tempWriteStream) {
+              tempWriteStream.once('drain', () => {
+                drainedTemp = true;
+                checkDrain();
+              });
+            }
           }
-          res.write(chunk);
         });
 
         upstreamRes.on('end', () => {
@@ -220,9 +306,11 @@ export function createPackageServer({
         upstreamRes.on('error', (err) => {
           if (tempWriteStream && !tempWriteStream.destroyed) tempWriteStream.destroy();
           try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch {}
-          if (!res.writableEnded) {
+          if (!res.headersSent) {
             res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
             res.end(`Proxy stream error: ${err.message}`);
+          } else if (!res.writableEnded) {
+            res.destroy(err);
           }
         });
       }
@@ -230,16 +318,20 @@ export function createPackageServer({
 
     upstreamReq.on('timeout', () => {
       upstreamReq.destroy();
-      if (!res.writableEnded) {
+      if (!res.headersSent) {
         res.writeHead(504, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('Gateway Timeout: Upstream request timed out');
+      } else if (!res.writableEnded) {
+        res.destroy(new Error('Gateway Timeout'));
       }
     });
 
     upstreamReq.on('error', (err) => {
-      if (!res.writableEnded) {
+      if (!res.headersSent) {
         res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end(`Proxy error: ${err.message}`);
+      } else if (!res.writableEnded) {
+        res.destroy(err);
       }
     });
 

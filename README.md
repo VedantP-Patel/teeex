@@ -58,19 +58,26 @@ that is the cost of real TeX, and the same cost Overleaf pays server-side.
 
 texlive-basic and a curated set of common academic `.sty`/`.cls`/`.bst` files in `public/packages/` ship locally (35 standard academic packages plus Springer Nature `sn-jnl.cls` and `sn-basic.bst`, totaling 37 files).
 
-Before the WASM engine runs, `preloadDocumentPackages()` resolves the transitive dependency closure of packages and classes declared in the preamble (`\usepackage`, `\RequirePackage`, `\LoadClass`, `\input`) and mounts them into MEMFS in parallel. Any remaining file is fetched on demand from a TeX Live 2026 package server.
+Before the WASM engine runs, `preloadDocumentPackages()` resolves the transitive dependency closure of packages and classes declared in the preamble (`\usepackage`, `\RequirePackage`, `\LoadClass`, `\input`) and mounts them into MEMFS.
+- **In-Flight Request Deduplication**: Simultaneous requests for the same package file share a single in-flight promise to eliminate redundant roundtrips.
+- **Bounded Fetch Concurrency**: Remote fetches are constrained to at most 8 parallel HTTP requests.
+- **Payload Streaming Guard**: Responses are streamed with an 8 MiB upper limit; oversized responses or bodies advertising `Content-Length > 8 MiB` are immediately aborted.
+- **160-File Cap**: Live resolution limits total preloaded files to 160 to prevent memory exhaustion from cyclic or unbounded package dependency trees.
+- **Strict 404 Caching**: Only permanent HTTP 404 responses are cached as negative misses; transient 5xx errors or network drops remain retryable on subsequent compiles.
 
 ### Essential Package Provisioning
 
 Local packages are provisioned by `scripts/download-essential-packages.mjs` during `npm run predev` and `npm run prebuild`:
-- **Bounded Concurrency & Retries**: Downloads run across 4 concurrent workers with 15-second timeouts and up to two retries per package.
-- **Payload & Marker Validation**: Downloads and existing cached assets are validated before saving:
-  - Rejects HTML error responses (even when served with binary headers) and explicit upstream error text (`Cannot GET`, `404 Not Found`).
-  - Enforces size boundaries (minimum 30 bytes, maximum 8 MiB).
-  - Checks for embedded NUL bytes in text packages.
-  - Verifies expected source markers (e.g. `\ProvidesPackage`, `\ProvidesClass`, `\def`, `%` for TeX files; `ENTRY`, `FUNCTION` for BibTeX styles).
-- **Atomic Writes & Digest Logging**: Downloads are staged in temporary files and atomically renamed into `public/packages/` upon full validation. Each package's size and SHA-256 digest are logged.
-- **Strict Failure Policy**: If any package fails to download or pass validation, the provisioning script exits with an error (exit code 1) to prevent partial or corrupted builds.
+- **Cryptographic Integrity Manifest**: Package sizes and SHA-256 digests are pinned in `scripts/essential-package-hashes.json`. Both newly downloaded files and existing cached assets are verified against this manifest.
+- **Streaming Response Limits**: Upstream responses are inspected for `Content-Length` headers (> 8 MiB rejected immediately) and read in streamed chunks with hard cancellation if accumulated bytes exceed 8 MiB, preventing unbounded memory consumption.
+- **Bounded Concurrency & Retries**: Downloads execute across configurable worker pools (default 4, bounded 1–16) with 15-second timeouts and up to two retries per package.
+- **Payload & Marker Validation**: In addition to cryptographic hash validation, packages are checked for:
+  - Prevention of HTML error payloads and server error messages (`Cannot GET`, `404 Not Found`).
+  - Size boundaries (minimum 30 bytes, maximum 8 MiB).
+  - Absence of embedded NUL bytes in plain text packages.
+  - Expected TeX/BibTeX format markers (`\ProvidesPackage`, `\ProvidesClass`, `\def`, BibTeX entries).
+- **Atomic Writes & Verification**: Downloads are staged in temporary files (`.tmp-*`) and atomically renamed into `public/packages/` only after full validation.
+- **Strict Failure Policy**: Any download failure, size discrepancy, or hash mismatch triggers an immediate exit (code 1) to halt builds with corrupt assets.
 
 > [!TIP]
 > **Offline / Incomplete Package Override**:
@@ -82,7 +89,7 @@ Local packages are provisioned by `scripts/download-essential-packages.mjs` duri
 
 > [!NOTE]
 > **Integrity Scope**:
-> Computed SHA-256 digests are logged for auditing, but not validated against a remotely signed hash manifest. Source-marker checks are heuristic guards against corrupt or HTML error responses.
+> Manifest hashes in `scripts/essential-package-hashes.json` are repository-managed integrity pins rather than third-party signed cryptographic attestations from upstream CTAN/TeX Live mirrors. Source-marker heuristics provide defense-in-depth against upstream server error pages.
 
 The default remote endpoint is proxied via `/api/texlive` (falling back to `https://texlive2026.texlyre.org`). To point at your own server (see `deploy/texlive-server`):
 
