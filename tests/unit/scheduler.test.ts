@@ -1,7 +1,29 @@
-import { describe, it, expect, vi } from 'vitest';
+// @vitest-environment happy-dom
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { safePostTask } from '../../src/utils/scheduler';
 
 describe('safePostTask Cooperative Scheduler', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('delegates to native scheduler.postTask when available', async () => {
+    const postTaskMock = vi.fn().mockResolvedValue('native-result');
+    (window as any).scheduler = { postTask: postTaskMock };
+
+    try {
+      const res = await safePostTask(() => 'native-result', { priority: 'user-visible' });
+      expect(res).toBe('native-result');
+      expect(postTaskMock).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (window as any).scheduler;
+    }
+  });
+
   it('executes a synchronous task and returns the result', async () => {
     const result = await safePostTask(() => 42);
     expect(result).toBe(42);
@@ -18,24 +40,118 @@ describe('safePostTask Cooperative Scheduler', () => {
   it('handles errors inside callback by rejecting the returned promise', async () => {
     await expect(
       safePostTask(() => {
-        throw new Error('Simulation error');
+        throw new Error('Sync error');
       })
-    ).rejects.toThrow('Simulation error');
+    ).rejects.toThrow('Sync error');
+
+    await expect(
+      safePostTask(async () => {
+        throw new Error('Async rejection');
+      })
+    ).rejects.toThrow('Async rejection');
   });
 
-  it('rejects immediately when passed an already-aborted signal', async () => {
+  it('rejects immediately when passed an already-aborted signal and does not run callback', async () => {
+    const fn = vi.fn().mockReturnValue('should not run');
     const controller = new AbortController();
     controller.abort(new Error('Aborted by user'));
 
     await expect(
-      safePostTask(() => 'should not run', { signal: controller.signal })
+      safePostTask(fn, { signal: controller.signal })
     ).rejects.toThrow('Aborted by user');
+
+    expect(fn).not.toHaveBeenCalled();
   });
 
-  it('runs tasks with background priority via fallback or scheduler', async () => {
-    const fn = vi.fn().mockReturnValue('bg-ok');
-    const res = await safePostTask(fn, { priority: 'background' });
-    expect(res).toBe('bg-ok');
-    expect(fn).toHaveBeenCalled();
+  it('aborts during delay before start, preventing callback execution and clearing timer', async () => {
+    const fn = vi.fn().mockReturnValue('delayed result');
+    const controller = new AbortController();
+
+    const taskPromise = safePostTask(fn, { delay: 60, signal: controller.signal });
+
+    // Abort after 15ms while waiting for the 60ms delay
+    setTimeout(() => {
+      controller.abort(new Error('Cancelled during delay'));
+    }, 15);
+
+    await expect(taskPromise).rejects.toThrow('Cancelled during delay');
+
+    // Wait past the 60ms delay to confirm callback was never executed
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('honors configured delay timing in fallback execution', async () => {
+    const start = Date.now();
+    const result = await safePostTask(() => 'done', { delay: 40 });
+    const elapsed = Date.now() - start;
+
+    expect(result).toBe('done');
+    expect(elapsed).toBeGreaterThanOrEqual(30);
+  });
+
+  it('runs tasks with background priority via timer when requestIdleCallback is absent', async () => {
+    const originalIdle = (window as any).requestIdleCallback;
+    delete (window as any).requestIdleCallback;
+
+    try {
+      const fn = vi.fn().mockReturnValue('bg-timer');
+      const res = await safePostTask(fn, { priority: 'background' });
+      expect(res).toBe('bg-timer');
+      expect(fn).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalIdle) (window as any).requestIdleCallback = originalIdle;
+    }
+  });
+
+  it('uses requestIdleCallback for background work when available, honoring delay and cancellation', async () => {
+    let idleCb: (() => void) | null = null;
+    const cancelIdleMock = vi.fn();
+    const requestIdleMock = vi.fn().mockImplementation((cb: () => void) => {
+      idleCb = cb;
+      return 1234;
+    });
+
+    (window as any).requestIdleCallback = requestIdleMock;
+    (window as any).cancelIdleCallback = cancelIdleMock;
+
+    try {
+      // 1. Normal execution
+      const fn = vi.fn().mockReturnValue('idle-done');
+      const p = safePostTask(fn, { priority: 'background' });
+
+      expect(requestIdleMock).toHaveBeenCalledTimes(1);
+      expect(idleCb).not.toBeNull();
+      idleCb!();
+
+      const res = await p;
+      expect(res).toBe('idle-done');
+      expect(fn).toHaveBeenCalledTimes(1);
+
+      // 2. Cancellation of idle task
+      const fn2 = vi.fn().mockReturnValue('should be cancelled');
+      const controller = new AbortController();
+      const p2 = safePostTask(fn2, { priority: 'background', signal: controller.signal });
+
+      expect(requestIdleMock).toHaveBeenCalledTimes(2);
+      controller.abort(new Error('Idle task cancelled'));
+
+      await expect(p2).rejects.toThrow('Idle task cancelled');
+      expect(cancelIdleMock).toHaveBeenCalledWith(1234);
+      expect(fn2).not.toHaveBeenCalled();
+    } finally {
+      delete (window as any).requestIdleCallback;
+      delete (window as any).cancelIdleCallback;
+    }
+  });
+
+  it('ensures callback is executed at most once', async () => {
+    let count = 0;
+    const res = await safePostTask(() => {
+      count++;
+      return count;
+    });
+    expect(res).toBe(1);
+    expect(count).toBe(1);
   });
 });

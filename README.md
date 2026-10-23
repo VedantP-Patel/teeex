@@ -56,23 +56,41 @@ that is the cost of real TeX, and the same cost Overleaf pays server-side.
 
 ## Packages
 
-texlive-basic and a curated set of common academic .sty/.cls/.tfm files
-in public/packages/ ship locally. Before the WASM engine runs,
-preloadDocumentPackages() resolves the transitive dependency closure of
-packages and classes declared in the preamble (\usepackage, \RequirePackage,
-\LoadClass, \input) and mounts them into MEMFS in parallel. Any remaining
-file is fetched on demand from a TeX Live 2026 package server.
+texlive-basic and a curated set of common academic `.sty`/`.cls`/`.bst` files in `public/packages/` ship locally (35 standard academic packages plus Springer Nature `sn-jnl.cls` and `sn-basic.bst`, totaling 37 files).
 
-The default remote endpoint is proxied via /api/texlive (falling back to
-https://texlive2026.texlyre.org). To point at your own server (see
-deploy/texlive-server):
+Before the WASM engine runs, `preloadDocumentPackages()` resolves the transitive dependency closure of packages and classes declared in the preamble (`\usepackage`, `\RequirePackage`, `\LoadClass`, `\input`) and mounts them into MEMFS in parallel. Any remaining file is fetched on demand from a TeX Live 2026 package server.
+
+### Essential Package Provisioning
+
+Local packages are provisioned by `scripts/download-essential-packages.mjs` during `npm run predev` and `npm run prebuild`:
+- **Bounded Concurrency & Retries**: Downloads run across 4 concurrent workers with 15-second timeouts and up to two retries per package.
+- **Payload & Marker Validation**: Downloads and existing cached assets are validated before saving:
+  - Rejects HTML error responses (even when served with binary headers) and explicit upstream error text (`Cannot GET`, `404 Not Found`).
+  - Enforces size boundaries (minimum 30 bytes, maximum 8 MiB).
+  - Checks for embedded NUL bytes in text packages.
+  - Verifies expected source markers (e.g. `\ProvidesPackage`, `\ProvidesClass`, `\def`, `%` for TeX files; `ENTRY`, `FUNCTION` for BibTeX styles).
+- **Atomic Writes & Digest Logging**: Downloads are staged in temporary files and atomically renamed into `public/packages/` upon full validation. Each package's size and SHA-256 digest are logged.
+- **Strict Failure Policy**: If any package fails to download or pass validation, the provisioning script exits with an error (exit code 1) to prevent partial or corrupted builds.
+
+> [!TIP]
+> **Offline / Incomplete Package Override**:
+> For offline development or environments with restricted external network access, set:
+> ```bash
+> TEEEX_ALLOW_INCOMPLETE_PACKAGES=1 npm run dev
+> ```
+> This issues a warning for missing packages while allowing compilation with whatever assets are already cached.
+
+> [!NOTE]
+> **Integrity Scope**:
+> Computed SHA-256 digests are logged for auditing, but not validated against a remotely signed hash manifest. Source-marker checks are heuristic guards against corrupt or HTML error responses.
+
+The default remote endpoint is proxied via `/api/texlive` (falling back to `https://texlive2026.texlyre.org`). To point at your own server (see `deploy/texlive-server`):
 
 ```
 VITE_TEXLIVE_REMOTE_ENDPOINT=https://your-texlive-host
 ```
 
-Set it to off to disable remote package resolution entirely; compilation is
-then limited to the locally provisioned package set.
+Set it to `off` to disable remote package resolution entirely; compilation is then limited to the locally provisioned package set.
 
 ## Scripts
 

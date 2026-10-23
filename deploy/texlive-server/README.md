@@ -60,3 +60,22 @@ Verify your server is running:
 curl https://your-server-url/health
 # Returns: {"status":"healthy","service":"teeex-texlive-server","upstream":"https://texlive2026.texlyre.org"}
 ```
+
+---
+
+## Security & Deployment Constraints
+
+The package proxy is hardened with defensive controls to protect host infrastructure and cached assets:
+- **Method Whitelist**: Only `GET`, `HEAD`, and `OPTIONS` requests are accepted. All other methods return `405 Method Not Allowed` with an explicit `Allow` header.
+- **Path Sanitization & Traversal Prevention**: Raw URL path segments are validated before normalisation to block encoded dot traversals (`%2e%2e`, `..`), backslashes (`\`, `%5c`), NUL bytes (`%00`), and carriage returns/newlines (`\r`, `\n`). Paths that resolve outside the designated cache directory root are rejected with `400 Bad Request`.
+- **HTTPS Upstream Enforcement**: The proxy requires an HTTPS upstream URL (`UPSTREAM_URL`) to prevent insecure man-in-the-middle package substitution.
+- **Payload Limits & Timeouts**: Imposes a 15-second upstream request timeout and a 64 MiB maximum package size limit (enforced on both advertised `Content-Length` and streamed byte counts).
+- **Atomic Cache Writes & Resilience**: Cache misses are streamed directly to the client while writing to a uniquely named temporary file. The file is atomically renamed into the cache hierarchy only after a complete write. Disk I/O failures are treated as best-effort so cache write issues do not drop a valid upstream response.
+- **Security Headers**: All responses include `X-Content-Type-Options: nosniff` and `X-Cache: HIT` / `X-Cache: MISS` headers.
+
+> [!CAUTION]
+> **Deployment Boundary**:
+> This service functions as a public package proxy, not an authenticated compilation service.
+> - Always run behind an HTTPS-terminating reverse proxy (Cloudflare, Railway, Caddy, or Nginx) in production.
+> - Permissive CORS headers (`Access-Control-Allow-Origin: *`) are designed for browser package downloads and do not provide access control or document security.
+

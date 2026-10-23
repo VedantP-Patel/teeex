@@ -29,38 +29,69 @@ export function safePostTask<T>(
 
   // 2. Fallback execution for unsupported runtimes (Firefox, Safari, Node.js / Vitest)
   return new Promise<T>((resolve, reject) => {
-    if (options?.signal?.aborted) {
-      return reject(options.signal.reason);
+    const signal = options?.signal;
+    if (signal?.aborted) {
+      return reject(signal.reason ?? new DOMException('This operation was aborted', 'AbortError'));
     }
 
-    const abortHandler = () => {
-      reject(options?.signal?.reason);
-    };
-    options?.signal?.addEventListener('abort', abortHandler, { once: true });
+    let isSettled = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    let idleId: number | null = null;
 
-    const execute = async () => {
+    const cleanup = () => {
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+      if (timerId !== null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      if (idleId !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleId);
+        idleId = null;
+      }
+    };
+
+    const onAbort = () => {
+      if (isSettled) return;
+      isSettled = true;
+      cleanup();
+      reject(signal?.reason ?? new DOMException('This operation was aborted', 'AbortError'));
+    };
+
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    const run = async () => {
+      if (isSettled) return;
+      isSettled = true;
+      cleanup();
       try {
-        const result = await callback();
-        options?.signal?.removeEventListener('abort', abortHandler);
-        resolve(result);
+        resolve(await callback());
       } catch (err) {
-        options?.signal?.removeEventListener('abort', abortHandler);
         reject(err);
       }
     };
 
-    const delay = options?.delay || 0;
+    const delay = Math.max(0, options?.delay || 0);
 
-    if (
-      options?.priority === 'background' &&
-      typeof window !== 'undefined' &&
-      'requestIdleCallback' in window
-    ) {
-      window.requestIdleCallback(() => execute(), { timeout: Math.max(delay, 2000) });
-    } else if (delay > 0) {
-      setTimeout(execute, delay);
+    const scheduleWork = () => {
+      if (
+        options?.priority === 'background' &&
+        typeof window !== 'undefined' &&
+        'requestIdleCallback' in window
+      ) {
+        idleId = window.requestIdleCallback(() => run(), { timeout: 2000 });
+      } else {
+        timerId = setTimeout(run, 0);
+      }
+    };
+
+    if (delay > 0) {
+      timerId = setTimeout(scheduleWork, delay);
     } else {
-      setTimeout(execute, 0);
+      scheduleWork();
     }
   });
 }
