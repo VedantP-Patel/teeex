@@ -110,8 +110,12 @@ export const onRequest: PagesFunction = async (context) => {
     }
   }
 
-  // 2. Fetch from upstream TeX Live 2026 server with Cloudflare Edge Cache
-  const upstreamUrl = `${UPSTREAM_TEXLIVE_BASE}/${subpath}`;
+  // 2. Fetch from upstream TeX Live server with Cloudflare Edge Cache
+  const upstreamBase =
+    ((context.env as Record<string, unknown>)?.VITE_TEXLIVE_REMOTE_ENDPOINT as string) ||
+    ((context.env as Record<string, unknown>)?.TEXLIVE_REMOTE_ENDPOINT as string) ||
+    UPSTREAM_TEXLIVE_BASE;
+  const upstreamUrl = `${upstreamBase.replace(/\/+$/, '')}/${subpath}`;
 
   try {
     const upstreamRes = await fetch(upstreamUrl, {

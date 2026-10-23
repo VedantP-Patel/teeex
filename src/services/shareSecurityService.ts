@@ -20,14 +20,31 @@ export interface RoomShareTokens {
   isRevoked?: boolean;
 }
 
-// Fast synchronous SHA-256 implementation
+/**
+ * Asynchronous cryptographic SHA-256 via Web Crypto API (SubtleCrypto).
+ * Non-blocking, standards-compliant, and fully preserves UTF-8 non-ASCII characters.
+ */
+export async function sha256(str: string): Promise<string> {
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const enc = new TextEncoder();
+    const data = enc.encode(str);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  return sha256Sync(str);
+}
+
+// Synchronous SHA-256 with full UTF-8 encoding support (no silent & 0xff non-ASCII truncation)
 export function sha256Sync(str: string): string {
   function rightRotate(value: number, amount: number) {
     return (value >>> amount) | (value << (32 - amount));
   }
 
+  const bytes = new TextEncoder().encode(str);
   const words: number[] = [];
-  const asciiBitLength = str.length * 8;
+  const bitLength = bytes.length * 8;
 
   let h0 = 0x6a09e667;
   let h1 = 0xbb67ae85;
@@ -46,15 +63,16 @@ export function sha256Sync(str: string): string {
     0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
     0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
   ];
 
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i);
-    words[i >> 2] |= (code & 0xff) << (24 - (i % 4) * 8);
+  for (let i = 0; i < bytes.length; i++) {
+    words[i >> 2] |= bytes[i] << (24 - (i % 4) * 8);
   }
-  words[str.length >> 2] |= 0x80 << (24 - (str.length % 4) * 8);
-  words[(((str.length + 8) >> 6) << 4) + 15] = asciiBitLength;
+  words[bytes.length >> 2] |= 0x80 << (24 - (bytes.length % 4) * 8);
+
+  const totalBlocks = ((bytes.length + 8) >> 6) + 1;
+  words[(totalBlocks << 4) - 1] = bitLength;
 
   for (let i = 0; i < words.length; i += 16) {
     const w: number[] = [];
@@ -107,8 +125,8 @@ function generateCryptographicKey(): string {
   const randomBytes = new Uint8Array(16);
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
     crypto.getRandomValues(randomBytes);
-  } else {
-    for (let i = 0; i < 16; i++) randomBytes[i] = Math.floor(Math.random() * 256);
+  } else if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '').slice(0, 32);
   }
   return Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }

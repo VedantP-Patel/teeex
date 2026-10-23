@@ -1,8 +1,66 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
+
+function buildConnectSrc(): string {
+  const allowed = new Set<string>([
+    "'self'",
+    'blob:',
+    'https://texlive2026.texlyre.org',
+    'https://*.supabase.co',
+    'wss://*.supabase.co',
+  ]);
+
+  const customRemote = process.env.VITE_TEXLIVE_REMOTE_ENDPOINT;
+  if (customRemote && customRemote !== 'off') {
+    try {
+      const url = new URL(customRemote);
+      allowed.add(url.origin);
+    } catch {
+      // Ignore invalid URL formatting
+    }
+  }
+
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  if (supabaseUrl) {
+    try {
+      const url = new URL(supabaseUrl);
+      allowed.add(url.origin);
+      if (url.protocol === 'https:') {
+        allowed.add(`wss://${url.host}`);
+      }
+    } catch {
+      // Ignore invalid URL formatting
+    }
+  }
+
+  return Array.from(allowed).join(' ');
+}
+
+function getCsp(): string {
+  const connectSrc = buildConnectSrc();
+  return `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src ${connectSrc}; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`;
+}
+
+function cspHeadersPlugin(): Plugin {
+  return {
+    name: 'csp-headers-generator',
+    closeBundle() {
+      const rootDir = import.meta.dirname || __dirname;
+      const distHeaders = resolve(rootDir, 'dist', '_headers');
+      if (existsSync(distHeaders)) {
+        let content = readFileSync(distHeaders, 'utf8');
+        const cspLine = `  Content-Security-Policy: ${getCsp()}`;
+        content = content.replace(/^[ \t]*Content-Security-Policy:.*$/m, cspLine);
+        writeFileSync(distHeaders, content, 'utf8');
+      }
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), cspHeadersPlugin()],
   worker: {
     format: 'es',
   },
@@ -28,7 +86,11 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/texlive': {
-        target: 'https://texlive2026.texlyre.org',
+        target:
+          process.env.VITE_TEXLIVE_REMOTE_ENDPOINT &&
+          process.env.VITE_TEXLIVE_REMOTE_ENDPOINT !== 'off'
+            ? process.env.VITE_TEXLIVE_REMOTE_ENDPOINT
+            : 'https://texlive2026.texlyre.org',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/texlive/, ''),
       },
@@ -88,8 +150,7 @@ export default defineConfig({
    */
   preview: {
     headers: {
-      'Content-Security-Policy':
-        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' blob: https://texlive2026.texlyre.org https://*.supabase.co wss://*.supabase.co; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
+      'Content-Security-Policy': getCsp(),
     },
   },
   define: {

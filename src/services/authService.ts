@@ -201,11 +201,13 @@ export function startLocalWorkspace(
       id =
         typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
           ? `local-${crypto.randomUUID()}`
-          : `local-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+          : `local-${Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('')}`;
       localStorage.setItem(LOCAL_PROFILE_KEY, id);
     }
   } catch {
-    id = `local-${Date.now().toString(36)}`;
+    id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `local-${crypto.randomUUID()}`
+      : `local-${Date.now().toString(36)}`;
   }
 
   const name = displayName.trim() || 'Local workspace';

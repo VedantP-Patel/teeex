@@ -270,7 +270,10 @@ export class SupabaseYjsProvider {
       });
     } else {
       // Chunk large update into slices
-      const transferId = 'xfer_' + Math.random().toString(36).substring(2, 9);
+      const transferId =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? `xfer_${crypto.randomUUID()}`
+          : `xfer_${Date.now().toString(36)}`;
       const totalChunks = Math.ceil(update.byteLength / CHUNK_SIZE);
 
       for (let i = 0; i < totalChunks; i++) {

@@ -98,7 +98,14 @@ function remoteEndpoint(): string | undefined {
   return DEFAULT_REMOTE_ENDPOINT;
 }
 
-function hashString(str: string): string {
+async function sha256Hex(str: string): Promise<string> {
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const data = new TextEncoder().encode(str);
+    const buf = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(buf))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
   let hash = 5381;
   for (let i = 0; i < str.length; i++) {
     hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
@@ -141,7 +148,7 @@ function extractMissingImageKeys(texContent: string, files: ProjectFile[]): stri
   return Array.from(misses);
 }
 
-function extractPreambleSig(files: ProjectFile[]): { sig: string; preambleText: string } {
+async function extractPreambleSig(files: ProjectFile[]): Promise<{ sig: string; preambleText: string }> {
   const chunks: string[] = [];
   for (const f of files) {
     if (f.name.endsWith('.tex') || f.name.endsWith('.cls') || f.name.endsWith('.sty')) {
@@ -150,14 +157,15 @@ function extractPreambleSig(files: ProjectFile[]): { sig: string; preambleText: 
     }
   }
   const preambleText = chunks.join('\n');
-  return { sig: hashString(preambleText), preambleText };
+  const sig = await sha256Hex(preambleText);
+  return { sig, preambleText };
 }
 
-function extractAuxSignature(memfsFiles: Array<{ path: string; content: string | Uint8Array }>): string {
+async function extractAuxSignature(memfsFiles: Array<{ path: string; content: string | Uint8Array }>): Promise<string> {
   for (const f of memfsFiles) {
     if (f.path.toLowerCase().endsWith('.aux')) {
       const text = typeof f.content === 'string' ? f.content : new TextDecoder().decode(f.content);
-      return hashString(text);
+      return sha256Hex(text);
     }
   }
   return '';
@@ -493,7 +501,7 @@ export class TexEngineService {
     // 2. Preload the preamble's package dependency closure in parallel before
     //    launching WASM.
     try {
-      const { sig: preambleSig, preambleText } = extractPreambleSig(input.files);
+      const { sig: preambleSig, preambleText } = await extractPreambleSig(input.files);
       if (this.lastPreambleSig.get(engine) !== preambleSig) {
         const preloaded = await preloadDocumentPackages(preambleText, remoteEndpoint());
         const mountedSet = this.mountedPackagesByEngine.get(engine) ?? new Set<string>();
@@ -655,7 +663,7 @@ export class TexEngineService {
       if (input.compileMode !== 'publication' && parsed.rerunRequired) {
         try {
           const memfsFiles = await runner.readProjectFiles();
-          const auxSig = extractAuxSignature(memfsFiles);
+          const auxSig = await extractAuxSignature(memfsFiles);
           const prevAuxSig = this.lastAuxSignature.get(projectKey);
           if (auxSig && prevAuxSig && auxSig === prevAuxSig) {
             // .aux contents are completely identical: all references and labels are already stable!
@@ -709,7 +717,7 @@ export class TexEngineService {
         void (async () => {
           try {
             const memfsFiles = await runner.readProjectFiles();
-            const auxSig = extractAuxSignature(memfsFiles);
+            const auxSig = await extractAuxSignature(memfsFiles);
             if (auxSig) {
               this.lastAuxSignature.set(projectKey, auxSig);
             }

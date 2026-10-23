@@ -339,7 +339,10 @@ export function App() {
 
   const [selfUser, setSelfUser] = useState<Collaborator>(() => {
     const savedName = localStorage.getItem('teeex_user_name') || 'Guest Author';
-    const userId = 'usr_' + Math.random().toString(36).substring(2, 9);
+    const userId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? `usr_${crypto.randomUUID()}`
+        : `usr_${Date.now().toString(36)}`;
     const color = '#38bdf8';
     if (currentUser) {
       return {
@@ -887,7 +890,10 @@ export function App() {
   const handleAddTrackedChange = useCallback((change: Omit<TrackedChange, 'id' | 'status' | 'timestamp'>) => {
     const newChange: TrackedChange = {
       ...change,
-      id: `change-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id:
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? `change-${crypto.randomUUID()}`
+          : `change-${Date.now()}`,
       timestamp: 'Just now',
       status: 'pending',
     };

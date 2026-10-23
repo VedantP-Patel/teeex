@@ -40,7 +40,10 @@ export class CollaborationHub {
     this.roomId = roomId;
     const randomColor = PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)];
     const savedName = localStorage.getItem('teeex_user_name') || initialUserName || 'Guest Author';
-    const userId = 'user_' + Math.random().toString(36).substring(2, 9);
+    const userId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? `user_${crypto.randomUUID()}`
+        : `user_${Date.now().toString(36)}`;
 
     this.selfUser = {
       id: userId,
