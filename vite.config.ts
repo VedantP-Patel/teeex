@@ -47,7 +47,7 @@ function cspHeadersPlugin(): Plugin {
   return {
     name: 'csp-headers-generator',
     closeBundle() {
-      const rootDir = import.meta.dirname || __dirname;
+      const rootDir = import.meta.dirname ?? process.cwd();
       const distHeaders = resolve(rootDir, 'dist', '_headers');
       if (existsSync(distHeaders)) {
         let content = readFileSync(distHeaders, 'utf8');
