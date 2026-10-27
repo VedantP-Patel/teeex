@@ -1,3 +1,20 @@
+self.onerror = function (message, source, lineno, colno, error) {
+    try {
+        self.postMessage({
+            exception: `Worker Error: ${message} (${source || 'busytex_worker.js'}:${lineno || 0}:${colno || 0})` +
+                (error?.stack ? `\nStack:\n${error.stack}` : '')
+        });
+    } catch (_) {}
+};
+
+self.onunhandledrejection = function (event) {
+    try {
+        const reason = event.reason;
+        const msg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+        self.postMessage({ exception: `Worker Unhandled Rejection: ${msg}` });
+    } catch (_) {}
+};
+
 importScripts('busytex_biber.js');
 importScripts('busytex_pipeline.js');
 

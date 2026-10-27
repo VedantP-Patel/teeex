@@ -81,10 +81,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     });
 
     if (upstreamRes.ok && upstreamRes.body) {
-      const headers = new Headers(upstreamRes.headers);
+      const headers = new Headers();
       headers.set('Cache-Control', 'public, max-age=31536000, immutable');
       headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+      headers.set('Access-Control-Allow-Origin', '*');
       headers.set('Content-Type', getContentType(key));
+      // Upstream GitHub Pages responses are often gzipped and transparently
+      // decompressed by Cloudflare's runtime fetch(). Never forward upstream
+      // 'content-encoding: gzip' or compressed 'content-length' headers to avoid
+      // net::ERR_CONTENT_DECODING_FAILED crashes inside browser Web Workers.
 
       return new Response(upstreamRes.body, {
         status: upstreamRes.status,

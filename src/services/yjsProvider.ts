@@ -42,6 +42,8 @@ export class SupabaseYjsProvider {
   private lastAwarenessBroadcastTime = 0;
   private pendingAwarenessTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingDocSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private isChannelSubscribed = false;
+  private pendingWireMessages: YjsWireMessage[] = [];
   private onDocSaveCallback?: (files: ProjectFile[]) => void;
 
   constructor(
@@ -224,6 +226,8 @@ export class SupabaseYjsProvider {
         })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
+            this.isChannelSubscribed = true;
+
             // Track presence on the channel
             this.supabaseChannel?.track({
               user: this.selfUser,
@@ -231,8 +235,25 @@ export class SupabaseYjsProvider {
               onlineAt: Date.now(),
             });
 
+            // Flush buffered messages queued before WebSocket channel completed subscription
+            if (this.pendingWireMessages.length > 0) {
+              const pending = [...this.pendingWireMessages];
+              this.pendingWireMessages = [];
+              for (const msg of pending) {
+                try {
+                  this.supabaseChannel?.send({
+                    type: 'broadcast',
+                    event: 'yjs-wire',
+                    payload: msg,
+                  });
+                } catch { }
+              }
+            }
+
             // Handshake: Send sync-step-1 to discover peer states
             this.sendSyncStep1();
+          } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+            this.isChannelSubscribed = false;
           }
         });
     } catch (err) {
@@ -254,13 +275,21 @@ export class SupabaseYjsProvider {
 
     // 2. Post to Supabase Realtime Broadcast (for remote peers)
     if (this.supabaseChannel) {
-      try {
-        this.supabaseChannel.send({
-          type: 'broadcast',
-          event: 'yjs-wire',
-          payload: msg,
-        });
-      } catch { }
+      if (this.isChannelSubscribed) {
+        try {
+          this.supabaseChannel.send({
+            type: 'broadcast',
+            event: 'yjs-wire',
+            payload: msg,
+          });
+        } catch { }
+      } else {
+        // Buffer until WebSocket handshake finishes to avoid REST fallback warning
+        this.pendingWireMessages.push(msg);
+        if (this.pendingWireMessages.length > 50) {
+          this.pendingWireMessages.shift();
+        }
+      }
     }
   }
 
@@ -585,6 +614,8 @@ export class SupabaseYjsProvider {
 
   public destroy() {
     this.isDestroyed = true;
+    this.isChannelSubscribed = false;
+    this.pendingWireMessages = [];
 
     if (this.pendingAwarenessTimer) {
       clearTimeout(this.pendingAwarenessTimer);

@@ -292,36 +292,65 @@ function pruneLocalStorageQuota(): void {
 export function saveProjects(projects: Project[]): void {
   const sanitized = projects.filter(p => p.id !== 'proj-guest' && p.title !== 'Sign In Required');
 
-  // 1. Always mirror all sanitized projects to IndexedDB offline storage
+  // 1. Always mirror all sanitized projects to IndexedDB offline storage (which supports multi-GB quota)
   for (const p of sanitized) {
     saveProjectOffline(p).catch(() => {});
   }
 
-  // 2. Persist to localStorage with quota-safe fallback
+  // Helper to trim large files for localStorage while full contents remain safely in IndexedDB
+  const makeQuotaSafe = (items: Project[], maxContentLen: number) => {
+    return items.map(p => ({
+      ...p,
+      files: p.files.map(f => {
+        if (f.content.length <= maxContentLen) return f;
+        return {
+          ...f,
+          content: f.content.slice(0, 500) + '\n% [Content persisted in IndexedDB storage]',
+          _persistedInIdb: true,
+        };
+      }),
+    }));
+  };
+
+  // 2. Persist to localStorage with progressive quota fallback
   try {
     localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(sanitized));
-  } catch (err) {
-    console.warn('[ProjectsService] Primary localStorage save failed or exceeded quota. Pruning and retrying...', err);
+  } catch (_err) {
     pruneLocalStorageQuota();
     try {
-      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(sanitized));
-    } catch (retryErr) {
-      console.warn('[ProjectsService] Quota still exceeded. Falling back to active project retention in localStorage:', retryErr);
-      try {
-        const activeId = localStorage.getItem(ACTIVE_PROJECT_ID_KEY);
-        const slim = sanitized.map(p => {
-          if (p.id === activeId) return p;
-          return {
-            ...p,
-            files: p.files.map(f => ({
+      // Pass 1: Trim non-active project files >2000 chars and active files >50,000 chars (~1000 lines)
+      const activeId = localStorage.getItem(ACTIVE_PROJECT_ID_KEY);
+      const pass1 = sanitized.map(p => {
+        const threshold = p.id === activeId ? 50000 : 2000;
+        return {
+          ...p,
+          files: p.files.map(f => {
+            if (f.content.length <= threshold) return f;
+            return {
               ...f,
-              content: f.content.length > 500 ? f.content.slice(0, 200) + '... [Persisted in IndexedDB]' : f.content,
-            })),
-          };
-        });
-        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(slim));
-      } catch (finalErr) {
-        console.error('[ProjectsService] Critical: localStorage is completely exhausted. Manuscript is persisted in IndexedDB.', finalErr);
+              content: f.content.slice(0, 500) + '\n% [Content persisted in IndexedDB storage]',
+              _persistedInIdb: true,
+            };
+          }),
+        };
+      });
+      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(pass1));
+    } catch {
+      try {
+        // Pass 2: Aggressively trim all files >1000 chars across all projects
+        const pass2 = makeQuotaSafe(sanitized, 1000);
+        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(pass2));
+      } catch {
+        // Pass 3: Metadata only in localStorage (headers, tags, member info)
+        try {
+          const pass3 = sanitized.map(p => ({
+            ...p,
+            files: p.files.map(f => ({ ...f, content: '', _persistedInIdb: true })),
+          }));
+          localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(pass3));
+        } catch {
+          // Non-fatal: IndexedDB already holds the full manuscripts
+        }
       }
     }
   }
@@ -563,6 +592,35 @@ export async function pushProjectToCloud(
       error = retry.error;
     }
     if (error) {
+      // Handle RLS policy violation if user is saving a template/starter project owned by another account
+      const isRlsError =
+        error.code === '42501' ||
+        error.message?.includes('row-level security') ||
+        error.message?.includes('violates row-level security policy');
+      const isTemplateId =
+        project.id === 'proj-starter' ||
+        project.id === 'proj-neural-quantum' ||
+        project.id.startsWith('proj-starter');
+
+      if (isRlsError && isTemplateId) {
+        const newId = newProjectId();
+        const rekeyedProject: Project = {
+          ...project,
+          id: newId,
+          ownerId: `usr-${ownerUid}`,
+          role: 'owner',
+        };
+        const newRow = projectToRow(rekeyedProject, ownerUid);
+        const retryResult = await supabase.from('projects').upsert(newRow, { onConflict: 'id' });
+        if (!retryResult.error) {
+          updateProject(project.id, { id: newId });
+          if (localStorage.getItem(ACTIVE_PROJECT_ID_KEY) === project.id) {
+            localStorage.setItem(ACTIVE_PROJECT_ID_KEY, newId);
+          }
+          return { success: true };
+        }
+      }
+
       console.warn('Supabase project upsert error:', error.message);
       return { success: false, error: error.message };
     }

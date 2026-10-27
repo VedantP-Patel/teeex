@@ -30,6 +30,7 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 export async function saveProjectOffline(project: Project): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
   try {
     const db = await openDatabase();
     return new Promise((resolve, reject) => {

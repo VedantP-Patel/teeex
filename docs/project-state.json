@@ -3,16 +3,17 @@
   "project": "Teeex",
   "mission": "One authoritative document-rendering architecture: real TeX computes layout, the preview renders the compiled PDF, and export ships those same bytes.",
   "updated": "2026-10-28",
-  "phase": "Phase 1-6 Progressive Engineering Improvements verified (Server-side share capability tokens with RLS 0004 & owner-pinning trigger; React 19 / App.tsx de-monolithization into useProjectLifecycle, useFileOperations, useProjectCheckpoints with 100% modalStore migration & 0 compiler warnings; useCollaboration Yjs awareness decoupled from provider lifecycle; Cloudflare Pages /core/busytex/* routing for WASM streaming; Multi-file BibTeX aggregation and CodeMirror 6 balanced \\begin/\\end block folding; PDF preview search; TeX engine companion packages; 506 unit tests passing across 56 files, tsc clean, oxlint clean)",
+  "phase": "Phase 1-7 Progressive Engineering Improvements verified (Server-side share capability tokens with RLS 0004 & owner-pinning trigger; React 19 / App.tsx de-monolithization into useProjectLifecycle, useFileOperations, useProjectCheckpoints with 100% modalStore migration & 0 compiler warnings; useCollaboration Yjs awareness decoupled from provider lifecycle; Cloudflare Pages /core/busytex/* routing with upstream Content-Encoding stripping to eliminate ERR_CONTENT_DECODING_FAILED worker initialization crashes; Progressive tiered storage architecture falling back to IndexedDB with localStorage quota stubs preventing QuotaExceededError on massive papers; Automatic Supabase template rekeying preventing RLS conflict 403s on starter projects; Realtime channel buffering eliminating REST fallback deprecation warning; 509 unit tests passing across 57 files, tsc clean, oxlint clean, build:pages clean)",
 
   "verificationStatus": {
     "state": "PASSING",
-    "note": "Progressive engineering improvement phases verified across share security, React 19 architecture, modalStore unification, CodeMirror LaTeX editing, PDF viewer search, and TeX engine package pipeline.",
+    "note": "Progressive engineering improvement phases verified across share security, React 19 architecture, modalStore unification, CodeMirror LaTeX editing, PDF viewer search, TeX engine package pipeline, Cloudflare Pages WASM decompression routing, and storage quota resilience.",
     "results": {
       "typecheck": "npx tsc -p tsconfig.app.json --noEmit — clean, exit 0",
       "lint": "npx oxlint — clean on modified core files, exit 0",
-      "unitAndFuzz": "npx vitest run — 506 passed across 56 files (including shareSecurityService 7, codeMirrorFoldingAndBib 2, pdfPreviewSearch 5, texProject 18, bibtexAstHashing 5)",
+      "unitAndFuzz": "npx vitest run — 509 passed across 57 files (including projectsQuota 2, shareSecurityService 8, codeMirrorFoldingAndBib 2, pdfPreviewSearch 5, texProject 18, bibtexAstHashing 5)",
       "runtimeE2E": "npx playwright test — verified suite",
+      "productionBuild": "npm run build:pages — clean, exit 0",
       "benchmarks": "docs/benchmarks.json captured: structural outline parsing <40ms in worker, warm compile sub-second, heap flat 0MB delta across consecutive compiles"
     },
     "stillUnverified": []

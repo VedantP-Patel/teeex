@@ -18,6 +18,7 @@ import {
   deleteProject,
   updateProject,
   syncProjectsWithCloudBiDirectional,
+  hydrateProjectFromOffline,
 } from '../services/projectsService';
 import { saveProjectOffline } from '../services/offlineStorageService';
 import { STARTER_TEMPLATES } from '../services/templates';
@@ -65,6 +66,17 @@ export function useProjectLifecycle({
       openFileIds: [firstFileId],
       projectTitle: active?.title || 'Untitled Project',
     });
+
+    if (active?.files.some(f => (f as any)._persistedInIdb)) {
+      hydrateProjectFromOffline(initialActiveId).then(offlineProj => {
+        if (offlineProj && Array.isArray(offlineProj.files) && offlineProj.files.length > 0) {
+          setProjectState({
+            files: offlineProj.files,
+            folders: offlineProj.folders || ['sections', 'figures'],
+          });
+        }
+      }).catch(() => {});
+    }
   }, [currentUser]);
 
   const activeProject = useMemo(() => {
@@ -187,7 +199,19 @@ export function useProjectLifecycle({
       projectTitle: proj.title,
     });
 
-    setTimeout(() => triggerCompile(), 60);
+    if (proj.files.some(f => (f as any)._persistedInIdb)) {
+      hydrateProjectFromOffline(projId).then(offlineProj => {
+        if (offlineProj && Array.isArray(offlineProj.files) && offlineProj.files.length > 0) {
+          setProjectState({
+            files: offlineProj.files,
+            folders: offlineProj.folders || ['sections', 'figures'],
+          });
+          setTimeout(() => triggerCompile(), 60);
+        }
+      }).catch(() => {});
+    } else {
+      setTimeout(() => triggerCompile(), 60);
+    }
   }, [flushCurrentProjectSave, triggerCompile]);
 
   const handleCreateProject = useCallback((title: string, templateId?: string) => {
