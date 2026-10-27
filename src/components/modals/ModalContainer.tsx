@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
+import { useModalStore, closeModal } from '../../stores/modalStore';
 import type { Checkpoint, WorkingTreeStatus } from '../../services/checkpointsService';
 import type {
   ProjectFile,
@@ -247,19 +248,34 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
   onCreateBranch,
   onDeleteBranch,
 }) => {
+  const activeModal = useModalStore((s) => s.activeModal);
+
+  const isImageUpload = isImageUploadOpen || activeModal === 'imageUpload';
+  const isSymbols = isSymbolsOpen || activeModal === 'symbolPalette';
+  const isTableBuilder = isTableBuilderOpen || activeModal === 'tableBuilder';
+  const isHistory = isHistoryOpen || activeModal === 'versionHistory';
+  const isWordCount = isWordCountOpen || activeModal === 'wordCount';
+  const isShare = isShareOpen || activeModal === 'share';
+  const isTemplates = isTemplatesOpen || activeModal === 'template';
+  const isAuth = isAuthOpen || activeModal === 'auth';
+  const isProjectsHub = isProjectsHubOpen || activeModal === 'projectsHub';
+  const isEncryption = isEncryptionModalOpen || activeModal === 'encryption';
+  const isAudit = isAuditModalOpen || activeModal === 'auditLog';
+  const isCommandPalette = isCommandPaletteOpen || activeModal === 'commandPalette';
+
   const isAnyModalOpen =
-    isImageUploadOpen ||
-    isSymbolsOpen ||
-    isTableBuilderOpen ||
-    isHistoryOpen ||
-    isWordCountOpen ||
-    isShareOpen ||
-    isTemplatesOpen ||
-    isAuthOpen ||
-    isProjectsHubOpen ||
-    isEncryptionModalOpen ||
-    isAuditModalOpen ||
-    isCommandPaletteOpen;
+    isImageUpload ||
+    isSymbols ||
+    isTableBuilder ||
+    isHistory ||
+    isWordCount ||
+    isShare ||
+    isTemplates ||
+    isAuth ||
+    isProjectsHub ||
+    isEncryption ||
+    isAudit ||
+    isCommandPalette;
 
   // Background Isolation via HTML `inert`
   useEffect(() => {
@@ -281,37 +297,49 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
 
   return (
     <Suspense fallback={<ModalLoadingFallback />}>
-      {isImageUploadOpen && (
+      {isImageUpload && (
         <ImageUploadModal
-          isOpen={isImageUploadOpen}
-          onClose={() => setIsImageUploadOpen(false)}
+          isOpen={isImageUpload}
+          onClose={() => {
+            closeModal();
+            setIsImageUploadOpen(false);
+          }}
           onAddImageFile={handleAddImageFile}
           onInsertLatex={handleInsertCode}
         />
       )}
 
-      {isSymbolsOpen && (
+      {isSymbols && (
         <SymbolPaletteModal
-          isOpen={isSymbolsOpen}
-          onClose={() => setIsSymbolsOpen(false)}
+          isOpen={isSymbols}
+          onClose={() => {
+            closeModal();
+            setIsSymbolsOpen(false);
+          }}
           onInsert={handleInsertCode}
           onAddPreambleMacro={handleAddPreambleMacro}
           initialTab={symbolsInitialTab}
         />
       )}
 
-      {isTableBuilderOpen && (
+      {isTableBuilder && (
         <TableBuilderModal
-          isOpen={isTableBuilderOpen}
-          onClose={() => setIsTableBuilderOpen(false)}
+          isOpen={isTableBuilder}
+          onClose={() => {
+            closeModal();
+            setIsTableBuilderOpen(false);
+          }}
           onInsert={handleInsertCode}
         />
       )}
 
-      {isHistoryOpen && (
+      {isHistory && (
         <VersionHistoryModal
-          isOpen={isHistoryOpen}
-          onClose={() => setIsHistoryOpen(false)}
+          isOpen={isHistory}
+          onClose={() => {
+            closeModal();
+            setIsHistoryOpen(false);
+          }}
           checkpoints={checkpoints}
           currentFiles={files}
           workingTreeStatus={workingTreeStatus}
@@ -333,10 +361,13 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
         />
       )}
 
-      {isWordCountOpen && (
+      {isWordCount && (
         <WordCountModal
-          isOpen={isWordCountOpen}
-          onClose={() => setIsWordCountOpen(false)}
+          isOpen={isWordCount}
+          onClose={() => {
+            closeModal();
+            setIsWordCountOpen(false);
+          }}
           wordCount={wordCount}
           equationCount={equationCount}
           parsedDoc={parsedDoc}
@@ -344,10 +375,13 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
         />
       )}
 
-      {isShareOpen && (
+      {isShare && (
         <ShareModal
-          isOpen={isShareOpen}
-          onClose={() => setIsShareOpen(false)}
+          isOpen={isShare}
+          onClose={() => {
+            closeModal();
+            setIsShareOpen(false);
+          }}
           roomId={roomId}
           peers={peers}
           selfUser={selfUser}
@@ -360,27 +394,36 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
         />
       )}
 
-      {isTemplatesOpen && (
+      {isTemplates && (
         <TemplateModal
-          isOpen={isTemplatesOpen}
-          onClose={() => setIsTemplatesOpen(false)}
+          isOpen={isTemplates}
+          onClose={() => {
+            closeModal();
+            setIsTemplatesOpen(false);
+          }}
           onSelectTemplate={handleSelectTemplate}
         />
       )}
 
-      {isAuthOpen && (
+      {isAuth && (
         <AuthModal
-          isOpen={isAuthOpen}
-          onClose={() => setIsAuthOpen(false)}
+          isOpen={isAuth}
+          onClose={() => {
+            closeModal();
+            setIsAuthOpen(false);
+          }}
           currentUser={currentUser}
           onAuthSuccess={handleAuthSuccess}
         />
       )}
 
-      {isProjectsHubOpen && (
+      {isProjectsHub && (
         <ProjectsDashboardModal
-          isOpen={isProjectsHubOpen}
-          onClose={() => setIsProjectsHubOpen(false)}
+          isOpen={isProjectsHub}
+          onClose={() => {
+            closeModal();
+            setIsProjectsHubOpen(false);
+          }}
           projects={projects}
           activeProjectId={activeProjectId}
           onSelectProject={handleSelectProject}
@@ -392,10 +435,13 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
         />
       )}
 
-      {isEncryptionModalOpen && (
+      {isEncryption && (
         <EncryptionModal
-          isOpen={isEncryptionModalOpen}
-          onClose={() => setIsEncryptionModalOpen(false)}
+          isOpen={isEncryption}
+          onClose={() => {
+            closeModal();
+            setIsEncryptionModalOpen(false);
+          }}
           isEncrypted={!!activeProject?.isEncrypted}
           encryptionSalt={activeProject?.encryptionSalt}
           files={files}
@@ -403,19 +449,25 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
         />
       )}
 
-      {isAuditModalOpen && (
+      {isAudit && (
         <AuditLogModal
-          isOpen={isAuditModalOpen}
-          onClose={() => setIsAuditModalOpen(false)}
+          isOpen={isAudit}
+          onClose={() => {
+            closeModal();
+            setIsAuditModalOpen(false);
+          }}
           projectId={activeProjectId}
           projectTitle={projectTitle}
         />
       )}
 
-      {isCommandPaletteOpen && (
+      {isCommandPalette && (
         <CommandPaletteModal
-          isOpen={isCommandPaletteOpen}
-          onClose={() => setIsCommandPaletteOpen(false)}
+          isOpen={isCommandPalette}
+          onClose={() => {
+            closeModal();
+            setIsCommandPaletteOpen(false);
+          }}
           files={files}
           projects={projects}
           activeProjectId={activeProjectId}

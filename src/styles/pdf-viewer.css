@@ -857,3 +857,91 @@
   font-weight: 600;
   font-size: 11px;
 }
+
+/* In-document Find Bar */
+.pdf-find-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-surface, #18181b);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+
+.pdf-find-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-base, #09090b);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
+  padding: 2px 8px;
+  flex: 1;
+  max-width: 320px;
+}
+
+.pdf-find-input-wrap:focus-within {
+  border-color: var(--accent-cyan);
+}
+
+.pdf-find-input {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  width: 100%;
+  outline: none;
+}
+
+.pdf-find-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.pdf-find-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Page Jump Input */
+.pdf-page-jumper {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.pdf-page-input {
+  width: 34px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs, 3px);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: right;
+  padding: 1px 4px;
+  outline: none;
+  -moz-appearance: textfield;
+}
+
+.pdf-page-input::-webkit-outer-spin-button,
+.pdf-page-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.pdf-page-input:hover,
+.pdf-page-input:focus {
+  background: var(--bg-hover);
+  border-color: var(--border-subtle);
+}
+
+.pdf-page-total {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}

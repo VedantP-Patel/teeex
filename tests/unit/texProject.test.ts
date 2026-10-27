@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectFile } from '../../src/types/latex';
 import {
+  detectBibliographyConfig,
   needsBibtex,
   needsMakeindex,
   resolveEntryFile,
@@ -135,9 +136,44 @@ describe('needsBibtex', () => {
   });
 });
 
+describe('detectBibliographyConfig', () => {
+  it('detects standard bibliography with bib file present', () => {
+    const withBib = [file({ name: 'refs.bib', content: '' })];
+    const cfg = detectBibliographyConfig(withBib, '\\bibliography{refs}');
+    expect(cfg.needed).toBe(true);
+    expect(cfg.engine).toBe('bibtex');
+    expect(cfg.hasBibFile).toBe(true);
+    expect(cfg.usesBiblatex).toBe(false);
+  });
+
+  it('detects biblatex default (biber) and emits helpful warning without running bibtex8', () => {
+    const withBib = [file({ name: 'refs.bib', content: '' })];
+    const cfg = detectBibliographyConfig(withBib, '\\usepackage{biblatex}\n\\addbibresource{refs.bib}');
+    expect(cfg.needed).toBe(false);
+    expect(cfg.engine).toBe('biblatex-biber');
+    expect(cfg.usesBiblatex).toBe(true);
+    expect(cfg.warning).toContain('backend=bibtex');
+  });
+
+  it('allows biblatex when backend=bibtex is explicitly specified', () => {
+    const withBib = [file({ name: 'refs.bib', content: '' })];
+    const cfg = detectBibliographyConfig(withBib, '\\usepackage[backend=bibtex]{biblatex}\n\\addbibresource{refs.bib}');
+    expect(cfg.needed).toBe(true);
+    expect(cfg.engine).toBe('bibtex');
+    expect(cfg.usesBiblatex).toBe(true);
+  });
+
+  it('returns needed: false when no bibliography directive or .bib is present', () => {
+    const cfg = detectBibliographyConfig([], 'Simple article without citations.');
+    expect(cfg.needed).toBe(false);
+    expect(cfg.engine).toBe('none');
+  });
+});
+
 describe('needsMakeindex', () => {
   it('detects index usage', () => {
     expect(needsMakeindex('\\makeindex\n\\printindex')).toBe(true);
     expect(needsMakeindex('No index here.')).toBe(false);
   });
 });
+

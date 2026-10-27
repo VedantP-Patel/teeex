@@ -517,19 +517,48 @@ export function rowToProject(r: any): Project {
   };
 }
 
-export async function pushProjectToCloud(project: Project): Promise<{ success: boolean; error?: string }> {
-  const supabase = getSupabaseClient();
+export async function pushProjectToCloud(
+  project: Project,
+  shareToken?: string | null
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = getSupabaseClient(shareToken);
   if (!supabase) return { success: false, error: 'Supabase client not connected' };
 
   const ownerUid = await getAuthUid();
-  if (!ownerUid) return { success: false, error: 'Not signed in' };
+  if (!ownerUid) {
+    // If not signed in as owner, check if we have an edit capability token
+    if (shareToken && shareToken.startsWith('ed_')) {
+      try {
+        const { error } = await supabase
+          .from('projects')
+          .update({
+            title: project.title,
+            files: project.files,
+            folders: project.folders || ['sections', 'figures'],
+            tags: project.tags,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', project.id);
+
+        if (error) {
+          console.warn('Capability update error:', error.message);
+          return { success: false, error: error.message };
+        }
+        return { success: true };
+      } catch (err: unknown) {
+        const e = err as { message?: string };
+        return { success: false, error: e?.message || 'Capability cloud update failed' };
+      }
+    }
+    return { success: false, error: 'Not signed in' };
+  }
 
   try {
     const row = projectToRow(project, ownerUid);
     let { error } = await supabase.from('projects').upsert(row, { onConflict: 'id' });
     if (error && (error.code === 'PGRST204' || error.message?.includes('folders'))) {
       // Schema compatibility: retry without 'folders' column if missing on remote table
-      const { folders, ...rowWithoutFolders } = row;
+      const { folders: _folders, ...rowWithoutFolders } = row;
       const retry = await supabase.from('projects').upsert(rowWithoutFolders, { onConflict: 'id' });
       error = retry.error;
     }
@@ -542,6 +571,33 @@ export async function pushProjectToCloud(project: Project): Promise<{ success: b
     const e = err as { message?: string };
     console.warn('Cloud sync failed with exception:', e);
     return { success: false, error: e?.message || 'Cloud sync failed' };
+  }
+}
+
+export async function fetchSharedProjectFromCloud(
+  projectId: string,
+  shareToken: string
+): Promise<{ success: boolean; project?: Project; error?: string }> {
+  const supabase = getSupabaseClient(shareToken);
+  if (!supabase) return { success: false, error: 'Supabase client not connected' };
+
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('id', projectId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('Error fetching shared project from cloud:', error.message);
+      return { success: false, error: error.message };
+    }
+    if (!data) return { success: false, error: 'Shared project not found' };
+
+    return { success: true, project: rowToProject(data) };
+  } catch (err: unknown) {
+    const e = err as { message?: string };
+    return { success: false, error: e?.message || 'Failed to fetch shared project' };
   }
 }
 
@@ -579,7 +635,7 @@ export async function syncAllProjectsWithCloud(localProjects: Project[]): Promis
     const rows = localProjects.map((p) => projectToRow(p, ownerUid));
     let { error } = await supabase.from('projects').upsert(rows, { onConflict: 'id' });
     if (error && (error.code === 'PGRST204' || error.message?.includes('folders'))) {
-      const rowsWithoutFolders = rows.map(({ folders, ...rest }) => rest);
+      const rowsWithoutFolders = rows.map(({ folders: _folders, ...rest }) => rest);
       const retry = await supabase.from('projects').upsert(rowsWithoutFolders, { onConflict: 'id' });
       error = retry.error;
     }

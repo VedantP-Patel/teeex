@@ -12,7 +12,7 @@ import {
   keymap,
   EditorView,
 } from '@codemirror/view';
-import { foldGutter, bracketMatching, indentOnInput } from '@codemirror/language';
+import { foldGutter, foldService, bracketMatching, indentOnInput } from '@codemirror/language';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { lintGutter } from '@codemirror/lint';
@@ -24,6 +24,32 @@ import type { BibEntry } from '../services/bibtexParser';
 import { createEditorTheme } from '../services/codeMirrorThemes';
 import { createLatexCompletionSource } from '../services/codeMirrorCompletion';
 import { peerDecorationsField } from './usePeerDecorations';
+
+export const latexFoldService = foldService.of((state, lineStart) => {
+  const line = state.doc.lineAt(lineStart);
+  const text = line.text;
+  const beginMatch = text.match(/\\begin\{([^}]+)\}/);
+  if (beginMatch) {
+    const env = beginMatch[1];
+    const endTag = `\\end{${env}}`;
+    let depth = 1;
+    for (let i = line.number + 1; i <= state.doc.lines; i++) {
+      const nextLine = state.doc.line(i);
+      if (nextLine.text.includes(`\\begin{${env}}`)) depth++;
+      if (nextLine.text.includes(endTag)) {
+        depth--;
+        if (depth === 0) {
+          const from = line.from + text.indexOf(beginMatch[0]) + beginMatch[0].length;
+          const to = nextLine.from + nextLine.text.indexOf(endTag);
+          if (to > from) {
+            return { from, to };
+          }
+        }
+      }
+    }
+  }
+  return null;
+});
 
 export interface UseLatexExtensionsOptions {
   theme: SyntaxTheme;
@@ -124,6 +150,7 @@ export function useLatexExtensions({
       highlightSpecialChars(),
       history(),
       foldGutter(),
+      latexFoldService,
       drawSelection(),
       dropCursor(),
       rectangularSelection(),
@@ -174,5 +201,15 @@ export function useLatexExtensions({
     ];
 
     return extensions;
-  }, [theme, isLight, readOnly, onCompileShortcut, onForwardSync, onOpenCommandPalette, onSaveShortcut]);
+  }, [
+    theme,
+    isLight,
+    readOnly,
+    onCompileShortcut,
+    onForwardSync,
+    onOpenCommandPalette,
+    onSaveShortcut,
+    bibEntries,
+    labels,
+  ]);
 }

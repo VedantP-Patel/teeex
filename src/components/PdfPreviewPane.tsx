@@ -12,15 +12,19 @@ import React, {
 } from 'react';
 import {
   AlertTriangle,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Download,
   FileText,
   Loader2,
   Minus,
   Plus,
   RefreshCw,
+  Search,
   Sparkles,
+  X,
 } from 'lucide-react';
 import {
   CSS_PX_PER_PT,
@@ -28,6 +32,7 @@ import {
   isSafeUrl,
   type PageGeometry,
   type PdfLinkAnnotation,
+  type PdfSearchResult,
 } from '../services/pdfRenderer';
 import { downloadPdf } from '../services/pdfExporter';
 import { inverseSync, type ForwardMatch, type SyncTexIndex } from '../services/synctex';
@@ -114,7 +119,7 @@ function PdfPageView({
 
   useEffect(() => {
     if (!active) {
-      setLinks([]);
+      queueMicrotask(() => setLinks([]));
       return;
     }
     let cancelled = false;
@@ -144,7 +149,7 @@ function PdfPageView({
         canvas.width = 0;
         canvas.height = 0;
       }
-      setPainted(false);
+      queueMicrotask(() => setPainted(false));
       return;
     }
 
@@ -365,6 +370,18 @@ export function PdfPreviewPane({
   const [currentPage, setCurrentPage] = useState(1);
   const [activePages, setActivePages] = useState<Set<number>>(() => new Set([1, 2, 3]));
   const [elapsedCompileSec, setElapsedCompileSec] = useState(0);
+
+  const [isFindOpen, setIsFindOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<PdfSearchResult[]>([]);
+  const [currentResultIndex, setCurrentResultIndex] = useState(0);
+  const [isSearching, setIsSearching] = useState(false);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  const [pageInputValue, setPageInputValue] = useState(String(currentPage));
+
+  useEffect(() => {
+    setPageInputValue(String(currentPage));
+  }, [currentPage]);
 
   const anchorRef = useRef<{ page: number; offset: number } | null>(null);
 
@@ -628,6 +645,68 @@ export function PdfPreviewPane({
     [doc, scrollToPage],
   );
 
+  const handlePageInputSubmit = useCallback(() => {
+    const p = parseInt(pageInputValue, 10);
+    if (!isNaN(p) && p >= 1 && p <= geometry.length) {
+      scrollToPage(p);
+    } else {
+      setPageInputValue(String(currentPage));
+    }
+  }, [pageInputValue, geometry.length, scrollToPage, currentPage]);
+
+  const navigateMatch = useCallback(
+    (direction: 1 | -1) => {
+      if (searchResults.length === 0) return;
+      const nextIdx = (currentResultIndex + direction + searchResults.length) % searchResults.length;
+      setCurrentResultIndex(nextIdx);
+      const match = searchResults[nextIdx];
+      scrollToPage(match.pageNumber, match.yPt, true);
+    },
+    [searchResults, currentResultIndex, scrollToPage],
+  );
+
+  useEffect(() => {
+    if (!doc || !searchQuery.trim()) {
+      setSearchResults([]);
+      setCurrentResultIndex(0);
+      setIsSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setIsSearching(true);
+    const timer = setTimeout(() => {
+      doc
+        .findText(searchQuery)
+        .then((results) => {
+          if (cancelled) return;
+          setSearchResults(results);
+          setCurrentResultIndex(0);
+          setIsSearching(false);
+          if (results.length > 0) {
+            scrollToPage(results[0].pageNumber, results[0].yPt, true);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSearchResults([]);
+            setIsSearching(false);
+          }
+        });
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [doc, searchQuery, scrollToPage]);
+
+  useEffect(() => {
+    if (isFindOpen) {
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    }
+  }, [isFindOpen]);
+
   const highlightsByPage = useMemo(() => {
     const map = new Map<number, { rects: ForwardMatch['rects']; nonce?: number }>();
     if (forwardTarget) map.set(forwardTarget.page, { rects: forwardTarget.rects, nonce: forwardTarget.nonce });
@@ -670,6 +749,11 @@ export function PdfPreviewPane({
         if (event.key === '0') {
           event.preventDefault();
           setZoomMode('fit-width');
+          return;
+        }
+        if (event.key.toLowerCase() === 'f') {
+          event.preventDefault();
+          setIsFindOpen(true);
           return;
         }
         return;
@@ -750,9 +834,26 @@ export function PdfPreviewPane({
           >
             <ChevronLeft size={14} />
           </button>
-          <span className="pdf-page-indicator" aria-live="polite">
-            {hasDocument ? `${currentPage} / ${geometry.length}` : '—'}
-          </span>
+          <div className="pdf-page-jumper">
+            <input
+              type="number"
+              min={1}
+              max={geometry.length || 1}
+              value={pageInputValue}
+              onChange={(e) => setPageInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur();
+                  handlePageInputSubmit();
+                }
+              }}
+              onBlur={handlePageInputSubmit}
+              disabled={!hasDocument}
+              className="pdf-page-input"
+              aria-label="Current page number"
+            />
+            <span className="pdf-page-total">/ {geometry.length > 0 ? geometry.length : '—'}</span>
+          </div>
           <button
             type="button"
             className="btn-icon"
@@ -845,6 +946,17 @@ export function PdfPreviewPane({
             <Plus size={14} />
           </button>
 
+          <button
+            type="button"
+            className={`btn-icon ${isFindOpen ? 'active' : ''}`}
+            onClick={() => setIsFindOpen((prev) => !prev)}
+            title="Find in document (Ctrl+F)"
+            aria-label="Find in document"
+            disabled={!hasDocument}
+          >
+            <Search size={14} />
+          </button>
+
           <div className="pdf-toolbar-divider" />
 
           <button
@@ -869,6 +981,72 @@ export function PdfPreviewPane({
           </button>
         </div>
       </div>
+
+      {isFindOpen && hasDocument && (
+        <div className="pdf-find-bar" role="search">
+          <div className="pdf-find-input-wrap">
+            <Search size={13} style={{ color: 'var(--text-tertiary)' }} />
+            <input
+              ref={findInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  navigateMatch(e.shiftKey ? -1 : 1);
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setIsFindOpen(false);
+                }
+              }}
+              placeholder="Find in document..."
+              className="pdf-find-input"
+              aria-label="Search text"
+            />
+            {searchQuery && (
+              <span className="pdf-find-count" aria-live="polite">
+                {isSearching
+                  ? 'Searching...'
+                  : searchResults.length > 0
+                    ? `${currentResultIndex + 1} of ${searchResults.length}`
+                    : 'No matches'}
+              </span>
+            )}
+          </div>
+          <div className="pdf-find-actions">
+            <button
+              type="button"
+              className="btn-icon"
+              onClick={() => navigateMatch(-1)}
+              disabled={searchResults.length === 0}
+              title="Previous match (Shift+Enter)"
+              aria-label="Previous match"
+            >
+              <ChevronUp size={14} />
+            </button>
+            <button
+              type="button"
+              className="btn-icon"
+              onClick={() => navigateMatch(1)}
+              disabled={searchResults.length === 0}
+              title="Next match (Enter)"
+              aria-label="Next match"
+            >
+              <ChevronDown size={14} />
+            </button>
+            <button
+              type="button"
+              className="btn-icon"
+              onClick={() => setIsFindOpen(false)}
+              title="Close find (Esc)"
+              aria-label="Close find"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {isCompiling && <div className="pdf-compile-progress-bar" />}
 

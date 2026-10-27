@@ -27,12 +27,13 @@ function readEnv(name: 'VITE_SUPABASE_URL' | 'VITE_SUPABASE_ANON_KEY'): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-let supabaseInstance: SupabaseClient | null = null;
-let resolved = false;
+const clientCache = new Map<string, SupabaseClient>();
 
-export function getSupabaseClient(): SupabaseClient | null {
-  if (resolved) return supabaseInstance;
-  resolved = true;
+export function getSupabaseClient(shareToken?: string | null): SupabaseClient | null {
+  const tokenKey = shareToken?.trim() || '';
+  if (clientCache.has(tokenKey)) {
+    return clientCache.get(tokenKey)!;
+  }
 
   const url = readEnv('VITE_SUPABASE_URL');
   const anonKey = readEnv('VITE_SUPABASE_ANON_KEY');
@@ -44,15 +45,25 @@ export function getSupabaseClient(): SupabaseClient | null {
   }
 
   try {
-    supabaseInstance = createClient(url, anonKey, {
-      auth: { persistSession: true, autoRefreshToken: true },
+    const client = createClient(url, anonKey, {
+      auth: {
+        persistSession: !tokenKey,
+        autoRefreshToken: !tokenKey,
+      },
+      global: tokenKey
+        ? {
+            headers: {
+              'x-share-token': tokenKey,
+            },
+          }
+        : undefined,
     });
+    clientCache.set(tokenKey, client);
+    return client;
   } catch (cause) {
     console.warn('Supabase client could not be created; running local-only.', cause);
-    supabaseInstance = null;
+    return null;
   }
-
-  return supabaseInstance;
 }
 
 export function isSupabaseConnected(): boolean {

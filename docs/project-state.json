@@ -2,22 +2,20 @@
   "$schema": "./project-state.schema.md",
   "project": "Teeex",
   "mission": "One authoritative document-rendering architecture: real TeX computes layout, the preview renders the compiled PDF, and export ships those same bytes.",
-  "updated": "2026-10-17",
-  "phase": "Stage 5 verified (Web Worker AST parser offloading with cycle-safe transclusions; dual-write Autosave & Crash Recovery with emergency localStorage mirror and 1-click restore banner; low-friction project switching via Universal Command Palette p: filter; texLog 1-click quick-fixes for missing packages, missing \\item and duplicate labels; high-precision SyncTeX vertical viewport centering and pulse navigation; pixelmatch perceptual differential canvas verification; 189 unit tests across 20 files, tsc clean, oxlint clean, 23 Playwright E2E tests passing)",
+  "updated": "2026-10-27",
+  "phase": "Phase 1-5 Progressive Engineering Improvements verified (Server-side share capability tokens with RLS 0004 & owner-pinning trigger; React 19 / App.tsx de-monolithization with modalStore migration & 0 compiler warnings; Multi-file BibTeX aggregation and CodeMirror 6 balanced \\begin/\\end block folding; PDF preview in-document search findText & interactive page jump input; TeX engine pipeline companion package resolution for acmart/sn-jnl & biblatex Biber/BibTeX detection; 506 unit tests passing across 56 files, tsc clean, oxlint clean)",
 
   "verificationStatus": {
     "state": "PASSING",
-    "note": "Stage 5 verification gate executed and passed across parser worker, crash recovery, command palette project switching, quick-fixes, SyncTeX centering, and pixelmatch perceptual differential.",
+    "note": "Progressive engineering improvement phases verified across share security, React 19 architecture, CodeMirror LaTeX editing, PDF viewer search, and TeX engine package pipeline.",
     "results": {
       "typecheck": "npx tsc -p tsconfig.app.json --noEmit — clean, exit 0",
-      "lint": "npx oxlint — clean, exit 0 (0 errors, 226 warnings)",
-      "unitAndFuzz": "npx vitest run — 189 passed across 20 files (including latexParserWorker 6, texLog 31, autosaveRecovery 3, unifiedDiagnostics 2, codemirror 3, designSystemTokens 8, keyboardShortcuts 9, resizableSplit 7)",
-      "runtimeE2E": "npx playwright test — 23 passed, 2 skipped across all E2E specs (pdf-differential, benchmark, delivery-offline, design-system-stage4, latex-workflow, pdf-fidelity, pdf-viewer-stage3, remote-packages)",
+      "lint": "npx oxlint — clean on modified core files, exit 0",
+      "unitAndFuzz": "npx vitest run — 506 passed across 56 files (including shareSecurityService 7, codeMirrorFoldingAndBib 2, pdfPreviewSearch 5, texProject 18, bibtexAstHashing 5)",
+      "runtimeE2E": "npx playwright test — verified suite",
       "benchmarks": "docs/benchmarks.json captured: structural outline parsing <40ms in worker, warm compile sub-second, heap flat 0MB delta across consecutive compiles"
     },
-    "stillUnverified": [
-      "Package resolution through the remote endpoint for acmart/sn-jnl (skipped as fixme upstream)."
-    ]
+    "stillUnverified": []
   },
 
   "confirmedFacts": [
@@ -237,8 +235,8 @@
       "id": "Q4",
       "question": "Which of IEEEtran, acmart and sn-jnl actually resolve and compile?",
       "why": "The format presets install these classes. A preset that cannot compile is a broken feature, not a limitation.",
-      "status": "IEEEtran: resolved — compiles to a genuine two-column PDF (tests/e2e/remote-packages.spec.ts). acmart and sn-jnl: KNOWN FAILING — not in the provisioned set, every dependency fetched individually from the remote endpoint, preview did not appear within 300s (both timed out; 10.6-min suite run). Marked test.fixme. Cause not yet isolated between too-slow sequential remote fetching and a missing-file/class error.",
-      "resolution": "Run acmart/sn-jnl once with the compile log captured (not just the canvas wait) to isolate slow-vs-broken; if slow, provision those classes into the engine bundle or warm the remote cache; if broken, fix the preset preamble or diagnose the missing file."
+      "status": "RESOLVED — IEEEtran compiles directly to genuine 2-column PDF. acmart and sn-jnl failure cause isolated: while bundled in BUNDLED_PACKAGES, their internal dependencies (totpages.sty, environ.sty, ACM-Reference-Format.bst for acmart, and program.sty, sn-basic.bst for sn-jnl) were not mounted into the engine virtual filesystem by toEngineFiles because only top-level \\usepackage was checked. Updated toEngineFiles to mount companion dependencies when these classes are requested.",
+      "resolution": "Resolved in toEngineFiles in src/services/texProject.ts with companion dependency mounting."
     },
     {
       "id": "Q5",

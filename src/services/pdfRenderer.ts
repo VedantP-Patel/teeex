@@ -61,6 +61,13 @@ export interface PdfLinkAnnotation {
   title?: string;
 }
 
+export interface PdfSearchResult {
+  pageNumber: number;
+  matchIndex: number;
+  snippet: string;
+  yPt?: number;
+}
+
 export function isSafeUrl(rawUrl: string): boolean {
   if (!rawUrl || typeof rawUrl !== 'string') return false;
   const trimmed = rawUrl.trim();
@@ -71,6 +78,7 @@ export function isSafeUrl(rawUrl: string): boolean {
   }
 
   // Guard against scheme evasion with whitespace (e.g. "javascript :alert(1)")
+  // oxlint-disable-next-line eslint/no-control-regex
   const noWhitespace = trimmed.replace(/[\s\x00-\x1f]+/g, '');
   if (/^[a-zA-Z0-9+.-]+:/.test(noWhitespace)) {
     const colonIndex = noWhitespace.indexOf(':');
@@ -468,6 +476,61 @@ export class PdfDocument {
     } catch {
       return [];
     }
+  }
+
+  async findText(query: string): Promise<PdfSearchResult[]> {
+    if (this.destroyed || !query.trim()) return [];
+    const normalized = query.trim().toLowerCase();
+    const results: PdfSearchResult[] = [];
+    let matchCounter = 0;
+
+    for (let pageNum = 1; pageNum <= this.numPages; pageNum++) {
+      if (this.destroyed) break;
+      try {
+        const page = await this.page(pageNum);
+        const textContent = await page.getTextContent();
+        const items = textContent.items.filter(
+          (item): item is typeof item & { str: string; transform?: number[] } =>
+            'str' in item && typeof (item as { str?: unknown }).str === 'string',
+        );
+
+        let fullText = '';
+        const itemSpans: Array<{ start: number; end: number; yPt?: number }> = [];
+        for (const item of items) {
+          const start = fullText.length;
+          fullText += item.str + ' ';
+          const end = fullText.length;
+          const yPt =
+            Array.isArray(item.transform) && typeof item.transform[5] === 'number'
+              ? item.transform[5]
+              : undefined;
+          itemSpans.push({ start, end, yPt });
+        }
+
+        const lowerFull = fullText.toLowerCase();
+        let idx = 0;
+        while ((idx = lowerFull.indexOf(normalized, idx)) !== -1) {
+          const matchingSpan = itemSpans.find((span) => idx >= span.start && idx < span.end);
+          const start = Math.max(0, idx - 20);
+          const end = Math.min(fullText.length, idx + normalized.length + 20);
+          const snippet =
+            (start > 0 ? '…' : '') +
+            fullText.slice(start, end).trim() +
+            (end < fullText.length ? '…' : '');
+
+          results.push({
+            pageNumber: pageNum,
+            matchIndex: matchCounter++,
+            snippet,
+            yPt: matchingSpan?.yPt,
+          });
+          idx += Math.max(1, normalized.length);
+        }
+      } catch {
+        // Skip page on failure
+      }
+    }
+    return results;
   }
 
   cleanupPage(pageNumber: number): void {

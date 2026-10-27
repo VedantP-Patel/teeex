@@ -37,6 +37,7 @@ export class SupabaseYjsProvider {
   private pendingChunkTransfers: Map<string, { total: number; chunks: Map<number, Uint8Array> }> = new Map();
 
   public isDestroyed = false;
+  public shareToken?: string | null;
   private peerListeners: Set<(peers: Collaborator[]) => void> = new Set();
   private lastAwarenessBroadcastTime = 0;
   private pendingAwarenessTimer: ReturnType<typeof setTimeout> | null = null;
@@ -47,11 +48,13 @@ export class SupabaseYjsProvider {
     projectId: string,
     selfUser: Collaborator,
     initialFiles?: ProjectFile[],
-    onDocSave?: (files: ProjectFile[]) => void
+    onDocSave?: (files: ProjectFile[]) => void,
+    shareToken?: string | null
   ) {
     this.projectId = projectId;
     this.selfUser = selfUser;
     this.onDocSaveCallback = onDocSave;
+    this.shareToken = shareToken;
 
     // 1. Initialize root Y.Doc and Awareness
     this.ydoc = new Y.Doc({ gc: true });
@@ -199,7 +202,7 @@ export class SupabaseYjsProvider {
   // ============================================================================
 
   private initSupabaseRealtime() {
-    const supabase = getSupabaseClient();
+    const supabase = getSupabaseClient(this.shareToken);
     if (!supabase) return;
 
     try {
@@ -527,11 +530,12 @@ export class SupabaseYjsProvider {
   }
 
   public async saveSnapshotToCloud() {
-    const supabase = getSupabaseClient();
+    const supabase = getSupabaseClient(this.shareToken);
     if (!supabase) return;
 
     const uid = await getAuthUid();
-    if (!uid) return;
+    // Allow saving if authenticated OR if holding an edit capability token
+    if (!uid && (!this.shareToken || !this.shareToken.startsWith('ed_'))) return;
 
     try {
       const snapshot = buffer.toBase64(Y.encodeStateAsUpdate(this.ydoc));
@@ -543,7 +547,7 @@ export class SupabaseYjsProvider {
           snapshot,
           state_vector: stateVector,
           updated_at: new Date().toISOString(),
-          updated_by: uid,
+          updated_by: uid ?? null,
         },
         { onConflict: 'project_id' }
       );
@@ -554,7 +558,7 @@ export class SupabaseYjsProvider {
   }
 
   public async loadSnapshotFromCloud(): Promise<boolean> {
-    const supabase = getSupabaseClient();
+    const supabase = getSupabaseClient(this.shareToken);
     if (!supabase) return false;
 
     try {

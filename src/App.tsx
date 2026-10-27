@@ -25,6 +25,7 @@ import {
 } from './services/checkpointsService';
 
 import { ModalContainer } from './components/modals/ModalContainer';
+import { openModal, closeModal } from './stores/modalStore';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { useGlobalKeyboardShortcuts } from './hooks/useGlobalKeyboardShortcuts';
 import { useResizableSplit } from './hooks/useResizableSplit';
@@ -106,6 +107,17 @@ export function App() {
   });
   const [isAuthOpen, setIsAuthOpen] = useState(false);
 
+  // Multi-Project State
+  const [projects, setProjects] = useState<Project[]>(() => {
+    const sessionUser = getStoredSession().user;
+    return loadProjects(sessionUser?.email, sessionUser?.fullName);
+  });
+  const [activeProjectId, setActiveProjectIdState] = useState<string>(() => {
+    const sessionUser = getStoredSession().user;
+    return getActiveProjectId(loadProjects(sessionUser?.email, sessionUser?.fullName));
+  });
+  const [isProjectsHubOpen, setIsProjectsHubOpen] = useState(false);
+
   // Active Cloud / Supabase session verification & Bi-directional project sync on startup
   useEffect(() => {
     let isMounted = true;
@@ -128,24 +140,11 @@ export function App() {
           setProjects(res.projects);
         }
       }).catch(() => { });
-    } else {
-      setIsAuthChecking(false);
     }
     return () => {
       isMounted = false;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Multi-Project State
-  const [projects, setProjects] = useState<Project[]>(() => {
-    const sessionUser = getStoredSession().user;
-    return loadProjects(sessionUser?.email, sessionUser?.fullName);
-  });
-  const [activeProjectId, setActiveProjectIdState] = useState<string>(() => {
-    const sessionUser = getStoredSession().user;
-    return getActiveProjectId(loadProjects(sessionUser?.email, sessionUser?.fullName));
-  });
-  const [isProjectsHubOpen, setIsProjectsHubOpen] = useState(false);
 
   const activeProject = useMemo(() => {
     return projects.find(p => p.id === activeProjectId) || projects[0];
@@ -238,7 +237,7 @@ export function App() {
         updatedAt: new Date().toISOString(),
       }).catch(() => { });
     }
-  }, []);
+  }, [setProjects]);
 
   // Listen to window unload and visibility change to immediately flush saves so no edits are lost
   useEffect(() => {
@@ -429,7 +428,7 @@ export function App() {
     const handleGitShortcut = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'g' || e.key === 'G')) {
         e.preventDefault();
-        setIsHistoryOpen(prev => !prev);
+        openModal('versionHistory');
       }
     };
     window.addEventListener('keydown', handleGitShortcut);
@@ -441,14 +440,22 @@ export function App() {
     return files.find(f => f.id === activeFileId) || files[0];
   }, [files, activeFileId]);
 
-  // Performance fix: Only re-parse BibTeX when the .bib file's actual content changes!
-  const bibContent = useMemo(() => {
-    return files.find(f => f.name.endsWith('.bib'))?.content ?? '';
-  }, [files]);
-
+  // Multi-File BibTeX: Aggregate and parse all .bib files in the project
   const bibEntries = useMemo(() => {
-    return bibContent ? parseBibtex(bibContent) : [];
-  }, [bibContent]);
+    const bibFiles = files.filter(f => f.name.endsWith('.bib') && f.content?.trim());
+    if (bibFiles.length === 0) return [];
+
+    const entriesMap = new Map();
+    for (const bf of bibFiles) {
+      const parsed = parseBibtex(bf.content);
+      for (const entry of parsed) {
+        if (!entriesMap.has(entry.key)) {
+          entriesMap.set(entry.key, entry);
+        }
+      }
+    }
+    return Array.from(entriesMap.values());
+  }, [files]);
 
   const [targetLine, setTargetLine] = useState<number | null>(null);
   const [forwardTargetLine, setForwardTargetLine] = useState<{ line: number; nonce: number } | null>(null);
@@ -463,7 +470,7 @@ export function App() {
   const [compileState, setCompileState] = useState<CompileState>({
     status: 'success',
     durationMs: 14,
-    timestamp: new Date().toLocaleTimeString(),
+    timestamp: 'Initial',
     errorCount: 0,
     warningCount: 0,
     rawLogs: ['Output written on main.pdf (1 page, 38402 bytes).'],
@@ -697,37 +704,43 @@ export function App() {
 
   useEffect(() => {
     if (texEngineView.isCompiling) {
-      setCompileState(prev => ({ ...prev, status: 'compiling', isDebouncing: false }));
+      queueMicrotask(() => {
+        setCompileState(prev => prev.status === 'compiling' ? prev : ({ ...prev, status: 'compiling', isDebouncing: false }));
+      });
       return;
     }
 
     if (texEngineView.isDebouncing) {
-      setCompileState(prev => ({ ...prev, isDebouncing: true }));
+      queueMicrotask(() => {
+        setCompileState(prev => prev.isDebouncing ? prev : ({ ...prev, isDebouncing: true }));
+      });
       return;
     }
 
     const outcome = texEngineView.outcome;
-    if (!outcome) {
-      setCompileState(prev => ({
-        ...prev,
-        durationMs: liveCompileResult.durationMs,
-        isDebouncing: false,
-      }));
-      return;
-    }
+    queueMicrotask(() => {
+      if (!outcome) {
+        setCompileState(prev => ({
+          ...prev,
+          durationMs: liveCompileResult.durationMs,
+          isDebouncing: false,
+        }));
+        return;
+      }
 
-    setCompileState({
-      status: outcome.ok ? 'success' : 'error',
-      durationMs: liveCompileResult.durationMs,
-      pdfDurationMs: outcome.durationMs,
-      isDebouncing: false,
-      errorCount: outcome.diagnostics.filter(d => d.severity === 'error').length,
-      warningCount: outcome.diagnostics.filter(d => d.severity === 'warning').length,
-      timestamp: texEngineView.lastCompiledAt
-        ? new Date(texEngineView.lastCompiledAt).toLocaleTimeString()
-        : new Date().toLocaleTimeString(),
-      rawLogs: outcome.log ? outcome.log.split(/\r?\n/).filter(Boolean) : [],
-      compileMode: outcome.compileMode ?? compileMode,
+      setCompileState({
+        status: outcome.ok ? 'success' : 'error',
+        durationMs: liveCompileResult.durationMs,
+        pdfDurationMs: outcome.durationMs,
+        isDebouncing: false,
+        errorCount: outcome.diagnostics.filter(d => d.severity === 'error').length,
+        warningCount: outcome.diagnostics.filter(d => d.severity === 'warning').length,
+        timestamp: texEngineView.lastCompiledAt
+          ? new Date(texEngineView.lastCompiledAt).toLocaleTimeString()
+          : 'Just now',
+        rawLogs: outcome.log ? outcome.log.split(/\r?\n/).filter(Boolean) : [],
+        compileMode: outcome.compileMode ?? compileMode,
+      });
     });
   }, [texEngineView.isCompiling, texEngineView.isDebouncing, texEngineView.outcome, texEngineView.lastCompiledAt, liveCompileResult.durationMs, compileMode]);
 
@@ -818,7 +831,7 @@ export function App() {
       yComments.unobserve(updateComments);
       yTracked.unobserve(updateTracked);
     };
-  }, [activeProjectId]);
+  }, [activeProjectId, selfUser]);
 
   useEffect(() => {
     return () => {
@@ -952,7 +965,7 @@ export function App() {
       }
     }
     setIsEncryptionModalOpen(false);
-  }, [currentUser, currentRole]);
+  }, [currentUser, currentRole, setFiles, setProjects]);
 
   // Fast, non-blocking file content update with immediate synchronous ref & draft sync
   const handleCodeChange = useCallback((newCode: string) => {
@@ -981,7 +994,7 @@ export function App() {
     cursorThrottleRef.current = setTimeout(() => {
       setActiveCursorLine(prev => (prev !== line ? line : prev));
     }, 200);
-  }, [provider]);
+  }, [provider, setActiveCursorLine]);
 
   // Apply Quick Fix action safely across single or multiple lines
   const handleApplyFix = useCallback((fix: SuggestedFix) => {
@@ -1038,6 +1051,7 @@ export function App() {
     isCommandPaletteOpen;
 
   const handleDismissModal = useCallback(() => {
+    closeModal();
     if (isCommandPaletteOpen) setIsCommandPaletteOpen(false);
     else if (isImageUploadOpen) setIsImageUploadOpen(false);
     else if (isSymbolsOpen) setIsSymbolsOpen(false);
@@ -1063,6 +1077,18 @@ export function App() {
     isProjectsHubOpen,
     isEncryptionModalOpen,
     isAuditModalOpen,
+    setIsCommandPaletteOpen,
+    setIsImageUploadOpen,
+    setIsSymbolsOpen,
+    setIsTableBuilderOpen,
+    setIsHistoryOpen,
+    setIsWordCountOpen,
+    setIsShareOpen,
+    setIsTemplatesOpen,
+    setIsAuthOpen,
+    setIsProjectsHubOpen,
+    setIsEncryptionModalOpen,
+    setIsAuditModalOpen,
   ]);
 
   useGlobalKeyboardShortcuts({
@@ -1103,7 +1129,7 @@ export function App() {
     };
     setComments(prev => [...prev, newComment]);
     provider?.getCommentsArray().push([newComment]);
-  }, [selfUser, provider]);
+  }, [selfUser, provider, setComments]);
 
   const handleResolveComment = useCallback((commentId: string) => {
     setComments(prev => prev.map(c => c.id === commentId ? { ...c, resolved: true } : c));
@@ -1116,7 +1142,7 @@ export function App() {
         yArr.insert(idx, [{ ...item, resolved: true }]);
       }
     }
-  }, [provider]);
+  }, [provider, setComments]);
 
   const handleFollowPeer = useCallback((peer: Collaborator) => {
     if (peer.activeFile && peer.activeFile !== activeFileIdRef.current) {
@@ -1141,8 +1167,10 @@ export function App() {
   });
 
   useEffect(() => {
-    setActiveBranchState(getActiveBranch(activeProjectId));
-    setProjectBranches(getProjectBranches(activeProjectId));
+    queueMicrotask(() => {
+      setActiveBranchState(getActiveBranch(activeProjectId));
+      setProjectBranches(getProjectBranches(activeProjectId));
+    });
   }, [activeProjectId]);
 
   const handleSwitchBranch = useCallback((branchName: string, checkoutHead = false) => {
@@ -1528,7 +1556,7 @@ export function App() {
     setProjectTitle(proj.title);
     setPeers([]);
     setTimeout(() => triggerCompile(), 60);
-  }, [flushCurrentProjectSave, triggerCompile]);
+  }, [flushCurrentProjectSave, triggerCompile, setPeers]);
 
   const handleCreateProject = useCallback((title: string, templateId?: string) => {
     flushCurrentProjectSave();
@@ -1583,7 +1611,7 @@ export function App() {
   const handleToggleArchiveProject = useCallback((projId: string) => {
     const updated = toggleArchiveProject(projId);
     setProjects(updated);
-  }, []);
+  }, [setProjects]);
 
   const handleDeleteProject = useCallback((projId: string) => {
     const updated = deleteProject(projId);
@@ -1617,7 +1645,7 @@ export function App() {
     const members = [...(activeProject?.members || []), newMember];
     const updated = updateProject(activeProjectIdRef.current, { members });
     setProjects(updated);
-  }, [activeProject]);
+  }, [activeProject, setProjects]);
 
   const handleUpdateMemberRole = useCallback((memberId: string, newRole: ProjectRole) => {
     const members = (activeProject?.members || []).map(m =>
@@ -1625,13 +1653,13 @@ export function App() {
     );
     const updated = updateProject(activeProjectIdRef.current, { members });
     setProjects(updated);
-  }, [activeProject]);
+  }, [activeProject, setProjects]);
 
   const handleRemoveMember = useCallback((memberId: string) => {
     const members = (activeProject?.members || []).filter(m => m.id !== memberId);
     const updated = updateProject(activeProjectIdRef.current, { members });
     setProjects(updated);
-  }, [activeProject]);
+  }, [activeProject, setProjects]);
 
   useEffect(() => {
     if (!currentUser?.email || !currentUser?.fullName) return;
@@ -1648,7 +1676,9 @@ export function App() {
           : m
       );
       const updated = updateProject(activeProjectId, { members: updatedMembers });
-      setProjects(updated);
+      queueMicrotask(() => {
+        setProjects(updated);
+      });
     }
   }, [currentUser, activeProject, activeProjectId]);
 
@@ -1701,7 +1731,7 @@ export function App() {
         setTimeout(() => triggerCompile(), 80);
       }
     }
-  }, [triggerCompile]);
+  }, [triggerCompile, setProjects, setSelfUser, setPeers]);
 
   const handleSignOut = useCallback(async () => {
     flushCurrentProjectSave();
@@ -1719,7 +1749,7 @@ export function App() {
       setProjectTitle(first.title);
       setActiveFileId(first.files[0]?.id || 'main.tex');
     }
-  }, [flushCurrentProjectSave]);
+  }, [flushCurrentProjectSave, setProjects]);
 
   const [isDragOverApp, setIsDragOverApp] = useState(false);
   const dragCounterRef = useRef(0);

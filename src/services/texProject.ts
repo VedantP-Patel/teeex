@@ -139,14 +139,30 @@ export function toEngineFiles(
         shouldMount = true;
       } else if (base === 'everysel' && requestedPackages.has('ragged2e')) {
         shouldMount = true;
+      } else if ((base === 'totpages' || base === 'environ') && requestedClasses.has('acmart')) {
+        shouldMount = true;
+      } else if (base === 'program' && requestedClasses.has('sn-jnl')) {
+        shouldMount = true;
       }
     } else if (lowerName === 'microtype-pdftex.def' && requestedPackages.has('microtype')) {
+      shouldMount = true;
+    } else if (lowerName === 'lipsum.ltd' && requestedPackages.has('lipsum')) {
       shouldMount = true;
     } else if (lowerName === 'tfrupee.tfm' && requestedPackages.has('tfrupee')) {
       shouldMount = true;
     } else if (
       (lowerName.endsWith('.tfm') || lowerName.endsWith('.fd')) &&
-      (requestedClasses.has('ieeetran') || requestedClasses.has('acmart'))
+      (requestedClasses.has('ieeetran') || requestedClasses.has('acmart') || requestedClasses.has('sn-jnl'))
+    ) {
+      shouldMount = true;
+    } else if (
+      lowerName === 'acm-reference-format.bst' &&
+      (requestedClasses.has('acmart') || entryContent.includes('ACM-Reference-Format'))
+    ) {
+      shouldMount = true;
+    } else if (
+      lowerName === 'sn-basic.bst' &&
+      (requestedClasses.has('sn-jnl') || entryContent.includes('sn-basic'))
     ) {
       shouldMount = true;
     }
@@ -163,6 +179,60 @@ export function toEngineFiles(
   return out;
 }
 
+export interface BibliographyConfig {
+  needed: boolean;
+  engine: 'bibtex' | 'biblatex-biber' | 'none';
+  hasBibFile: boolean;
+  usesBiblatex: boolean;
+  warning?: string;
+}
+
+/**
+ * Inspects document bibliography directives to determine if BibTeX is needed
+ * and detect incompatible Biber-only configurations in the browser environment.
+ */
+export function detectBibliographyConfig(files: ProjectFile[], source: string): BibliographyConfig {
+  const hasBibFile = files.some((file) => file.name.endsWith('.bib'));
+  const usesBiblatex = /\\usepackage(?:\s*\[[^\]]*\])?\s*\{\s*biblatex\s*\}/.test(source);
+  const usesBibtexBackend = /\\usepackage\s*\[[^\]]*backend\s*=\s*bibtex[^\]]*\]\s*\{\s*biblatex\s*\}/.test(source);
+  const usesNatbibOrStandard = /\\(?:bibliography|bibliographystyle)\b/.test(source);
+  const usesAddBibResource = /\\addbibresource\b/.test(source);
+
+  if (!hasBibFile && !usesAddBibResource) {
+    return { needed: false, engine: 'none', hasBibFile: false, usesBiblatex: false };
+  }
+
+  if (usesBiblatex) {
+    if (usesBibtexBackend) {
+      return {
+        needed: hasBibFile,
+        engine: 'bibtex',
+        hasBibFile,
+        usesBiblatex: true,
+      };
+    }
+    return {
+      needed: false,
+      engine: 'biblatex-biber',
+      hasBibFile,
+      usesBiblatex: true,
+      warning:
+        'biblatex defaults to Biber backend. In browser TeX, use \\usepackage[backend=bibtex]{biblatex} to compile with the bundled BibTeX engine.',
+    };
+  }
+
+  if (usesNatbibOrStandard || usesAddBibResource) {
+    return {
+      needed: hasBibFile,
+      engine: 'bibtex',
+      hasBibFile,
+      usesBiblatex: false,
+    };
+  }
+
+  return { needed: false, engine: 'none', hasBibFile, usesBiblatex: false };
+}
+
 /**
  * Whether a BibTeX pass is needed.
  *
@@ -171,14 +241,10 @@ export function toEngineFiles(
  * surface as diagnostics on a document that is actually fine.
  */
 export function needsBibtex(files: ProjectFile[], source: string): boolean {
-  const hasBibFile = files.some((file) => file.name.endsWith('.bib'));
-  const usesBibliography =
-    /\\(?:bibliography|addbibresource|printbibliography|bibliographystyle)\b/.test(
-      source,
-    );
-  return hasBibFile && usesBibliography;
+  return detectBibliographyConfig(files, source).needed;
 }
 
 export function needsMakeindex(source: string): boolean {
   return /\\(?:makeindex|printindex)\b/.test(source);
 }
+

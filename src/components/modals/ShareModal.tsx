@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Users,
   Copy,
@@ -21,6 +21,7 @@ import {
   getRoomShareTokens,
   rotateRoomShareTokens,
   revokeRoomShareTokens,
+  syncRoomShareTokensToCloud,
   type RoomShareTokens,
 } from '../../services/shareSecurityService';
 
@@ -60,6 +61,12 @@ export const ShareModal: React.FC<Props> = ({
   const [expiresInDays, setExpiresInDays] = useState<number | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ message: string; type: 'success' | 'warn' } | null>(null);
 
+  useEffect(() => {
+    if (isOpen && currentRole === 'owner') {
+      syncRoomShareTokensToCloud(roomId, tokensState).catch(() => {});
+    }
+  }, [isOpen, roomId, currentRole, tokensState]);
+
   if (!isOpen) return null;
 
   const activeKey = linkRole === 'editor' ? tokensState.editToken : tokensState.viewToken;
@@ -77,6 +84,7 @@ export const ShareModal: React.FC<Props> = ({
   const handleRotateKeys = () => {
     const rotated = rotateRoomShareTokens(roomId, expiresInDays);
     setTokensState(rotated);
+    syncRoomShareTokensToCloud(roomId, rotated).catch(() => {});
     setActionFeedback({
       message: 'Fresh secret keys generated! All previously shared links have been invalidated.',
       type: 'success',
@@ -86,7 +94,9 @@ export const ShareModal: React.FC<Props> = ({
 
   const handleRevokeKeys = () => {
     revokeRoomShareTokens(roomId);
-    setTokensState(prev => ({ ...prev, isRevoked: true }));
+    const updated = { ...tokensState, isRevoked: true };
+    setTokensState(updated);
+    syncRoomShareTokensToCloud(roomId, updated).catch(() => {});
     setActionFeedback({
       message: 'All links revoked. Room is now strictly private.',
       type: 'warn',

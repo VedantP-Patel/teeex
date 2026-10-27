@@ -12,12 +12,21 @@
  * the Edit Token (ed_...) due to SHA-256 one-way pre-image resistance.
  */
 
+import { getSupabaseClient } from './supabaseClient';
+
 export interface RoomShareTokens {
   editToken: string;
   viewToken: string;
   createdAt: number;
   expiresAt: number | null; // Milliseconds timestamp, null = Never
   isRevoked?: boolean;
+}
+
+export interface TokenCapabilityHashes {
+  editTokenHash: string;
+  viewTokenHash: string;
+  shareTokensRevoked: boolean;
+  shareTokensExpiresAt: string | null;
 }
 
 /**
@@ -293,6 +302,50 @@ export function verifyShareKey(roomId: string, key: string | null): 'editor' | '
   }
 
   return 'viewer';
+}
+
+/**
+  * Computes cryptographic digests (SHA-256) of active share tokens
+  * for storage in Postgres projects table.
+  */
+export function computeTokenHashes(tokens: RoomShareTokens): TokenCapabilityHashes {
+  return {
+    editTokenHash: tokens.editToken ? sha256Sync(tokens.editToken) : '',
+    viewTokenHash: tokens.viewToken ? sha256Sync(tokens.viewToken) : '',
+    shareTokensRevoked: Boolean(tokens.isRevoked),
+    shareTokensExpiresAt: tokens.expiresAt ? new Date(tokens.expiresAt).toISOString() : null,
+  };
+}
+
+/**
+  * Synchronizes cryptographic capability hashes to Supabase Postgres.
+  * Allows anonymous visitors with share tokens to pass RLS verification.
+  */
+export async function syncRoomShareTokensToCloud(roomId: string, tokens: RoomShareTokens): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  const hashes = computeTokenHashes(tokens);
+  try {
+    const { error } = await supabase
+      .from('projects')
+      .update({
+        edit_token_hash: hashes.editTokenHash,
+        view_token_hash: hashes.viewTokenHash,
+        share_tokens_revoked: hashes.shareTokensRevoked,
+        share_tokens_expires_at: hashes.shareTokensExpiresAt,
+      })
+      .eq('id', roomId);
+
+    if (error) {
+      console.warn('Could not sync share capability hashes to cloud:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Network error syncing share tokens to cloud:', err);
+    return false;
+  }
 }
 
 

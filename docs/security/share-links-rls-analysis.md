@@ -97,6 +97,8 @@ To enforce capability tokens on the server without forcing guest users to create
 -- Teeex — 0004: Server-Side Share Capability Tokens & Anonymous Link Access
 -- ==============================================================================
 
+create extension if not exists pgcrypto;
+
 alter table public.projects
   add column if not exists edit_token_hash text,
   add column if not exists view_token_hash text,
@@ -107,10 +109,11 @@ create or replace function public.teeex_verify_token(p_token text, p_hash text)
 returns boolean
 language sql
 stable
+set search_path = public, extensions, pg_temp
 as $$
   select p_token is not null
      and p_hash is not null
-     and encode(digest(p_token, 'sha256'), 'hex') = p_hash;
+     and encode(digest(p_token, 'sha256'::text), 'hex') = p_hash;
 $$;
 ```
 
