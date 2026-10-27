@@ -2,12 +2,12 @@
   "$schema": "./project-state.schema.md",
   "project": "Teeex",
   "mission": "One authoritative document-rendering architecture: real TeX computes layout, the preview renders the compiled PDF, and export ships those same bytes.",
-  "updated": "2026-10-27",
-  "phase": "Phase 1-5 Progressive Engineering Improvements verified (Server-side share capability tokens with RLS 0004 & owner-pinning trigger; React 19 / App.tsx de-monolithization with modalStore migration & 0 compiler warnings; Multi-file BibTeX aggregation and CodeMirror 6 balanced \\begin/\\end block folding; PDF preview in-document search findText & interactive page jump input; TeX engine pipeline companion package resolution for acmart/sn-jnl & biblatex Biber/BibTeX detection; 506 unit tests passing across 56 files, tsc clean, oxlint clean)",
+  "updated": "2026-10-28",
+  "phase": "Phase 1-6 Progressive Engineering Improvements verified (Server-side share capability tokens with RLS 0004 & owner-pinning trigger; React 19 / App.tsx de-monolithization into useProjectLifecycle, useFileOperations, useProjectCheckpoints with 100% modalStore migration & 0 compiler warnings; useCollaboration Yjs awareness decoupled from provider lifecycle; Cloudflare Pages /core/busytex/* routing for WASM streaming; Multi-file BibTeX aggregation and CodeMirror 6 balanced \\begin/\\end block folding; PDF preview search; TeX engine companion packages; 506 unit tests passing across 56 files, tsc clean, oxlint clean)",
 
   "verificationStatus": {
     "state": "PASSING",
-    "note": "Progressive engineering improvement phases verified across share security, React 19 architecture, CodeMirror LaTeX editing, PDF viewer search, and TeX engine package pipeline.",
+    "note": "Progressive engineering improvement phases verified across share security, React 19 architecture, modalStore unification, CodeMirror LaTeX editing, PDF viewer search, and TeX engine package pipeline.",
     "results": {
       "typecheck": "npx tsc -p tsconfig.app.json --noEmit — clean, exit 0",
       "lint": "npx oxlint — clean on modified core files, exit 0",
@@ -218,7 +218,7 @@
       "question": "Does texlive2026.texlyre.org send permissive CORS headers?",
       "why": "API_ORIGINS defaults to same-origin only. If it is restrictive, on-demand package resolution needs a same-origin proxy.",
       "status": "RESOLVED — Same-origin Cloudflare Pages edge proxy functions/api/texlive/[[path]].ts with public/_routes.json handles package fetching and injects permissive CORS with CDN caching; latexCompiler.ts defaults to ${window.location.origin}/api/texlive in browser runtime.",
-      "resolution": "Edge proxy at /api/texlive/* in Cloudflare Pages Functions and Vite dev proxy handle all requests same-origin with global CDN caching."
+      "resolution": "Edge proxy at /api/texlive/* in Cloudflare Pages Functions and Vite dev proxy handle all requests same-origin with global CDN caching. public/_routes.json routes both /api/* and /core/busytex/* to Functions so pruned WASM and data binary packages stream properly."
     },
     {
       "id": "Q2",
@@ -257,6 +257,7 @@
     { "order": 7, "action": "DONE — Phase E: AST parser offloaded to dedicated Web Worker with balanced-brace extraction and cycle-safe transclusion expansion (C12, C13)." },
     { "order": 8, "action": "DONE — Phase F: DTCG 3-tier design token architecture, command palette, resizable split engine, CodeMirror keymaps, and background inert isolation." },
     { "order": 9, "action": "DONE — Render the annotation layer so hyperref links are clickable (preview.annotations), windowed list unmounting, and lazy geometry." },
-    { "order": 10, "action": "DONE — AGPL-3.0-or-later position formalized: texlyre-busytex runs client-side in WebAssembly without proprietary modifications; engine attribution, license links, and source repository pointers are prominently exposed in UI, README.md, and docs." }
+    { "order": 10, "action": "DONE — AGPL-3.0-or-later position formalized: texlyre-busytex runs client-side in WebAssembly without proprietary modifications; engine attribution, license links, and source repository pointers are prominently exposed in UI, README.md, and docs." },
+    { "order": 11, "action": "DONE — De-monolithization of App.tsx into useProjectLifecycle, useFileOperations, and useProjectCheckpoints; useCollaboration awareness lifecycle decoupled from selfUser re-renders; ModalContainer 100% unified to modalStore; public/_routes.json updated with /core/busytex/* to route WASM/data binary streams." }
   ]
 }

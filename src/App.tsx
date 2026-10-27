@@ -6,26 +6,9 @@ import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
 import { PreviewPane } from './components/PreviewPane';
 import { DiagnosticsDock } from './components/DiagnosticsDock';
-import type { Checkpoint } from './services/checkpointsService';
-import {
-  loadProjectCheckpoints,
-  createCheckpoint,
-  createCommit,
-  deleteCheckpoint,
-  fetchProjectCheckpointsFromCloud,
-  pushCommitsToCloud,
-  getWorkingTreeStatus,
-  getActiveBranch,
-  setActiveBranch,
-  getProjectBranches,
-  createBranch,
-  deleteBranch,
-  hydrateCheckpointsFromOffline,
-  createAutoSaveCheckpointIfNeeded,
-} from './services/checkpointsService';
 
 import { ModalContainer } from './components/modals/ModalContainer';
-import { openModal, closeModal } from './stores/modalStore';
+import { openModal, closeModal, useModalStore } from './stores/modalStore';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { useGlobalKeyboardShortcuts } from './hooks/useGlobalKeyboardShortcuts';
 import { useResizableSplit } from './hooks/useResizableSplit';
@@ -54,9 +37,10 @@ import { useTheme } from './hooks/useTheme';
 import { useProjectManager } from './hooks/useProjectManager';
 import { useCollaboration } from './hooks/useCollaboration';
 import { useCompilerIntegration } from './hooks/useCompilerIntegration';
+import { useProjectCheckpoints } from './hooks/useProjectCheckpoints';
 
 export function App() {
-  // Theme hook (Finding 6)
+  // Theme hook
   const { theme, toggleTheme } = useTheme();
 
   // Auth & Session State
@@ -66,8 +50,6 @@ export function App() {
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(() => {
     return isSupabaseConnected() && getStoredSession().user !== null;
   });
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [isProjectsHubOpen, setIsProjectsHubOpen] = useState(false);
 
   // Toast notification state
   const [toast, setToast] = useState<string | null>(null);
@@ -77,7 +59,7 @@ export function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  // Active Cloud / Supabase session verification & Bi-directional project sync on startup
+  // Active Cloud / Supabase session verification
   useEffect(() => {
     let isMounted = true;
     if (isSupabaseConnected()) {
@@ -104,10 +86,10 @@ export function App() {
     requestDurableStorage().catch(() => {});
   }, []);
 
-  // Forward compile trigger ref to break circular dependency between compiler and projectManager
+  // Forward compile trigger ref to break circular dependency
   const compileTriggerRef = useRef<() => void>(() => {});
 
-  // Project manager hook (Finding 1 & 4)
+  // Project manager hook (composed of useProjectLifecycle & useFileOperations)
   const projectManager = useProjectManager({
     currentUser,
     onToast: (msg) => setToast(msg),
@@ -159,15 +141,21 @@ export function App() {
     handleToggleEncryption,
     handleRestoreCheckpoint,
     handleRestoreSingleFile,
+    setFiles,
     setProjects,
   } = projectManager;
 
-  // Collaboration hook (Finding 1, 2, 7, 8)
+  // Editor jump target line
+  const [targetLine, setTargetLine] = useState<number | null>(null);
+
+  // Collaboration hook — with stable onSelectFile and onJumpToLine injected
   const collaboration = useCollaboration({
     activeProjectId,
     activeProject,
     currentUser,
     activeFileId,
+    onSelectFile: handleSelectFile,
+    onJumpToLine: setTargetLine,
     onToast: (msg) => setToast(msg),
   });
 
@@ -191,8 +179,30 @@ export function App() {
     isCloudConnected,
   } = collaboration;
 
-  // Editor jump target line
-  const [targetLine, setTargetLine] = useState<number | null>(null);
+  // Checkpoints & Git version control hook — decoupled from keystroke updates
+  const checkpointsManager = useProjectCheckpoints({
+    activeProjectId,
+    currentUser,
+    authorName: selfUser.name,
+    onToast: (msg) => setToast(msg),
+    setFiles,
+  });
+
+  const {
+    checkpoints,
+    activeBranch,
+    projectBranches,
+    workingTreeStatus,
+    handleSwitchBranch,
+    handleCreateBranch,
+    handleDeleteBranch,
+    handleCreateCommit,
+    handlePushCommits,
+    handlePullCommits,
+    handleCreateCheckpoint,
+    handleDeleteCheckpoint,
+    handleSyncCheckpointsCloud,
+  } = checkpointsManager;
 
   // Live parser for syntax tree, outline, and live diagnostics (debounced 220ms)
   const liveCompileResult = useLatexParser({
@@ -205,7 +215,7 @@ export function App() {
   const parsedDoc = liveCompileResult.parsedDoc;
   const labels = liveCompileResult.labels;
 
-  // Compiler integration hook (Finding 1 & 3)
+  // Compiler integration hook
   const compiler = useCompilerIntegration({
     files,
     projectId: activeProjectId,
@@ -234,12 +244,11 @@ export function App() {
     bibEntries,
   } = compiler;
 
-  // Wire triggerCompile into ref
   useEffect(() => {
     compileTriggerRef.current = triggerCompile;
   }, [triggerCompile]);
 
-  // Combined diagnostics: TeX Engine diagnostics + Live Parser diagnostics
+  // Combined diagnostics
   const diagnostics = useMemo(() => {
     const parserDiags = liveCompileResult.diagnostics;
     const outcome = texEngineView.outcome;
@@ -352,194 +361,6 @@ export function App() {
 
   const equationCount = parsedDoc.mathBlocks.length;
 
-  // Checkpoints state & Version control
-  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>(() => {
-    return loadProjectCheckpoints(activeProjectId, activeProject?.files, currentUser?.fullName || 'You');
-  });
-
-  useEffect(() => {
-    const localCps = loadProjectCheckpoints(activeProjectId, files, currentUser?.fullName || 'You');
-    setCheckpoints(localCps);
-
-    hydrateCheckpointsFromOffline(activeProjectId)
-      .then(offlineCps => {
-        if (offlineCps && offlineCps.length > localCps.length) {
-          setCheckpoints(offlineCps);
-        }
-      })
-      .catch(() => {});
-
-    if (isSupabaseConnected()) {
-      fetchProjectCheckpointsFromCloud(activeProjectId)
-        .then(res => {
-          if (res.success && res.checkpoints && res.checkpoints.length > 0) {
-            setCheckpoints(res.checkpoints);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [activeProjectId, currentUser?.fullName, files]);
-
-  // Periodic Autosave Checkpoints (every 5 minutes during active session)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!activeProjectId || !files || files.length === 0) return;
-      const newCp = createAutoSaveCheckpointIfNeeded(activeProjectId, files, currentUser?.fullName || selfUser.name);
-      if (newCp) {
-        setCheckpoints(prev => [newCp, ...prev.filter(c => c.id !== newCp.id)]);
-      }
-    }, 5 * 60 * 1000);
-
-    return () => clearInterval(interval);
-  }, [activeProjectId, currentUser?.fullName, files, selfUser.name]);
-
-  const workingTreeStatus = useMemo(() => {
-    const head = checkpoints[0] || null;
-    return getWorkingTreeStatus(files, head);
-  }, [files, checkpoints]);
-
-  const [activeBranch, setActiveBranchState] = useState<string>(() => {
-    return getActiveBranch(activeProjectId) || 'main';
-  });
-  const [projectBranches, setProjectBranches] = useState<string[]>(() => {
-    return getProjectBranches(activeProjectId);
-  });
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      setActiveBranchState(getActiveBranch(activeProjectId));
-      setProjectBranches(getProjectBranches(activeProjectId));
-    });
-  }, [activeProjectId]);
-
-  const handleSwitchBranch = useCallback((branchName: string, checkoutHead = false) => {
-    setActiveBranch(activeProjectId, branchName);
-    setActiveBranchState(branchName);
-    setToast(`Switched to branch "${branchName}"`);
-
-    if (checkoutHead) {
-      const cps = loadProjectCheckpoints(activeProjectId);
-      const branchHead = cps.find(c => (c.branch || 'main') === branchName) || cps[0];
-      if (branchHead && branchHead.files.length > 0) {
-        projectManager.setFiles(branchHead.files);
-        setToast(`Checked out branch "${branchName}" (${branchHead.shortSha})`);
-      }
-    }
-  }, [activeProjectId, projectManager]);
-
-  const handleCreateBranch = useCallback((branchName: string) => {
-    const res = createBranch(activeProjectId, branchName);
-    if (res.success) {
-      const updated = getProjectBranches(activeProjectId);
-      setProjectBranches(updated);
-      setActiveBranchState(branchName.trim().replace(/\s+/g, '-').toLowerCase());
-      setToast(`Created and switched to branch "${branchName}"`);
-    } else {
-      setToast(`Failed to create branch: ${res.error || 'Error'}`);
-    }
-  }, [activeProjectId]);
-
-  const handleDeleteBranch = useCallback((branchName: string) => {
-    const res = deleteBranch(activeProjectId, branchName);
-    if (res.success) {
-      setProjectBranches(getProjectBranches(activeProjectId));
-      setToast(`Deleted branch "${branchName}"`);
-    } else {
-      setToast(`Failed to delete branch: ${res.error || 'Error'}`);
-    }
-  }, [activeProjectId]);
-
-  const handleCreateCommit = useCallback((message: string, description?: string) => {
-    const currentBranch = getActiveBranch(activeProjectId) || 'main';
-    const newCommit = createCommit(
-      activeProjectId,
-      message,
-      currentUser?.fullName || selfUser.name,
-      files,
-      description,
-      currentBranch,
-      currentUser?.email || ''
-    );
-    setCheckpoints(prev => [newCommit, ...prev.filter(c => c.id !== newCommit.id)]);
-    setToast(`Committed: ${message} (${newCommit.shortSha})`);
-  }, [activeProjectId, currentUser?.fullName, currentUser?.email, selfUser.name, files]);
-
-  const handlePushCommits = useCallback(async () => {
-    if (!isSupabaseConnected()) {
-      setToast('Supabase Cloud is not connected — commits saved locally');
-      return;
-    }
-    try {
-      const res = await pushCommitsToCloud(activeProjectId);
-      if (res.success) {
-        setCheckpoints(loadProjectCheckpoints(activeProjectId));
-        setToast(`Pushed ${res.pushedCount} commit${res.pushedCount === 1 ? '' : 's'} to Cloud`);
-      } else {
-        setToast(`Push failed: ${res.error || 'Network error'}`);
-      }
-    } catch (err: any) {
-      setToast(`Push failed: ${err?.message || 'Error'}`);
-    }
-  }, [activeProjectId]);
-
-  const handlePullCommits = useCallback(async () => {
-    if (!isSupabaseConnected()) {
-      setToast('Supabase Cloud is not connected');
-      return;
-    }
-    try {
-      const res = await fetchProjectCheckpointsFromCloud(activeProjectId);
-      if (res.success && res.checkpoints) {
-        setCheckpoints(res.checkpoints);
-        setToast(`Pulled ${res.checkpoints.length} versions from Cloud`);
-      } else {
-        setToast(`Pull failed: ${res.error || 'Network error'}`);
-      }
-    } catch (err: any) {
-      setToast(`Pull failed: ${err?.message || 'Error'}`);
-    }
-  }, [activeProjectId]);
-
-  const handleCreateCheckpoint = useCallback((name: string) => {
-    const newCp = createCheckpoint(
-      activeProjectId,
-      name,
-      currentUser?.fullName || selfUser.name,
-      files,
-      false
-    );
-    setCheckpoints(prev => [newCp, ...prev.filter(c => c.id !== newCp.id)]);
-    setToast(`Snapshot "${name}" saved to history`);
-  }, [activeProjectId, currentUser?.fullName, selfUser.name, files]);
-
-  const handleDeleteCheckpoint = useCallback((cpId: string) => {
-    deleteCheckpoint(activeProjectId, cpId)
-      .then(updated => {
-        setCheckpoints(updated);
-        setToast('Checkpoint deleted');
-      })
-      .catch(() => {});
-  }, [activeProjectId]);
-
-  const handleSyncCheckpointsCloud = useCallback(() => {
-    if (!isSupabaseConnected()) {
-      setToast('Supabase is not connected');
-      return;
-    }
-    fetchProjectCheckpointsFromCloud(activeProjectId)
-      .then(res => {
-        if (res.success && res.checkpoints) {
-          setCheckpoints(res.checkpoints);
-          setToast(`Checkpoints synchronized (${res.checkpoints.length} versions)`);
-        } else {
-          setToast('Cloud sync completed');
-        }
-      })
-      .catch(err => {
-        setToast('Cloud sync error: ' + (err?.message || 'Unknown'));
-      });
-  }, [activeProjectId]);
-
   // Export handlers
   const handleExportPdf = useCallback(() => {
     const bytes = texEngineView.pdf;
@@ -565,7 +386,7 @@ export function App() {
   // Auth & Session
   const handleAuthSuccess = useCallback((user: UserProfile) => {
     setCurrentUser(user);
-    setIsAuthOpen(false);
+    closeModal();
     setSelfUser(prev => ({
       ...prev,
       name: user.fullName,
@@ -595,7 +416,7 @@ export function App() {
     flushCurrentProjectSave();
     await signOutUser();
     setCurrentUser(null);
-    setIsAuthOpen(false);
+    closeModal();
     const guestProjects = loadProjects();
     setProjects(guestProjects);
     if (guestProjects[0]) {
@@ -603,72 +424,16 @@ export function App() {
     }
   }, [flushCurrentProjectSave, handleSelectProject, setProjects]);
 
-  // Modal dialog states
-  const [isShareOpen, setIsShareOpen] = useState(false);
-  const [isTableBuilderOpen, setIsTableBuilderOpen] = useState(false);
-  const [isSymbolsOpen, setIsSymbolsOpen] = useState(false);
-  const [symbolsInitialTab, setSymbolsInitialTab] = useState<'symbols' | 'snippets' | 'macros'>('symbols');
-  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
-  const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isWordCountOpen, setIsWordCountOpen] = useState(false);
-  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
-  const [isEncryptionModalOpen, setIsEncryptionModalOpen] = useState(false);
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const [commandPaletteMode, setCommandPaletteMode] = useState<'all' | 'files'>('all');
-
-  const isAnyModalActive =
-    isImageUploadOpen ||
-    isSymbolsOpen ||
-    isTableBuilderOpen ||
-    isHistoryOpen ||
-    isWordCountOpen ||
-    isShareOpen ||
-    isTemplatesOpen ||
-    isAuthOpen ||
-    isProjectsHubOpen ||
-    isEncryptionModalOpen ||
-    isAuditModalOpen ||
-    isCommandPaletteOpen;
-
-  const handleDismissModal = useCallback(() => {
-    closeModal();
-    if (isCommandPaletteOpen) setIsCommandPaletteOpen(false);
-    else if (isImageUploadOpen) setIsImageUploadOpen(false);
-    else if (isSymbolsOpen) setIsSymbolsOpen(false);
-    else if (isTableBuilderOpen) setIsTableBuilderOpen(false);
-    else if (isHistoryOpen) setIsHistoryOpen(false);
-    else if (isWordCountOpen) setIsWordCountOpen(false);
-    else if (isShareOpen) setIsShareOpen(false);
-    else if (isTemplatesOpen) setIsTemplatesOpen(false);
-    else if (isAuthOpen) setIsAuthOpen(false);
-    else if (isProjectsHubOpen) setIsProjectsHubOpen(false);
-    else if (isEncryptionModalOpen) setIsEncryptionModalOpen(false);
-    else if (isAuditModalOpen) setIsAuditModalOpen(false);
-  }, [
-    isCommandPaletteOpen,
-    isImageUploadOpen,
-    isSymbolsOpen,
-    isTableBuilderOpen,
-    isHistoryOpen,
-    isWordCountOpen,
-    isShareOpen,
-    isTemplatesOpen,
-    isAuthOpen,
-    isProjectsHubOpen,
-    isEncryptionModalOpen,
-    isAuditModalOpen,
-  ]);
+  // Unified modal active check
+  const isAnyModalOpen = useModalStore(s => s.activeModal !== null);
 
   // Global Keyboard Shortcuts
   useGlobalKeyboardShortcuts({
     onOpenCommandPalette: () => {
-      setCommandPaletteMode('all');
-      setIsCommandPaletteOpen(prev => !prev);
+      openModal('commandPalette', { initialMode: 'all' });
     },
     onQuickOpenFile: () => {
-      setCommandPaletteMode('files');
-      setIsCommandPaletteOpen(true);
+      openModal('commandPalette', { initialMode: 'files' });
     },
     onSaveProject: () => {
       flushCurrentProjectSave();
@@ -681,8 +446,8 @@ export function App() {
     onForwardSync: () => {
       if (activeCursorLine) setForwardTargetLine({ line: activeCursorLine, nonce: Date.now() });
     },
-    onDismissModal: handleDismissModal,
-    isModalOpen: isAnyModalActive,
+    onDismissModal: closeModal,
+    isModalOpen: isAnyModalOpen,
   });
 
   // Ctrl+Shift+G for Source Control
@@ -868,24 +633,21 @@ export function App() {
           selfUser={selfUser}
           theme={theme}
           onToggleTheme={toggleTheme}
-          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-          onOpenShare={() => setIsShareOpen(true)}
-          onOpenTableBuilder={() => setIsTableBuilderOpen(true)}
-          onOpenSymbols={() => {
-            setSymbolsInitialTab('symbols');
-            setIsSymbolsOpen(true);
-          }}
-          onOpenTemplates={() => setIsTemplatesOpen(true)}
-          onOpenImageUpload={() => setIsImageUploadOpen(true)}
+          onOpenCommandPalette={() => openModal('commandPalette', { initialMode: 'all' })}
+          onOpenShare={() => openModal('share')}
+          onOpenTableBuilder={() => openModal('tableBuilder')}
+          onOpenSymbols={() => openModal('symbolPalette', { initialTab: 'symbols' })}
+          onOpenTemplates={() => openModal('template')}
+          onOpenImageUpload={() => openModal('imageUpload')}
           isCloudConnected={isCloudConnected}
           onExportPdf={handleExportPdf}
           onExportZip={handleExportZip}
           projects={projects}
           activeProjectId={activeProjectId}
           onSelectProject={handleSelectProject}
-          onOpenProjectsHub={() => setIsProjectsHubOpen(true)}
+          onOpenProjectsHub={() => openModal('projectsHub')}
           currentUser={currentUser}
-          onOpenAuth={() => setIsAuthOpen(true)}
+          onOpenAuth={() => openModal('auth')}
           onSignOut={handleSignOut}
           currentRole={currentRole}
           isEncrypted={!!activeProject?.isEncrypted}
@@ -921,12 +683,12 @@ export function App() {
               onJumpToLine={setTargetLine}
               wordCount={wordCount}
               equationCount={equationCount}
-              onOpenWordCount={() => setIsWordCountOpen(true)}
-              onOpenHistory={() => setIsHistoryOpen(true)}
+              onOpenWordCount={() => openModal('wordCount')}
+              onOpenHistory={() => openModal('versionHistory')}
               role={currentRole}
               onCollapse={() => setIsSidebarOpen(false)}
               onImportFiles={handleImportFiles}
-              onOpenImageUpload={() => setIsImageUploadOpen(true)}
+              onOpenImageUpload={() => openModal('imageUpload')}
               peers={peers}
             />
           </div>
@@ -963,18 +725,15 @@ export function App() {
                 onAcceptTrackedChange={handleAcceptTrackedChange}
                 onRejectTrackedChange={handleRejectTrackedChange}
                 onAddTrackedChange={handleAddTrackedChange}
-                onOpenSnippets={() => {
-                  setSymbolsInitialTab('snippets');
-                  setIsSymbolsOpen(true);
-                }}
+                onOpenSnippets={() => openModal('symbolPalette', { initialTab: 'snippets' })}
                 onFormatDocument={handleFormatDocument}
-                onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-                onOpenImageUpload={() => setIsImageUploadOpen(true)}
+                onOpenCommandPalette={() => openModal('commandPalette', { initialMode: 'all' })}
+                onOpenImageUpload={() => openModal('imageUpload')}
                 onImportFiles={handleImportFiles}
                 ytext={provider ? provider.getText(activeFileId) : null}
                 awareness={provider ? provider.awareness : null}
                 undoManager={provider ? provider.getUndoManager(activeFileId) : null}
-                onFollowPeer={(peer) => handleFollowPeer(peer, handleSelectFile, setTargetLine)}
+                onFollowPeer={handleFollowPeer}
               />
             </div>
 
@@ -1120,32 +879,6 @@ export function App() {
       </div>
 
       <ModalContainer
-        isImageUploadOpen={isImageUploadOpen}
-        setIsImageUploadOpen={setIsImageUploadOpen}
-        isSymbolsOpen={isSymbolsOpen}
-        setIsSymbolsOpen={setIsSymbolsOpen}
-        symbolsInitialTab={symbolsInitialTab}
-        isTableBuilderOpen={isTableBuilderOpen}
-        setIsTableBuilderOpen={setIsTableBuilderOpen}
-        isHistoryOpen={isHistoryOpen}
-        setIsHistoryOpen={setIsHistoryOpen}
-        isWordCountOpen={isWordCountOpen}
-        setIsWordCountOpen={setIsWordCountOpen}
-        isShareOpen={isShareOpen}
-        setIsShareOpen={setIsShareOpen}
-        isTemplatesOpen={isTemplatesOpen}
-        setIsTemplatesOpen={setIsTemplatesOpen}
-        isAuthOpen={isAuthOpen}
-        setIsAuthOpen={setIsAuthOpen}
-        isProjectsHubOpen={isProjectsHubOpen}
-        setIsProjectsHubOpen={setIsProjectsHubOpen}
-        isEncryptionModalOpen={isEncryptionModalOpen}
-        setIsEncryptionModalOpen={setIsEncryptionModalOpen}
-        isAuditModalOpen={isAuditModalOpen}
-        setIsAuditModalOpen={setIsAuditModalOpen}
-        isCommandPaletteOpen={isCommandPaletteOpen}
-        setIsCommandPaletteOpen={setIsCommandPaletteOpen}
-        commandPaletteInitialMode={commandPaletteMode}
         activeProject={activeProject}
         activeProjectId={activeProjectId}
         projectTitle={projectTitle}

@@ -12,6 +12,8 @@ interface UseCollaborationOptions {
   activeProject?: Project;
   currentUser: UserProfile | null;
   activeFileId?: string;
+  onSelectFile?: (fileId: string) => void;
+  onJumpToLine?: (line: number) => void;
   onToast?: (message: string) => void;
 }
 
@@ -20,6 +22,8 @@ export function useCollaboration({
   activeProject,
   currentUser,
   activeFileId = 'main.tex',
+  onSelectFile,
+  onJumpToLine,
   onToast,
 }: UseCollaborationOptions) {
   const activeFileIdRef = useRef(activeFileId);
@@ -147,6 +151,7 @@ export function useCollaboration({
   // Yjs CRDT Collaboration Provider
   const [provider, setProvider] = useState<SupabaseYjsProvider | null>(null);
   const providerRef = useRef<SupabaseYjsProvider | null>(null);
+  const selfUserRef = useRef(selfUser);
 
   const [activeCursorLine, setActiveCursorLine] = useState<number>(1);
   const cursorThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -155,7 +160,7 @@ export function useCollaboration({
   const [comments, setComments] = useState<ReviewComment[]>([]);
   const [trackedChanges, setTrackedChanges] = useState<TrackedChange[]>([]);
 
-  // Initialize and observe Yjs provider
+  // Initialize and observe Yjs provider — lifecycle strictly bound to activeProjectId
   useEffect(() => {
     let p = providerRef.current;
     if (!p || p.projectId !== activeProjectId || p.isDestroyed) {
@@ -163,7 +168,7 @@ export function useCollaboration({
       const currentFiles = projectStore.getState().files;
       p = new SupabaseYjsProvider(
         activeProjectId,
-        selfUser,
+        selfUserRef.current,
         currentFiles,
         (updatedFiles: ProjectFile[]) => {
           setFiles(prev => {
@@ -202,7 +207,15 @@ export function useCollaboration({
       yComments.unobserve(updateComments);
       yTracked.unobserve(updateTracked);
     };
-  }, [activeProjectId, selfUser]);
+  }, [activeProjectId]);
+
+  // Imperatively sync selfUser changes to Yjs awareness without tearing down the provider
+  useEffect(() => {
+    selfUserRef.current = selfUser;
+    if (providerRef.current?.awareness) {
+      providerRef.current.awareness.setLocalStateField('user', selfUser);
+    }
+  }, [selfUser]);
 
   // Clean up provider on unmount
   useEffect(() => {
@@ -254,15 +267,15 @@ export function useCollaboration({
   }, [provider]);
 
   // Follow peer in editor
-  const handleFollowPeer = useCallback((peer: Collaborator, onSelectFile: (fileId: string) => void, onJumpToLine: (line: number) => void) => {
-    if (peer.activeFile && peer.activeFile !== activeFileIdRef.current) {
+  const handleFollowPeer = useCallback((peer: Collaborator) => {
+    if (peer.activeFile && peer.activeFile !== activeFileIdRef.current && onSelectFile) {
       onSelectFile(peer.activeFile);
     }
-    if (peer.cursorLine) {
+    if (peer.cursorLine && onJumpToLine) {
       onJumpToLine(peer.cursorLine);
     }
     if (onToast) onToast(`Following ${peer.name}`);
-  }, [onToast]);
+  }, [onSelectFile, onJumpToLine, onToast]);
 
   // Tracked changes
   const handleAddTrackedChange = useCallback((change: Omit<TrackedChange, 'id' | 'status' | 'timestamp'>) => {
