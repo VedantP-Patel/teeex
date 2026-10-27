@@ -1048,7 +1048,19 @@ export function PdfPreviewPane({
         </div>
       )}
 
-      {isCompiling && <div className="pdf-compile-progress-bar" />}
+      {(isCompiling || status.phase === 'fetching') && (
+        <div
+          className="pdf-compile-progress-bar"
+          style={
+            status.phase === 'fetching'
+              ? {
+                  width: `${Math.max(8, Math.min(100, status.progress))}%`,
+                  transition: 'width 0.25s ease-out',
+                }
+              : undefined
+          }
+        />
+      )}
 
       <div
         ref={scrollRef}
@@ -1078,30 +1090,66 @@ export function PdfPreviewPane({
         )}
 
         {!hasDocument && status.phase !== 'failed' && !openError && (
-          <EmptyState
-            icon={
-              isCompiling || status.phase === 'fetching' ? (
-                <Loader2 size={22} className="spin" />
-              ) : (
-                <FileText size={22} />
-              )
-            }
-            title={
-              status.phase === 'fetching'
-                ? 'Preparing the TeX engine'
-                : isCompiling
+          status.phase === 'fetching' ? (
+            <div className="pdf-empty pdf-empty-neutral cold-start-card" role="status" aria-live="polite">
+              <div className="pdf-empty-icon">
+                <Loader2 size={24} className="spin" style={{ color: 'var(--accent-cyan)' }} />
+              </div>
+              <p className="pdf-empty-title">Initializing TeX Live 2026 WASM Engine</p>
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: 340,
+                  height: 6,
+                  borderRadius: 3,
+                  backgroundColor: 'var(--bg-surface-2)',
+                  overflow: 'hidden',
+                  margin: '12px auto 8px',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.max(5, Math.min(100, status.progress))}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, var(--accent-cyan), var(--accent-emerald))',
+                    transition: 'width 0.25s ease',
+                  }}
+                />
+              </div>
+              <p className="pdf-empty-detail" style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
+                {Math.round(status.progress)}% downloaded
+                {status.loadedBytes
+                  ? ` · ${((status.loadedBytes) / (1024 * 1024)).toFixed(1)} MB of ${((status.totalBytes ?? 127694000) / (1024 * 1024)).toFixed(0)} MB`
+                  : ''}
+                {status.speedMbps ? ` (${status.speedMbps} MB/s)` : ''}
+              </p>
+              <p className="pdf-empty-detail" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                One-time initial engine download. Permanently cached offline in browser storage.
+              </p>
+            </div>
+          ) : (
+            <EmptyState
+              icon={
+                isCompiling ? (
+                  <Loader2 size={22} className="spin" />
+                ) : (
+                  <FileText size={22} />
+                )
+              }
+              title={
+                isCompiling
                   ? `Typesetting your document (${elapsedCompileSec.toFixed(1)}s)`
                   : 'No output yet'
-            }
-            detail={
-              status.phase === 'fetching'
-                ? `${Math.round(status.progress)}% downloaded. Cached permanently for instant future loads.`
-                : isCompiling
+              }
+              detail={
+                isCompiling
                   ? 'Pre-caching packages & typesetting vector pages...'
                   : errorSummary ??
-                  'Start writing, or press Recompile to typeset the document.'
-            }
-          />
+                    'Start writing, or press Recompile to typeset the document.'
+              }
+            />
+          )
         )}
 
         {hasDocument && doc && (

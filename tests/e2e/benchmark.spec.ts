@@ -51,9 +51,14 @@ test('measure compile latency, first-paint, structure outline latency and heap s
 }) => {
   test.setTimeout(600_000);
 
+  const REPS = process.env.BENCHMARK_REPS ? parseInt(process.env.BENCHMARK_REPS, 10) : 4;
+  const isConfiguredOrCi = Boolean(process.env.BENCHMARK_REPS || process.env.CI);
+
   const results: Record<string, unknown> = {
-    machine: 'local dev (see host); single Chromium worker',
-    note: 'Small-sample baseline. p95 over few samples is indicative only.',
+    machine: isConfiguredOrCi ? 'automated CI / baseline tracking' : 'local dev (see host); single Chromium worker',
+    note: REPS >= 10
+      ? `Statistically robust benchmark baseline (${REPS} repetitions/size).`
+      : 'Small-sample baseline. p95 over few samples is indicative only.',
     capturedAt: new Date().toISOString(),
   };
 
@@ -72,7 +77,6 @@ test('measure compile latency, first-paint, structure outline latency and heap s
   results.coldStartToFirstPaintMs = Date.now() - t0;
 
   // --- compile latency by size (warm engine) ---------------------------
-  const REPS = 4;
   const latency: Record<string, ReturnType<typeof summarise>> = {};
 
   const measureCompile = async (source: string, rep: number): Promise<number> => {

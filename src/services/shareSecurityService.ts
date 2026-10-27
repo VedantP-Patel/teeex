@@ -269,20 +269,9 @@ export function verifyShareKey(roomId: string, key: string | null): 'editor' | '
       return 'viewer';
     }
 
-    // First time on this device with an authoritative edit key:
-    if (key.length >= 16) {
-      const derived = `vw_${sha256Sync(`${roomId}:${key}`).slice(0, 24)}`;
-      try {
-        localStorage.setItem(storageKey, JSON.stringify({
-          editToken: key,
-          viewToken: derived,
-          createdAt: Date.now(),
-          expiresAt: null,
-          isRevoked: false,
-        }));
-      } catch {}
-      return 'editor';
-    }
+    // Unknown edit token on this device — do NOT grant editor client-side.
+    // Default to 'viewer' pending asynchronous server RLS verification.
+    return 'viewer';
   }
 
   // 2. View-only capability key provided (vw_...)
@@ -299,6 +288,77 @@ export function verifyShareKey(roomId: string, key: string | null): 'editor' | '
       } catch {}
     }
     return 'viewer';
+  }
+
+  return 'viewer';
+}
+
+/**
+ * Asynchronously verifies an external edit or view token with Supabase Postgres RLS.
+ * Guarantees that untrusted client-provided ed_ keys cannot escalate privilege without
+ * server-side confirmation against edit_token_hash.
+ */
+export async function verifyShareKeyWithServer(
+  roomId: string,
+  key: string | null
+): Promise<'editor' | 'viewer' | null> {
+  if (!key) return null;
+
+  // First do synchronous check
+  const localCheck = verifyShareKey(roomId, key);
+  if (localCheck === 'editor') {
+    return 'editor';
+  }
+  if (localCheck === null) {
+    return null;
+  }
+
+  // If local check returned 'viewer' but the key claims to be an edit token ('ed_...'):
+  if (key.startsWith('ed_')) {
+    const supabase = getSupabaseClient(key);
+    if (!supabase) {
+      // Offline or unconfigured Supabase — default safely to viewer
+      return 'viewer';
+    }
+
+    try {
+      const editHash = sha256Sync(key);
+      const { data, error } = await supabase
+        .from('projects')
+        .select('id, edit_token_hash, share_tokens_revoked, share_tokens_expires_at')
+        .eq('id', roomId)
+        .maybeSingle();
+
+      if (error || !data) {
+        return 'viewer';
+      }
+
+      if (data.share_tokens_revoked) {
+        return null;
+      }
+
+      if (data.share_tokens_expires_at && new Date(data.share_tokens_expires_at).getTime() < Date.now()) {
+        return null;
+      }
+
+      if (data.edit_token_hash === editHash) {
+        // Cryptographically verified by server RLS and matching hash!
+        const storageKey = `teeex_share_tokens_${roomId}`;
+        const derived = `vw_${sha256Sync(`${roomId}:${key}`).slice(0, 24)}`;
+        try {
+          localStorage.setItem(storageKey, JSON.stringify({
+            editToken: key,
+            viewToken: derived,
+            createdAt: Date.now(),
+            expiresAt: data.share_tokens_expires_at ? new Date(data.share_tokens_expires_at).getTime() : null,
+            isRevoked: false,
+          }));
+        } catch {}
+        return 'editor';
+      }
+    } catch {
+      return 'viewer';
+    }
   }
 
   return 'viewer';

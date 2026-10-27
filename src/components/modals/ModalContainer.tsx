@@ -12,6 +12,7 @@ import type {
   ParsedDocument,
 } from '../../types/latex';
 import type { PaperFormatId } from '../../services/paperFormats';
+import type { EngineId } from '../../services/latexCompiler';
 
 // Lazy-loaded modal dialogs for zero initial bundle overhead
 const SymbolPaletteModal = lazy(() =>
@@ -110,6 +111,8 @@ export interface ModalContainerProps {
   projects: Project[];
   isTwoColumn: boolean;
   paperFormat: PaperFormatId;
+  selectedEngine?: EngineId;
+  onSelectEngine?: (engine: EngineId) => void;
   theme: 'dark' | 'light';
 
   // Modal action callbacks
@@ -203,6 +206,8 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
   projects,
   isTwoColumn,
   paperFormat,
+  selectedEngine,
+  onSelectEngine,
   theme,
 
   handleAddImageFile,
@@ -479,6 +484,8 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
           isTwoColumn={isTwoColumn}
           activeFormat={paperFormat}
           onSelectFormat={handleSelectFormat}
+          selectedEngine={selectedEngine}
+          onSelectEngine={onSelectEngine}
           theme={theme}
           onToggleTheme={toggleTheme}
           onExportPdf={handleExportPdf}

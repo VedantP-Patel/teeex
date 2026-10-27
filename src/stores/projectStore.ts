@@ -1,5 +1,6 @@
 import { createStore, useStore } from './createStore';
 import type { Project, ProjectFile } from '../types/latex';
+import type { PaperFormatId } from '../services/paperFormats';
 
 export interface ProjectState {
   projects: Project[];
@@ -9,7 +10,17 @@ export interface ProjectState {
   activeFileId: string;
   openFileIds: string[];
   projectTitle: string;
+  paperFormat: PaperFormatId;
+  isTwoColumn: boolean;
 }
+
+const initialPaperFormat = (typeof localStorage !== 'undefined'
+  ? (localStorage.getItem('teeex_paper_format') as PaperFormatId) || 'ieee'
+  : 'ieee') as PaperFormatId;
+
+const initialTwoColumn = typeof localStorage !== 'undefined'
+  ? localStorage.getItem('teeex_column_mode') !== '1'
+  : true;
 
 const initialState: ProjectState = {
   projects: [],
@@ -19,6 +30,8 @@ const initialState: ProjectState = {
   activeFileId: '',
   openFileIds: [],
   projectTitle: 'Untitled Project',
+  paperFormat: initialPaperFormat,
+  isTwoColumn: initialTwoColumn,
 };
 
 export const projectStore = createStore<ProjectState>(initialState);
@@ -70,6 +83,20 @@ export function setOpenFileIds(openFileIds: string[] | ((prev: string[]) => stri
 
 export function setProjectTitle(projectTitle: string): void {
   projectStore.setState({ projectTitle });
+}
+
+export function setPaperFormat(paperFormat: PaperFormatId): void {
+  try {
+    localStorage.setItem('teeex_paper_format', paperFormat);
+  } catch {}
+  projectStore.setState({ paperFormat });
+}
+
+export function setIsTwoColumn(isTwoColumn: boolean): void {
+  try {
+    localStorage.setItem('teeex_column_mode', isTwoColumn ? '2' : '1');
+  } catch {}
+  projectStore.setState({ isTwoColumn });
 }
 
 export function updateFileContent(fileId: string, content: string): void {

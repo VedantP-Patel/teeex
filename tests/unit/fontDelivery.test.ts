@@ -13,6 +13,14 @@ const EXPECTED_FONTS = [
   'Newsreader-Italic-Variable.woff2',
 ];
 
+function loadCompleteCss(filePath: string): string {
+  const content = readFileSync(filePath, 'utf8');
+  return content.replace(/@import\s+['"](\.\/[^'"]+)['"];/g, (_, rel) => {
+    const resolved = resolve(join(ROOT, 'src'), rel);
+    return existsSync(resolved) ? loadCompleteCss(resolved) : '';
+  });
+}
+
 describe('Self-Hosted Typography & Zero-Leak Delivery (S4g)', () => {
   it('all 5 WOFF2 variable font files exist in public/fonts/', () => {
     for (const font of EXPECTED_FONTS) {
@@ -46,7 +54,7 @@ describe('Self-Hosted Typography & Zero-Leak Delivery (S4g)', () => {
   });
 
   it('src/index.css defines local @font-face rules with font-display: swap', () => {
-    const css = readFileSync(join(ROOT, 'src', 'index.css'), 'utf8');
+    const css = loadCompleteCss(join(ROOT, 'src', 'index.css'));
 
     expect(css).toContain("font-family: 'Plus Jakarta Sans'");
     expect(css).toContain("url('/fonts/PlusJakartaSans-Variable.woff2')");

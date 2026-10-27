@@ -217,7 +217,8 @@
       "id": "Q1",
       "question": "Does texlive2026.texlyre.org send permissive CORS headers?",
       "why": "API_ORIGINS defaults to same-origin only. If it is restrictive, on-demand package resolution needs a same-origin proxy.",
-      "resolution": "Fetch a known file from a browser context and inspect Access-Control-Allow-Origin. Fallback: add a /texlive-remote/* rewrite in vercel.json and point VITE_TEXLIVE_REMOTE_ENDPOINT at it."
+      "status": "RESOLVED — Same-origin Cloudflare Pages edge proxy functions/api/texlive/[[path]].ts with public/_routes.json handles package fetching and injects permissive CORS with CDN caching; latexCompiler.ts defaults to ${window.location.origin}/api/texlive in browser runtime.",
+      "resolution": "Edge proxy at /api/texlive/* in Cloudflare Pages Functions and Vite dev proxy handle all requests same-origin with global CDN caching."
     },
     {
       "id": "Q2",
@@ -256,6 +257,6 @@
     { "order": 7, "action": "DONE — Phase E: AST parser offloaded to dedicated Web Worker with balanced-brace extraction and cycle-safe transclusion expansion (C12, C13)." },
     { "order": 8, "action": "DONE — Phase F: DTCG 3-tier design token architecture, command palette, resizable split engine, CodeMirror keymaps, and background inert isolation." },
     { "order": 9, "action": "DONE — Render the annotation layer so hyperref links are clickable (preview.annotations), windowed list unmounting, and lazy geometry." },
-    { "order": 10, "action": "Decide the AGPL position for texlyre-busytex." }
+    { "order": 10, "action": "DONE — AGPL-3.0-or-later position formalized: texlyre-busytex runs client-side in WebAssembly without proprietary modifications; engine attribution, license links, and source repository pointers are prominently exposed in UI, README.md, and docs." }
   ]
 }

@@ -2,9 +2,17 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 
+function loadCompleteCss(filePath: string): string {
+  const content = fs.readFileSync(filePath, 'utf8');
+  return content.replace(/@import\s+['"](\.\/[^'"]+)['"];/g, (_, rel) => {
+    const resolved = path.resolve(path.dirname(filePath), rel);
+    return fs.existsSync(resolved) ? loadCompleteCss(resolved) : '';
+  });
+}
+
 describe('Design System W3C DTCG Tokens & A11y (src/index.css)', () => {
   const cssPath = path.resolve(__dirname, '../../src/index.css');
-  const cssContent = fs.readFileSync(cssPath, 'utf8');
+  const cssContent = loadCompleteCss(cssPath);
 
   it('defines 3-Tier Global Spacing scale (--space-*) conforming to 4px baseline', () => {
     const requiredSpacing = [

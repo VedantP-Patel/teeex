@@ -51,6 +51,12 @@ describe('Share Capability Tokens & Security Service', () => {
     expect(verifyShareKey(roomId, null)).toBeNull();
   });
 
+  it('prevents client-side privilege escalation: unknown ed_ tokens default to viewer', () => {
+    // When no local token exists for a room, an arbitrary ed_ token must NOT grant editor
+    const arbitraryEditKey = 'ed_attacker_spoofed_random_key_12345';
+    expect(verifyShareKey('completely-new-room', arbitraryEditKey)).toBe('viewer');
+  });
+
   it('rejects all keys once room share tokens are revoked', () => {
     const tokens = getRoomShareTokens(roomId);
     revokeRoomShareTokens(roomId);

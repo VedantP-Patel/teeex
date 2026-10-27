@@ -134,11 +134,16 @@ Set it to `off` to disable remote package resolution entirely; compilation is th
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Dev server (provisions engine and essential packages first) |
+| `npm run dev` | Dev server (runs `predev` provisioning step first) |
 | `npm run build` | Typecheck (`tsc`) and Vite production bundle |
-| `npm run engine` | Provision the pdfTeX engine subset |
-| `npm run engine:full` | Also provision XeTeX and LuaHBTeX |
-| `npm run engine:verify` | Fail if engine assets are missing or incomplete |
+| `npm run build:pages` | Typecheck, build, and prune assets exceeding Cloudflare Pages 25MB file limit (`scripts/prune-pages-dist.mjs`) |
+| `npm run preview` | Run Vite local preview server on production build |
+| `npm run fonts` | Download modern variable fonts into `public/fonts/` (`scripts/download-fonts.mjs`) |
+| `npm run engine` | Provision the pdfTeX engine subset into `public/core/busytex/` (`scripts/fetch-engine.mjs`) |
+| `npm run engine:full` | Also provision XeTeX and LuaHBTeX engine profiles (`scripts/fetch-engine.mjs --profile full`) |
+| `npm run engine:verify` | Verify engine asset cryptographic digests against golden manifest (`scripts/fetch-engine.mjs --verify`) |
+| `npm run engine:r2-upload` | Synchronize version-pinned engine assets to Cloudflare R2 bucket mirror (`scripts/upload-r2.mjs`) |
+| `node scripts/download-essential-packages.mjs` | Prefetch essential companion `.sty`/`.cls` packages for offline use into `public/packages/` |
 | `npm test` | Run Vitest unit & fuzz test matrix (506 tests across 56 files) |
 | `npm run test:e2e` | Run Playwright browser verification suite |
 | `npx playwright test tests/e2e/benchmark.spec.ts` | Capture cold-start, warm compile, and heap baselines to `docs/benchmarks.json` |
@@ -158,13 +163,17 @@ working on the strength of having been written.
 
 ### Known limitations
 
-- **Cold Engine Download**: The first compile requires downloading ~128 MB of WASM and TeX data; compiles take seconds, not milliseconds.
+- **Cold Engine Download**: The first compile requires downloading ~128 MB of WASM and TeX data; compiles take seconds, not milliseconds. Surfaced via real-time progress indicators in the UI.
 - **Offline Package Scope**: Offline compilation is limited to `texlive-basic`, `public/packages/`, and packages previously cached in browser IndexedDB/OPFS.
-- **XeLaTeX / LuaLaTeX UI**: While engine binary assets can be provisioned via `npm run engine:full`, a user interface dropdown selector is not yet exposed; default execution is pdfLaTeX.
+- **XeLaTeX / LuaLaTeX Support**: Selectable from the Navbar engine dropdown. Full multi-engine compilation requires provisioning assets via `npm run engine:full`.
 - **Biber Backend**: Browser WASM includes `bibtex8`. For `biblatex` users, `\usepackage[backend=bibtex]{biblatex}` is required as the standalone Perl Biber executable cannot run in browser WebAssembly.
 
 ---
 
 ## Licensing
 
-The TeX engine is `texlyre-busytex`, licensed under **AGPL-3.0-or-later**. Operating a hosted service built on AGPL code carries a source-disclosure obligation to its users. Review this before deploying commercially.
+The TeX engine is `texlyre-busytex`, licensed under **AGPL-3.0-or-later**.
+- The engine executes entirely client-side within browser WebAssembly without proprietary server-side alterations.
+- Links to upstream source repositories, licenses, and attributions are maintained in project documentation and the application interface.
+- If you deploy Teeex Studio as a public network-accessible service, review AGPL-3.0 Section 13 regarding source code disclosure obligations.
+

@@ -52,7 +52,7 @@
       "tests": [],
       "limitations": [
         "Requires the `full` engine profile; not provisioned by default.",
-        "No UI to select it yet."
+        "Selectable via Navbar and Command Palette engine dropdown."
       ],
       "overall": "partial"
     },
@@ -69,7 +69,7 @@
       "tests": [],
       "limitations": [
         "Requires the `full` engine profile.",
-        "No UI to select it yet."
+        "Selectable via Navbar and Command Palette engine dropdown."
       ],
       "overall": "partial"
     },

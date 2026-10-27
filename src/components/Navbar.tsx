@@ -29,7 +29,7 @@ import {
   DownloadCloud
 } from 'lucide-react';
 import type { CompileState, CompileMode, Collaborator, Project, ProjectRole, UserProfile } from '../types/latex';
-import type { EngineStatus } from '../services/latexCompiler';
+import type { EngineId, EngineStatus } from '../services/latexCompiler';
 import { usePwaInstall } from '../hooks/usePwaInstall';
 import { EngineWarmupBadge } from './EngineWarmupBadge';
 import { resolveUserProjectRole } from '../services/projectsService';
@@ -41,6 +41,8 @@ interface Props {
   onCompile: () => void;
   compileMode?: CompileMode;
   onToggleCompileMode?: (mode: CompileMode) => void;
+  selectedEngine?: EngineId;
+  onSelectEngine?: (engine: EngineId) => void;
   onOpenCommandPalette?: () => void;
   peers: Collaborator[];
   selfUser: Collaborator;
@@ -78,6 +80,8 @@ export const Navbar: React.FC<Props> = ({
   onCompile,
   compileMode = 'fast',
   onToggleCompileMode,
+  selectedEngine = 'pdflatex',
+  onSelectEngine,
   onOpenCommandPalette,
   peers,
   selfUser: _selfUser,
@@ -353,6 +357,42 @@ export const Navbar: React.FC<Props> = ({
                 >
                   💎 <span className="nav-mode-label">Final</span>
                 </button>
+              </div>
+            )}
+
+            {/* TeX Engine Selector Capsule */}
+            {onSelectEngine && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  background: 'var(--bg-tertiary, rgba(255, 255, 255, 0.05))',
+                  border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.1))',
+                  borderRadius: 6,
+                  padding: '2px 4px',
+                }}
+              >
+                <select
+                  value={selectedEngine}
+                  onChange={(e) => onSelectEngine(e.target.value as EngineId)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-secondary, #cbd5e1)',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    outline: 'none',
+                    fontFamily: 'var(--font-mono, monospace)',
+                    padding: '1px 2px',
+                  }}
+                  title="TeX Compilation Engine"
+                  aria-label="Select TeX compilation engine"
+                >
+                  <option value="pdflatex" style={{ background: 'var(--bg-surface-0, #0d1017)', color: '#f1f5f9' }}>pdfLaTeX</option>
+                  <option value="xelatex" style={{ background: 'var(--bg-surface-0, #0d1017)', color: '#f1f5f9' }}>XeLaTeX</option>
+                  <option value="lualatex" style={{ background: 'var(--bg-surface-0, #0d1017)', color: '#f1f5f9' }}>LuaLaTeX</option>
+                </select>
               </div>
             )}
           </div>

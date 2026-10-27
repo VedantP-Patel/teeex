@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import type { Project, ProjectFile } from '../../types/latex';
 import { PAPER_FORMATS, type PaperFormatId } from '../../services/paperFormats';
+import type { EngineId } from '../../services/latexCompiler';
 
 export interface CommandItem {
   id: string;
@@ -48,6 +49,8 @@ interface Props {
   isTwoColumn: boolean;
   activeFormat: PaperFormatId;
   onSelectFormat: (format: PaperFormatId) => void;
+  selectedEngine?: EngineId;
+  onSelectEngine?: (engine: EngineId) => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
   onExportPdf: () => void;
@@ -81,6 +84,8 @@ export const CommandPaletteModal: React.FC<Props> = ({
   isTwoColumn,
   activeFormat,
   onSelectFormat,
+  selectedEngine = 'pdflatex',
+  onSelectEngine,
   theme,
   onToggleTheme,
   onExportPdf,
@@ -172,6 +177,33 @@ export const CommandPaletteModal: React.FC<Props> = ({
         icon: <ArrowRight size={13} color="#38bdf8" />,
         shortcut: 'Ctrl+Alt+J',
         onExecute: () => { onForwardSync(); onClose(); },
+      });
+    }
+
+    if (onSelectEngine) {
+      list.push({
+        id: 'engine-pdflatex',
+        category: 'Commands',
+        title: 'Switch Engine: pdfLaTeX',
+        subtitle: 'Standard TeX Live 2026 WebAssembly engine (recommended)',
+        icon: selectedEngine === 'pdflatex' ? <Check size={13} color="#10b981" /> : <Play size={13} color="#94a3b8" />,
+        onExecute: () => { onSelectEngine('pdflatex'); onClose(); },
+      });
+      list.push({
+        id: 'engine-xelatex',
+        category: 'Commands',
+        title: 'Switch Engine: XeLaTeX',
+        subtitle: 'Unicode and modern fontspec engine (XeTeX + dvipdfmx)',
+        icon: selectedEngine === 'xelatex' ? <Check size={13} color="#10b981" /> : <Play size={13} color="#94a3b8" />,
+        onExecute: () => { onSelectEngine('xelatex'); onClose(); },
+      });
+      list.push({
+        id: 'engine-lualatex',
+        category: 'Commands',
+        title: 'Switch Engine: LuaLaTeX',
+        subtitle: 'LuaHBTeX engine with programmable Lua scripting',
+        icon: selectedEngine === 'lualatex' ? <Check size={13} color="#10b981" /> : <Play size={13} color="#94a3b8" />,
+        onExecute: () => { onSelectEngine('lualatex'); onClose(); },
       });
     }
 
