@@ -53,7 +53,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   }
 
   // 2. Priority 2: Static files <= 25MB in deployment bundle
-  const isHeavyFile = key.endsWith('.data') || key === 'busytex.wasm';
+  const isHeavyFile = key === 'texlive-basic.data' || key === 'busytex.wasm';
   if (!isHeavyFile) {
     const staticResponse = await context.next();
     const contentType = staticResponse.headers.get('content-type') || '';
@@ -74,6 +74,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     const upstreamBase = (context.env?.TEEEX_ENGINE_BASE_URL || DEFAULT_UPSTREAM_BASE).replace(/\/+$/, '');
     const upstreamUrl = `${upstreamBase}/${key}`;
     const upstreamRes = await fetch(upstreamUrl, {
+      headers: {
+        'Accept-Encoding': 'identity',
+      },
       cf: {
         cacheTtl: 31536000,
         cacheEverything: true,
@@ -86,10 +89,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       headers.set('Cross-Origin-Resource-Policy', 'same-origin');
       headers.set('Access-Control-Allow-Origin', '*');
       headers.set('Content-Type', getContentType(key));
-      // Upstream GitHub Pages responses are often gzipped and transparently
-      // decompressed by Cloudflare's runtime fetch(). Never forward upstream
-      // 'content-encoding: gzip' or compressed 'content-length' headers to avoid
-      // net::ERR_CONTENT_DECODING_FAILED crashes inside browser Web Workers.
+      // Explicit 'Accept-Encoding: identity' forces upstream to serve exact uncompressed bytes.
+      // Forward the exact raw byte length so WebAssembly streaming and browsers know total size.
+      const rawLen = upstreamRes.headers.get('content-length');
+      if (rawLen) headers.set('Content-Length', rawLen);
 
       return new Response(upstreamRes.body, {
         status: upstreamRes.status,

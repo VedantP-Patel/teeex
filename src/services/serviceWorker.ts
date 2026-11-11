@@ -15,7 +15,7 @@ export interface EngineCacheStatus {
   cachedBytes: number;
 }
 
-const ENGINE_CACHE_NAME = 'teeex-engine-v1.4.0';
+export const ENGINE_CACHE_NAME = 'teeex-engine-v1.4.2';
 
 /**
  * Registers the root service worker (/sw.js) and requests persistent storage.
@@ -38,15 +38,29 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
       await registration.update();
     } catch {}
 
-    // Invalidate stale cached engine JS scripts in CacheStorage
+    // Invalidate stale or poisoned engine caches in CacheStorage
     if (typeof caches !== 'undefined') {
       try {
+        const cacheKeys = await caches.keys();
+        for (const k of cacheKeys) {
+          if (k.startsWith('teeex-engine-') && k !== ENGINE_CACHE_NAME) {
+            await caches.delete(k);
+          }
+        }
         const cache = await caches.open(ENGINE_CACHE_NAME);
         const pipelineResp = await cache.match('/core/busytex/busytex_pipeline.js');
         if (pipelineResp) {
           const text = await pipelineResp.clone().text();
           if (!text.includes('supported_drivers =')) {
             await cache.delete('/core/busytex/busytex_pipeline.js');
+          }
+        }
+        const wasmResp = await cache.match('/core/busytex/busytex.wasm');
+        if (wasmResp) {
+          const enc = wasmResp.headers.get('content-encoding');
+          const ct = wasmResp.headers.get('content-type') || '';
+          if (enc || ct.includes('text/html')) {
+            await cache.delete('/core/busytex/busytex.wasm');
           }
         }
       } catch {}

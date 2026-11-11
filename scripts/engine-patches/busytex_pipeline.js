@@ -151,6 +151,9 @@ class BusytexPipeline {
         this.data_package_resolver = new BusytexDataPackageResolver(data_packages_js, BusytexPipeline.texmf_system, texmf_local);
         this.wasm_module_promise = fetch(busytex_wasm).then(response => {
             if (!response.ok) throw new Error(`Failed to fetch WASM module: ${busytex_wasm} (HTTP ${response.status})`);
+            if (typeof postMessage === 'function') {
+                try { postMessage({ print: 'Downloading data... (30/100)' }); } catch (_) {}
+            }
             return WebAssembly.compileStreaming ? WebAssembly.compileStreaming(response) : response.arrayBuffer().then(WebAssembly.compile);
         });
         this.mem_header_size = 2 ** 26;
@@ -212,6 +215,9 @@ class BusytexPipeline {
 
     async reload_module(env, project_dir, data_packages_js = [], report_applet_versions = false) {
         const pkgs = Array.isArray(data_packages_js) ? data_packages_js : [];
+        if (typeof postMessage === 'function') {
+            try { postMessage({ print: 'Downloading data... (70/100)' }); } catch (_) {}
+        }
         const data_packages_js_promise = pkgs.map(dp => this.load_package(dp));
         const [em_module, wasm_module] = await Promise.all([
             this.em_module_promise,
@@ -252,7 +258,13 @@ class BusytexPipeline {
             instantiateWasm(imports, successCallback) {
                 WebAssembly.instantiate(wasm_module, imports)
                     .then(output => successCallback(WebAssembly.compileStreaming ? output : output.instance))
-                    .catch(err => { throw new Error('Error while initializing BusyTex!\n\n' + err.toString()); });
+                    .catch(err => {
+                        const msg = 'Error while initializing BusyTex WASM!\n\n' + (err.stack || err.toString());
+                        if (typeof postMessage === 'function') {
+                            try { postMessage({ exception: msg }); } catch (_) {}
+                        }
+                        throw new Error(msg);
+                    });
                 return {};
             },
 
@@ -290,11 +302,24 @@ class BusytexPipeline {
                     : typeof luahbtex !== 'undefined' ? luahbtex
                         : null;
         if (!moduleFactory) throw new Error('No BusyTeX module factory found.');
-        const initialized_module = await moduleFactory(Module);
+
+        let initialized_module;
+        try {
+            initialized_module = await moduleFactory(Module);
+        } catch (err) {
+            const errStr = err instanceof Error ? (err.stack || err.message) : String(err);
+            if (typeof postMessage === 'function') {
+                try { postMessage({ exception: 'BusyTeX Module initialization failed: ' + errStr }); } catch (_) {}
+            }
+            throw err;
+        }
 
         this._snapshot_mem_header(initialized_module);
 
         initialized_module.applet_versions = { pdftex: 'ready', xetex: 'ready', luahbtex: 'ready', bibtex8: 'ready' };
+        if (typeof postMessage === 'function') {
+            try { postMessage({ print: 'All downloads complete.' }); } catch (_) {}
+        }
         if (report_applet_versions && this.on_initialized) {
             this.on_initialized(initialized_module.applet_versions);
         }

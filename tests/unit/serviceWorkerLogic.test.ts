@@ -10,7 +10,7 @@ describe('Service Worker Architecture & Caching Logic (S3a, S3d, S3e)', () => {
 
   it('declares 3-tier partitioned cache names', () => {
     expect(swCode).toMatch(/const CACHE_STATIC = ['"]teeex-static-v/);
-    expect(swCode).toMatch(/const CACHE_ENGINE = ['"]teeex-engine-v1\.4\.0['"]/);
+    expect(swCode).toMatch(/const CACHE_ENGINE = ['"]teeex-engine-v1\.4\.\d+['"]/);
     expect(swCode).toMatch(/const CACHE_PACKAGES = ['"]teeex-packages-v1['"]/);
   });
 

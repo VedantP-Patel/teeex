@@ -14,20 +14,22 @@ interface GoldenSpec {
 
 const GOLDEN_DIGESTS: Record<string, GoldenSpec> = {
   'busytex_worker.js': {
-    bytes: [8258, 8870],
+    bytes: [8258, 8870, 8887],
     sha256: [
       '944f150cfa9b8282d06aa91b05fd9e82cc536c84f809f152d6beb4c358738e15',
       '318e70e92b54089ebbe526c64f64e074e067557f4f1718013252d4ca45fa4e82',
+      'f9f6d19ceecd8a1de5e1464f474dfa91f72d871ea0bd64608e264b5a727bd57b',
     ],
   },
   'busytex_pipeline.js': {
-    bytes: [28013, 29296, 29801, 30108, 30278],
+    bytes: [28013, 29296, 29801, 30108, 30278, 31384],
     sha256: [
       'ee62f299d5b210332d3e4c7804451721c6b9889c214410b818e9d7807385548c',
       '5b36545cd90aa46bb162d0e2fe4bcc60782c3444148e7acb77330bd24c58c46a',
       '741bdf9a4f8b2821c9e1b0d149e6037122a8be3cd6fe443ed51524ddd8c09aaf',
       '69d36e6b87b195935f9ed9134213deaa25f21f07f509e83ccaa99ed05aa506c9',
       'e8ee8b4aa09882eb5cb9f7b5288ebcff0773a73cca36729c392b53b2978143d2',
+      'fd9b55684778d3d87b14a95ef282f05f76c965316fda8bd4073631d61c8ce79c',
     ],
   },
   'busytex_biber.js': {

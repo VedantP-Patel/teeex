@@ -5,6 +5,7 @@ self.onerror = function (message, source, lineno, colno, error) {
                 (error?.stack ? `\nStack:\n${error.stack}` : '')
         });
     } catch (_) {}
+    return true;
 };
 
 self.onunhandledrejection = function (event) {

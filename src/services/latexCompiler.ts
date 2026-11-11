@@ -196,6 +196,8 @@ export class TexEngineService {
   private hasSettledBbl = new Map<string, boolean>();
   private loadedAuxProjects = new Set<string>();
 
+  private lastInitError = new Map<EngineId, { error: Error; timestamp: number }>();
+
   subscribe(listener: (status: EngineStatus) => void): () => void {
     this.listeners.add(listener);
     listener(this.status);
@@ -224,10 +226,22 @@ export class TexEngineService {
   }
 
   /**
+   * Explicitly clears initialization failures and retries engine priming.
+   */
+  async retryPrewarm(engine: EngineId = 'pdflatex'): Promise<BusyTexRunner> {
+    this.lastInitError.delete(engine);
+    this.initPromises.delete(engine);
+    this.registeredMissesByEngine.clear();
+    this.lastPreambleSig.clear();
+    return this.ensureRunner(engine);
+  }
+
+  /**
    * Clears transient package misses and preamble signatures.
    * Call when returning online so newly accessible network can resolve packages.
    */
   clearRegisteredMisses(): void {
+    this.lastInitError.clear();
     this.registeredMissesByEngine.clear();
     this.lastPreambleSig.clear();
   }
@@ -239,13 +253,26 @@ export class TexEngineService {
     const pending = this.initPromises.get(engine);
     if (pending) return pending;
 
+    // Fail-fast guard: If runner initialization failed within the last 15s,
+    // do not loop resetting phase: 'fetching' on every keystroke/autosave.
+    const lastErr = this.lastInitError.get(engine);
+    if (lastErr && Date.now() - lastErr.timestamp < 15000) {
+      throw lastErr.error;
+    }
+
     const promise = this.initialiseRunner(engine);
     this.initPromises.set(engine, promise);
 
     try {
-      return await promise;
+      const runner = await promise;
+      this.lastInitError.delete(engine);
+      return runner;
     } catch (error) {
       this.initPromises.delete(engine);
+      this.lastInitError.set(engine, {
+        error: error instanceof Error ? error : new Error(String(error)),
+        timestamp: Date.now(),
+      });
       throw error;
     }
   }
@@ -256,7 +283,7 @@ export class TexEngineService {
 
     this.setStatus({
       phase: 'fetching',
-      progress: 0,
+      progress: 5,
       engine,
       loadedBytes: 0,
       totalBytes: ESTIMATED_TOTAL_BYTES,

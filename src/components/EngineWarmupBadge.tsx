@@ -8,8 +8,9 @@ import {
   X,
   AlertCircle,
   DownloadCloud,
+  RotateCcw,
 } from 'lucide-react';
-import type { EngineStatus } from '../services/latexCompiler';
+import { texEngine, type EngineStatus } from '../services/latexCompiler';
 import { checkEngineCacheStatus, requestPersistentStorage, type EngineCacheStatus } from '../services/serviceWorker';
 import { usePwaInstall } from '../hooks/usePwaInstall';
 
@@ -24,6 +25,7 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact 
   const [cacheInfo, setCacheInfo] = useState<EngineCacheStatus | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [hasRequestedPersist, setHasRequestedPersist] = useState(false);
+  const [isPurging, setIsPurging] = useState(false);
   const { isInstallable, isInstalled, installApp } = usePwaInstall();
 
   useEffect(() => {
@@ -58,6 +60,35 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact 
     setIsVerifying(false);
   };
 
+  const handlePurgeAndRetry = async () => {
+    setIsPurging(true);
+    try {
+      if (typeof caches !== 'undefined') {
+        const keys = await caches.keys();
+        for (const key of keys) {
+          if (key.startsWith('teeex-engine-')) {
+            await caches.delete(key);
+          }
+        }
+      }
+      if (typeof indexedDB !== 'undefined') {
+        await new Promise<void>((resolve) => {
+          const req = indexedDB.deleteDatabase('EM_PRELOAD_CACHE');
+          req.onsuccess = () => resolve();
+          req.onerror = () => resolve();
+          req.onblocked = () => resolve();
+        });
+      }
+      const next = await checkEngineCacheStatus();
+      setCacheInfo(next);
+      texEngine.retryPrewarm(status.engine || 'pdflatex');
+    } catch (err) {
+      console.error('Failed to purge engine cache and retry:', err);
+    } finally {
+      setIsPurging(false);
+    }
+  };
+
   const isEngineReady = status.phase === 'ready' || Boolean(cacheInfo?.isEngineCached);
   const isPersisted = Boolean(cacheInfo?.persistedStorage);
 
@@ -70,7 +101,30 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact 
     return modalContent;
   };
 
-  // 1. Fetching / Downloading State
+  // 1. Failed Initialization State
+  if (status.phase === 'failed') {
+    return (
+      <div className="engine-warmup-pill-container">
+        <button
+          type="button"
+          onClick={handleToggleOpen}
+          className="engine-warmup-pill failed"
+          style={{ borderColor: 'rgba(244, 63, 94, 0.4)', color: '#fb7185' }}
+          title={`TeX engine failed to initialize: ${status.error || 'Click to view telemetry'}`}
+          aria-label="TeX Engine Failed"
+        >
+          <AlertCircle className="engine-warmup-icon text-rose-400" size={12} />
+          <span className="engine-warmup-text">
+            Engine Failed
+          </span>
+        </button>
+
+        {renderModalPortal()}
+      </div>
+    );
+  }
+
+  // 2. Fetching / Downloading State
   if (status.phase === 'fetching') {
     return (
       <div className="engine-warmup-pill-container">
@@ -224,6 +278,40 @@ export const EngineWarmupBadge: React.FC<Props> = ({ status, isOffline, compact 
                 </div>
               </div>
             )}
+
+            {status.error && (
+              <div
+                style={{
+                  padding: '8px 12px',
+                  background: 'rgba(244, 63, 94, 0.1)',
+                  border: '1px solid rgba(244, 63, 94, 0.3)',
+                  borderRadius: 8,
+                  fontSize: 11.5,
+                  lineHeight: 1.45,
+                  color: '#fda4af',
+                }}
+              >
+                <div style={{ fontWeight: 600, color: '#fb7185', marginBottom: 2 }}>
+                  Initialization Diagnostic:
+                </div>
+                <div style={{ fontFamily: 'monospace', wordBreak: 'break-word' }}>
+                  {status.error}
+                </div>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handlePurgeAndRetry}
+              disabled={isPurging}
+              className="engine-purge-btn"
+              title="Deletes locally cached engine binaries and restarts initialization"
+            >
+              <RotateCcw size={13} className={isPurging ? 'engine-spin' : ''} />
+              <span>
+                {isPurging ? 'Purging Local Caches & Restarting...' : 'Purge Engine Cache & Retry Priming'}
+              </span>
+            </button>
 
             <div className="engine-telemetry-tip">
               <p>

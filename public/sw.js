@@ -10,8 +10,8 @@
  *   Guarded against HTML response poisoning; capped at 300 entries with LRU eviction.
  */
 
-const CACHE_STATIC = 'teeex-static-v6-20261018';
-const CACHE_ENGINE = 'teeex-engine-v1.4.0';
+const CACHE_STATIC = 'teeex-static-v7-20261028';
+const CACHE_ENGINE = 'teeex-engine-v1.4.2';
 const CACHE_PACKAGES = 'teeex-packages-v1';
 const MAX_PACKAGE_ENTRIES = 300;
 
@@ -132,14 +132,15 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. TeX Engine Assets (/core/busytex/*): Network-First for JS scripts, Cache-First for heavy binaries
+  // 2. TeX Engine Assets (/core/busytex/*): Network-First for JS scripts, Cache-First for WASM binaries
   if (url.origin === self.location.origin && url.pathname.startsWith('/core/busytex/')) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE_ENGINE);
         const isScript = url.pathname.endsWith('.js');
+        const isDataPkg = url.pathname.endsWith('.data');
 
-        // Fast-path: Network-First for lightweight JS scripts so patches take effect immediately
+        // Fast-path 1: Network-First for lightweight JS scripts so patches take effect immediately
         if (isScript) {
           try {
             const res = await fetch(request);
@@ -155,14 +156,35 @@ self.addEventListener('fetch', (event) => {
           }
         }
 
+        // Fast-path 2: Do NOT cache .data packages in CacheStorage.
+        // Emscripten's texlive-basic.js manages chunked persistence directly into IndexedDB ('EM_PRELOAD_CACHE').
+        // Duplicating it into CacheStorage wastes ~180MB of device storage and risks stream lock / clone exhaustion.
+        if (isDataPkg) {
+          try {
+            return await fetch(request);
+          } catch (_err) {
+            return new Response('Offline: Engine package unavailable', { status: 503 });
+          }
+        }
+
+        // Fast-path 3: Cache-First for heavy WASM binary (busytex.wasm, biber.wasm)
         const cached = await cache.match(request);
-        if (cached) return cached;
+        if (cached) {
+          const enc = cached.headers.get('content-encoding');
+          const ct = cached.headers.get('content-type') || '';
+          // Ensure cached WASM is not a poisoned HTML fallback or compressed stream
+          if (!enc && !ct.includes('text/html')) {
+            return cached;
+          }
+          await cache.delete(request);
+        }
 
         try {
           const res = await fetch(request);
           const ct = res.headers.get('content-type') || '';
-          // Guard: Never cache SPA HTML fallback responses as engine binaries
-          if (res.ok && !ct.includes('text/html')) {
+          const enc = res.headers.get('content-encoding');
+          // Guard: Only cache valid uncompressed WASM binaries, never HTML fallbacks or gzipped responses
+          if (res.ok && !ct.includes('text/html') && !enc) {
             cache.put(request, res.clone()).catch(() => {});
             try {
               swChannel?.postMessage({ type: 'ENGINE_ASSET_CACHED', url: url.pathname });
