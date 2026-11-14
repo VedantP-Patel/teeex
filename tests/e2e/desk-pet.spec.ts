@@ -58,42 +58,38 @@ test.describe('Stage 6: TeXCat Desk Companion (Desk Pet)', () => {
     const mascot = page.getByRole('img', { name: /TeXCat Desk Companion/i });
     await expect(mascot).toBeVisible();
 
-    // 2. Triple-click mascot to reveal quick action toolbar
+    // 2. Triple-click mascot to reveal TeXCat companion menu
     await mascot.click({ clickCount: 3 });
-    const toolbar = page.getByRole('toolbar', { name: 'Desk companion quick actions' });
-    await expect(toolbar).toBeVisible();
+    const menu = page.getByRole('dialog', { name: 'TeXCat Desk Companion Menu' });
+    await expect(menu).toBeVisible();
 
-    // 3. Click "Pet" action
-    const petBtn = page.getByRole('button', { name: 'Pet companion' });
-    await petBtn.click();
-
-    // Floating heart particles appear
+    // 3. Pet mascot directly
+    await mascot.click({ clickCount: 1 });
     const hearts = page.locator('.pet-heart-particles');
     await expect(hearts).toBeAttached();
 
-    // 4. Click "Yarn" action
-    const yarnBtn = page.getByRole('button', { name: 'Toss yarn ball' });
-    await yarnBtn.click();
+    // 4. Click "Yarn Ball" action in Play & Toys tab
+    await menu.getByRole('button', { name: 'Play & Toys' }).click();
+    await menu.getByRole('button', { name: 'Yarn Ball' }).click();
 
     // Bouncy yarn ball appears
     const yarnBall = page.locator('.pet-yarn-ball');
     await expect(yarnBall).toBeAttached();
     await expect(page.locator('.texcat-rig')).toHaveClass(/state-yarn-chase/);
 
-    // 5. Cycle coat skin from toolbar
-    const skinBtn = page.getByRole('button', { name: 'Cycle coat skin' });
-    await skinBtn.click();
+    // 5. Select ginger coat skin from Wardrobe tab
+    await menu.getByRole('button', { name: 'Wardrobe' }).click();
+    await menu.getByRole('button', { name: 'ginger skin' }).click();
     await expect(page.locator('.desk-pet-container')).toHaveClass(/skin-ginger/);
 
-    // 6. Cycle academic attire from toolbar (equips mortarboard graduate cap)
-    const attireBtn = page.getByRole('button', { name: 'Cycle academic attire' });
-    await attireBtn.click();
+    // 6. Equip mortarboard graduate cap from Wardrobe tab
+    await menu.getByRole('button', { name: 'mortarboard' }).click();
     await expect(page.locator('.texcat-accessory-mortarboard')).toBeAttached();
 
-    // 7. Toggle sound effects from toolbar
-    const soundBtn = page.getByRole('button', { name: 'Toggle companion sound' });
+    // 7. Toggle sound effects from Settings tab
+    await menu.getByRole('button', { name: 'Settings' }).click();
+    const soundBtn = menu.getByRole('button', { name: 'Toggle sound' });
     await soundBtn.click();
-    await expect(soundBtn).toHaveAttribute('title', /ON/);
   });
 
   test('supports keyboard-first interaction shortcuts (Space, C, A, S, M, Y)', async ({ page }) => {

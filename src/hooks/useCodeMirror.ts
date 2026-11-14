@@ -148,22 +148,7 @@ export function useCodeMirror({
         }
       }
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reconfigure Yjs collaboration extension when active ytext or awareness changes (e.g. file tab switch)
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-
-    const collabExtension =
-      ytext && awareness
-        ? yCollab(ytext, awareness, { undoManager: undoManager || false })
-        : [];
-
-    view.dispatch({
-      effects: collabCompartment.reconfigure(collabExtension),
-    });
-  }, [ytext, awareness, undoManager]);
+  }, [ytext, awareness, undoManager]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync external code changes (tab switch, formatting, quick-fix) with minimal diff
   useEffect(() => {

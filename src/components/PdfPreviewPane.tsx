@@ -834,7 +834,7 @@ export function PdfPreviewPane({
           >
             <ChevronLeft size={14} />
           </button>
-          <div className="pdf-page-jumper">
+          <div className="pdf-page-jumper pdf-page-indicator">
             <input
               type="number"
               min={1}

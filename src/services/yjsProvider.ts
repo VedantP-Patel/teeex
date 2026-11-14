@@ -42,8 +42,11 @@ export class SupabaseYjsProvider {
   private lastAwarenessBroadcastTime = 0;
   private pendingAwarenessTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingDocSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private idleCompactionTimer: ReturnType<typeof setTimeout> | null = null;
   private isChannelSubscribed = false;
   private pendingWireMessages: YjsWireMessage[] = [];
+  private lastSavedStateVector = '';
+  private cloudStateVersion = 1;
   private onDocSaveCallback?: (files: ProjectFile[]) => void;
 
   constructor(
@@ -89,6 +92,7 @@ export class SupabaseYjsProvider {
 
       this.broadcastUpdate(update);
       this.scheduleDocSave();
+      this.scheduleIdleCompaction();
     });
 
     // 3. Set up Awareness local change listener
@@ -558,6 +562,44 @@ export class SupabaseYjsProvider {
     }
   }
 
+  private scheduleIdleCompaction() {
+    if (this.idleCompactionTimer) clearTimeout(this.idleCompactionTimer);
+    this.idleCompactionTimer = setTimeout(() => {
+      this.idleCompactionTimer = null;
+      void this.compactSnapshotIfLeader();
+    }, 30000);
+  }
+
+  private async compactSnapshotIfLeader() {
+    if (this.isDestroyed) return;
+    // Elect lowest clientID among active Awareness peers as single compactor
+    const clientIds = Array.from(this.awareness.getStates().keys());
+    const leaderId = clientIds.length > 0 ? Math.min(...clientIds) : this.ydoc.clientID;
+    if (leaderId !== this.ydoc.clientID) return;
+
+    const supabase = getSupabaseClient(this.shareToken);
+    if (!supabase) return;
+    const uid = await getAuthUid();
+    if (!uid) return;
+
+    try {
+      const compactedSnapshot = buffer.toBase64(Y.encodeStateAsUpdate(this.ydoc));
+      const stateVector = buffer.toBase64(Y.encodeStateVector(this.ydoc));
+      const { data, error } = await supabase.rpc('compact_project_crdt_state', {
+        p_project_id: this.projectId,
+        p_compacted_snapshot: compactedSnapshot,
+        p_state_vector: stateVector,
+        p_expected_version: this.cloudStateVersion,
+      });
+      if (!error && typeof data === 'number') {
+        this.cloudStateVersion = data;
+        this.lastSavedStateVector = stateVector;
+      }
+    } catch {
+      // Non-fatal: falls back cleanly if 0005 RPC is not yet applied
+    }
+  }
+
   public async saveSnapshotToCloud() {
     const supabase = getSupabaseClient(this.shareToken);
     if (!supabase) return;
@@ -567,10 +609,12 @@ export class SupabaseYjsProvider {
     if (!uid && (!this.shareToken || !this.shareToken.startsWith('ed_'))) return;
 
     try {
-      const snapshot = buffer.toBase64(Y.encodeStateAsUpdate(this.ydoc));
       const stateVector = buffer.toBase64(Y.encodeStateVector(this.ydoc));
+      if (stateVector === this.lastSavedStateVector) return;
 
-      await supabase.from('project_crdt_states').upsert(
+      const snapshot = buffer.toBase64(Y.encodeStateAsUpdate(this.ydoc));
+
+      const { error } = await supabase.from('project_crdt_states').upsert(
         {
           project_id: this.projectId,
           snapshot,
@@ -580,8 +624,10 @@ export class SupabaseYjsProvider {
         },
         { onConflict: 'project_id' }
       );
+      if (!error) {
+        this.lastSavedStateVector = stateVector;
+      }
     } catch (err) {
-      // Quiet fail if table doesn't exist yet in remote Supabase
       console.warn('[SupabaseYjsProvider] Cloud snapshot save notice:', err);
     }
   }
@@ -593,13 +639,19 @@ export class SupabaseYjsProvider {
     try {
       const { data, error } = await supabase
         .from('project_crdt_states')
-        .select('snapshot')
+        .select('snapshot, state_vector, state_version')
         .eq('project_id', this.projectId)
         .maybeSingle();
 
       if (!error && data && data.snapshot) {
         const update = buffer.fromBase64(data.snapshot);
         Y.applyUpdate(this.ydoc, update, this);
+        if (typeof data.state_vector === 'string') {
+          this.lastSavedStateVector = data.state_vector;
+        }
+        if (typeof data.state_version === 'number') {
+          this.cloudStateVersion = data.state_version;
+        }
         return true;
       }
     } catch (err) {
@@ -624,6 +676,10 @@ export class SupabaseYjsProvider {
     if (this.pendingDocSaveTimer) {
       clearTimeout(this.pendingDocSaveTimer);
       this.pendingDocSaveTimer = null;
+    }
+    if (this.idleCompactionTimer) {
+      clearTimeout(this.idleCompactionTimer);
+      this.idleCompactionTimer = null;
     }
 
     try {

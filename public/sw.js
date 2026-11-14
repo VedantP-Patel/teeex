@@ -10,7 +10,7 @@
  *   Guarded against HTML response poisoning; capped at 300 entries with LRU eviction.
  */
 
-const CACHE_STATIC = 'teeex-static-v7-20261028';
+const CACHE_STATIC = 'teeex-static-v8-20261114';
 const CACHE_ENGINE = 'teeex-engine-v1.4.2';
 const CACHE_PACKAGES = 'teeex-packages-v1';
 const MAX_PACKAGE_ENTRIES = 300;
@@ -23,17 +23,21 @@ const PRECACHE_STATIC_URLS = [
   '/packages/booktabs.sty',
   '/packages/microtype.sty',
   '/packages/cite.sty',
+  '/packages/enumitem.sty',
+  '/packages/fancyhdr.sty',
+  '/packages/listings.sty',
+  '/packages/multirow.sty',
+  '/packages/xcolor.sty',
 ];
-
 let swChannel = null;
 try {
   swChannel = new BroadcastChannel('teeex_sw_channel');
-} catch {}
+} catch { }
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_STATIC).then((cache) => cache.addAll(PRECACHE_STATIC_URLS).catch(() => {}))
+    caches.open(CACHE_STATIC).then((cache) => cache.addAll(PRECACHE_STATIC_URLS).catch(() => { }))
   );
 });
 
@@ -46,26 +50,41 @@ self.addEventListener('activate', (event) => {
           .filter((k) => k !== CACHE_STATIC && k !== CACHE_ENGINE && k !== CACHE_PACKAGES)
           .map((k) => caches.delete(k))
       );
+      if (self.registration?.navigationPreload) {
+        await self.registration.navigationPreload.enable().catch(() => { });
+      }
       // Evict stale pipeline JS script from CACHE_ENGINE so fresh patched file is used
       try {
         const engineCache = await caches.open(CACHE_ENGINE);
         await engineCache.delete('/core/busytex/busytex_pipeline.js');
-      } catch {}
+      } catch { }
       await self.clients.claim();
     })()
   );
 });
+
+async function hasEmPreloadData() {
+  if (typeof indexedDB === 'undefined') return false;
+  try {
+    if (typeof indexedDB.databases === 'function') {
+      const dbs = await indexedDB.databases();
+      return dbs.some((d) => d.name && d.name.includes('EM_PRELOAD_CACHE'));
+    }
+  } catch { }
+  return false;
+}
 
 self.addEventListener('message', async (event) => {
   if (event.data?.type === 'GET_ENGINE_STATUS') {
     try {
       const cache = await caches.open(CACHE_ENGINE);
       const wasm = await cache.match('/core/busytex/busytex.wasm');
-      const data = await cache.match('/core/busytex/texlive-basic.data');
+      const dataInCache = await cache.match('/core/busytex/texlive-basic.data');
+      const hasData = Boolean(dataInCache) || (await hasEmPreloadData());
       event.ports?.[0]?.postMessage({
-        isCached: Boolean(wasm && data),
+        isCached: Boolean(wasm && hasData),
         hasWasm: Boolean(wasm),
-        hasData: Boolean(data),
+        hasData,
       });
     } catch {
       event.ports?.[0]?.postMessage({ isCached: false });
@@ -111,7 +130,7 @@ self.addEventListener('fetch', (event) => {
           clearTimeout(timeoutId);
           if (networkRes && networkRes.ok) {
             const cache = await caches.open(CACHE_STATIC);
-            cache.put(request, networkRes.clone()).catch(() => {});
+            cache.put(request, networkRes.clone()).catch(() => { });
             return networkRes;
           }
         } catch (_err) {
@@ -146,7 +165,7 @@ self.addEventListener('fetch', (event) => {
             const res = await fetch(request);
             const ct = res.headers.get('content-type') || '';
             if (res.ok && !ct.includes('text/html')) {
-              cache.put(request, res.clone()).catch(() => {});
+              cache.put(request, res.clone()).catch(() => { });
             }
             return res;
           } catch {
@@ -185,10 +204,10 @@ self.addEventListener('fetch', (event) => {
           const enc = res.headers.get('content-encoding');
           // Guard: Only cache valid uncompressed WASM binaries, never HTML fallbacks or gzipped responses
           if (res.ok && !ct.includes('text/html') && !enc) {
-            cache.put(request, res.clone()).catch(() => {});
+            cache.put(request, res.clone()).catch(() => { });
             try {
               swChannel?.postMessage({ type: 'ENGINE_ASSET_CACHED', url: url.pathname });
-            } catch {}
+            } catch { }
           }
           return res;
         } catch (_err) {
@@ -215,7 +234,7 @@ self.addEventListener('fetch', (event) => {
           const ct = res.headers.get('content-type') || '';
           // Guard: Never cache 404 HTML fallback responses into TeX package cache
           if (res.ok && !ct.includes('text/html')) {
-            cache.put(request, res.clone()).then(() => trimCache(cache, MAX_PACKAGE_ENTRIES)).catch(() => {});
+            cache.put(request, res.clone()).then(() => trimCache(cache, MAX_PACKAGE_ENTRIES)).catch(() => { });
           }
           return res;
         } catch (_err) {
@@ -242,7 +261,7 @@ self.addEventListener('fetch', (event) => {
         try {
           const res = await fetch(request);
           if (res.ok) {
-            cache.put(request, res.clone()).catch(() => {});
+            cache.put(request, res.clone()).catch(() => { });
           }
           return res;
         } catch (_err) {
@@ -261,7 +280,7 @@ self.addEventListener('fetch', (event) => {
         const cached = await cache.match(request);
         const netFetch = fetch(request)
           .then((res) => {
-            if (res.ok) cache.put(request, res.clone()).catch(() => {});
+            if (res.ok) cache.put(request, res.clone()).catch(() => { });
             return res;
           })
           .catch(() => cached);

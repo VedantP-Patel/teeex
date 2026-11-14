@@ -51,6 +51,7 @@ test.describe('Stage 5 — Perceptual Differential & Project Experience', () => 
       .first();
 
     await expect(canvas).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(300);
 
     // Capture two consecutive raster snapshots
     const snap1Buffer = await canvas.screenshot();

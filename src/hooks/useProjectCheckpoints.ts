@@ -16,7 +16,7 @@ import {
   hydrateCheckpointsFromOffline,
   createAutoSaveCheckpointIfNeeded,
 } from '../services/checkpointsService';
-import { isSupabaseConnected } from '../services/supabaseClient';
+import { getSupabaseClient, isSupabaseConnected } from '../services/supabaseClient';
 import { projectStore, useProjectStore } from '../stores/projectStore';
 import type { UserProfile, ProjectFile } from '../types/latex';
 
@@ -54,7 +54,7 @@ export function useProjectCheckpoints({
           setCheckpoints(offlineCps);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
 
     if (isSupabaseConnected()) {
       fetchProjectCheckpointsFromCloud(activeProjectId)
@@ -63,7 +63,7 @@ export function useProjectCheckpoints({
             setCheckpoints(res.checkpoints);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     }
   }, [activeProjectId, currentUser?.fullName, authorName]);
 
@@ -105,6 +105,25 @@ export function useProjectCheckpoints({
       setActiveBranchState(getActiveBranch(activeProjectId));
       setProjectBranches(getProjectBranches(activeProjectId));
     });
+
+    const sb = isSupabaseConnected() ? getSupabaseClient() : null;
+    if (sb && activeProjectId) {
+      void sb
+        .from('project_branches')
+        .select('name')
+        .eq('project_id', activeProjectId)
+        .then(({ data, error }: { data: Array<{ name: string }> | null; error: unknown }) => {
+          if (error || !data || data.length === 0) return;
+          const local = getProjectBranches(activeProjectId);
+          const merged = Array.from(new Set(['main', ...local, ...data.map((r) => r.name)]));
+          for (const b of data) {
+            if (!local.includes(b.name)) {
+              createBranch(activeProjectId, b.name);
+            }
+          }
+          setProjectBranches(merged);
+        });
+    }
   }, [activeProjectId]);
 
   const handleSwitchBranch = useCallback((branchName: string, checkoutHead = false) => {
@@ -123,11 +142,21 @@ export function useProjectCheckpoints({
   }, [activeProjectId, onToast, setFiles]);
 
   const handleCreateBranch = useCallback((branchName: string) => {
+    const normalized = branchName.trim().replace(/\s+/g, '-').toLowerCase();
     const res = createBranch(activeProjectId, branchName);
     if (res.success) {
       const updated = getProjectBranches(activeProjectId);
       setProjectBranches(updated);
-      setActiveBranchState(branchName.trim().replace(/\s+/g, '-').toLowerCase());
+      setActiveBranchState(normalized);
+      const sb = isSupabaseConnected() ? getSupabaseClient() : null;
+      if (sb && activeProjectId) {
+        void sb
+          .from('project_branches')
+          .upsert(
+            { project_id: activeProjectId, name: normalized, updated_at: new Date().toISOString() },
+            { onConflict: 'project_id,name' }
+          );
+      }
       if (onToast) onToast(`Created and switched to branch "${branchName}"`);
     } else {
       if (onToast) onToast(`Failed to create branch: ${res.error || 'Error'}`);
@@ -138,6 +167,14 @@ export function useProjectCheckpoints({
     const res = deleteBranch(activeProjectId, branchName);
     if (res.success) {
       setProjectBranches(getProjectBranches(activeProjectId));
+      const sb = isSupabaseConnected() ? getSupabaseClient() : null;
+      if (sb && activeProjectId) {
+        void sb
+          .from('project_branches')
+          .delete()
+          .eq('project_id', activeProjectId)
+          .eq('name', branchName);
+      }
       if (onToast) onToast(`Deleted branch "${branchName}"`);
     } else {
       if (onToast) onToast(`Failed to delete branch: ${res.error || 'Error'}`);
@@ -215,7 +252,7 @@ export function useProjectCheckpoints({
         setCheckpoints(updated);
         if (onToast) onToast('Checkpoint deleted');
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [activeProjectId, onToast]);
 
   const handleSyncCheckpointsCloud = useCallback(() => {

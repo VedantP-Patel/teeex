@@ -102,6 +102,7 @@ test.describe('Stage 7: Real Yjs CRDT Multi-User Collaboration', () => {
       await expect(shareBtn2).toBeVisible();
 
       // 4. Alice types collaborative text in Page 1
+      await page1.bringToFront();
       await editor1.click();
       await page1.keyboard.press('ControlOrMeta+End');
       await page1.keyboard.type('\n% CRDT Collaboration Test: Hello Bob from Alice!\n');
@@ -111,9 +112,12 @@ test.describe('Stage 7: Real Yjs CRDT Multi-User Collaboration', () => {
       await expect(editor2).toContainText('CRDT Collaboration Test: Hello Bob from Alice!', { timeout: 15_000 });
 
       // 6. Bob types a response in Page 2
+      await page2.bringToFront();
       await editor2.click();
       await page2.keyboard.press('ControlOrMeta+End');
       await page2.keyboard.type('% Response from Bob: Real-time math received!\n');
+      await expect(editor2).toContainText('Response from Bob: Real-time math received!', { timeout: 10_000 });
+
 
       // 7. Verify Alice in Page 1 receives Bob's edits without clobbering
       await expect(editor1).toContainText('Response from Bob: Real-time math received!', { timeout: 15_000 });

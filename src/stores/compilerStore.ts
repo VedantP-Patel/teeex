@@ -24,8 +24,24 @@ const initialState: CompilerState = {
 
 export const compilerStore = createStore<CompilerState>(initialState);
 
+let pendingState: Partial<CompilerState> | null = null;
+let rafId: number | null = null;
+
 export function setCompilerState(partial: Partial<CompilerState>): void {
-  compilerStore.setState(partial);
+  if (typeof requestAnimationFrame === 'undefined') {
+    compilerStore.setState(partial);
+    return;
+  }
+
+  pendingState = pendingState ? { ...pendingState, ...partial } : partial;
+  if (rafId !== null) return;
+
+  rafId = requestAnimationFrame(() => {
+    const next = pendingState;
+    pendingState = null;
+    rafId = null;
+    if (next) compilerStore.setState(next);
+  });
 }
 
 export function useCompilerStore<T>(selector: (state: CompilerState) => T): T {

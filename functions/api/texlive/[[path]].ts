@@ -1,10 +1,8 @@
 // Cloudflare Pages Function: /api/texlive/*
-// Edge proxy with global CDN caching for TeX Live on-demand packages and font metrics.
+// Edge proxy with global CDN Cache API for TeX Live on-demand packages and font metrics.
 
 const UPSTREAM_TEXLIVE_BASE = 'https://texlive2026.texlyre.org';
 
-// Exact whitelist of static files actually present in /public/packages/
-// Prevents SPA fallback (/* -> /index.html 200) from returning HTML as a TeX package!
 const BUNDLED_STATIC_FILES = new Set([
   'IEEEtran.cls',
   'acmart.cls',
@@ -59,11 +57,36 @@ const BUNDLED_STATIC_FILES = new Set([
   'xcolor.sty',
 ]);
 
+function resolveTexContentType(path: string): string | null {
+  if (
+    path.endsWith('.cls') ||
+    path.endsWith('.sty') ||
+    path.endsWith('.tex') ||
+    path.endsWith('.def') ||
+    path.endsWith('.fd') ||
+    path.endsWith('.bst')
+  ) {
+    return 'text/plain; charset=utf-8';
+  }
+  if (path.endsWith('.tfm')) {
+    return 'application/x-tex-tfm';
+  }
+  if (
+    path.endsWith('.vf') ||
+    path.endsWith('.pfb') ||
+    path.endsWith('.otf') ||
+    path.endsWith('.ttf')
+  ) {
+    return 'application/octet-stream';
+  }
+  return null;
+}
+
 export const onRequest: PagesFunction = async (context) => {
   const url = new URL(context.request.url);
   const subpath = url.pathname.replace(/^\/api\/texlive\//, '');
 
-  if (!subpath) {
+  if (!subpath || subpath.includes('..')) {
     return new Response('Not Found', { status: 404 });
   }
 
@@ -79,7 +102,24 @@ export const onRequest: PagesFunction = async (context) => {
     });
   }
 
-  // 1. Only serve from local /packages/ if the file is genuinely in BUNDLED_STATIC_FILES
+  if (context.request.method !== 'GET' && context.request.method !== 'HEAD') {
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  const edgeCache = (caches as unknown as { default?: Cache }).default;
+  const cacheKey = new Request(url.toString(), { method: 'GET' });
+
+  // 0. Instant Cloudflare PoP Edge Cache check
+  if (edgeCache) {
+    const cachedHit = await edgeCache.match(cacheKey);
+    if (cachedHit) {
+      return context.request.method === 'HEAD'
+        ? new Response(null, { status: cachedHit.status, headers: cachedHit.headers })
+        : cachedHit;
+    }
+  }
+
+  // 1. Serve from local /packages/ if present in BUNDLED_STATIC_FILES
   const filename = decodeURIComponent(subpath.slice(subpath.lastIndexOf('/') + 1));
   if (filename && BUNDLED_STATIC_FILES.has(filename)) {
     try {
@@ -92,25 +132,23 @@ export const onRequest: PagesFunction = async (context) => {
         headers.set('Access-Control-Allow-Origin', '*');
         headers.set('Access-Control-Expose-Headers', 'fileid, Content-Length');
         headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
-        if (
-          filename.endsWith('.cls') ||
-          filename.endsWith('.sty') ||
-          filename.endsWith('.tex') ||
-          filename.endsWith('.def') ||
-          filename.endsWith('.fd')
-        ) {
-          headers.set('Content-Type', 'text/plain; charset=utf-8');
-        } else if (filename.endsWith('.tfm')) {
-          headers.set('Content-Type', 'application/x-tex-tfm');
+        const forcedCt = resolveTexContentType(filename);
+        if (forcedCt) headers.set('Content-Type', forcedCt);
+
+        const response = new Response(localRes.body, { status: 200, headers });
+        if (edgeCache) {
+          context.waitUntil(edgeCache.put(cacheKey, response.clone()));
         }
-        return new Response(localRes.body, { headers });
+        return context.request.method === 'HEAD'
+          ? new Response(null, { status: 200, headers })
+          : response;
       }
     } catch {
       // Fall through to upstream
     }
   }
 
-  // 2. Fetch from upstream TeX Live server with Cloudflare Edge Cache
+  // 2. Fetch from upstream TeX Live server with HTML poison guard + Edge Cache persistence
   const upstreamBase =
     ((context.env as Record<string, unknown>)?.VITE_TEXLIVE_REMOTE_ENDPOINT as string) ||
     ((context.env as Record<string, unknown>)?.TEXLIVE_REMOTE_ENDPOINT as string) ||
@@ -130,45 +168,40 @@ export const onRequest: PagesFunction = async (context) => {
       },
     });
 
-    if (upstreamRes.ok && upstreamRes.body) {
+    const upstreamCt = upstreamRes.headers.get('content-type') || '';
+    if (upstreamRes.ok && upstreamRes.body && !upstreamCt.includes('text/html')) {
       const headers = new Headers(upstreamRes.headers);
       headers.set('Cache-Control', 'public, max-age=31536000, immutable');
       headers.set('Access-Control-Allow-Origin', '*');
       headers.set('Access-Control-Expose-Headers', 'fileid, Content-Length');
       headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+      const forcedCt = resolveTexContentType(subpath);
+      if (forcedCt) headers.set('Content-Type', forcedCt);
 
-      if (
-        subpath.endsWith('.cls') ||
-        subpath.endsWith('.sty') ||
-        subpath.endsWith('.tex') ||
-        subpath.endsWith('.def') ||
-        subpath.endsWith('.fd')
-      ) {
-        headers.set('Content-Type', 'text/plain; charset=utf-8');
-      } else if (
-        subpath.endsWith('.tfm') ||
-        subpath.endsWith('.vf') ||
-        subpath.endsWith('.pfb') ||
-        subpath.endsWith('.otf') ||
-        subpath.endsWith('.ttf')
-      ) {
-        headers.set('Content-Type', 'application/octet-stream');
-      }
-
-      return new Response(upstreamRes.body, {
+      const response = new Response(upstreamRes.body, {
         status: upstreamRes.status,
         headers,
       });
+      if (edgeCache) {
+        context.waitUntil(edgeCache.put(cacheKey, response.clone()));
+      }
+      return context.request.method === 'HEAD'
+        ? new Response(null, { status: upstreamRes.status, headers })
+        : response;
     }
 
     if (upstreamRes.status === 404) {
-      return new Response('Not Found', {
+      const notFoundRes = new Response('Not Found', {
         status: 404,
         headers: {
           'Cache-Control': 'public, max-age=86400',
           'Access-Control-Allow-Origin': '*',
         },
       });
+      if (edgeCache) {
+        context.waitUntil(edgeCache.put(cacheKey, notFoundRes.clone()));
+      }
+      return notFoundRes;
     }
 
     return new Response(`Upstream error: ${upstreamRes.statusText}`, {

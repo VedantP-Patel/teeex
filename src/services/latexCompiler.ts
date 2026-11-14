@@ -1,5 +1,5 @@
 /**
- * Teeex — High-Speed TeX Engine Service with Instant Pass-1 Streaming.
+ * Teeex — High-Speed TeX Engine Service with Instant Pass-1 Streaming & Self-Healing Packages.
  */
 
 import { BusyTexRunner, LuaLatex, PdfLatex, XeLatex } from 'texlyre-busytex';
@@ -24,6 +24,14 @@ import {
   saveAuxiliaryArtifacts,
   type AuxiliaryFileEntry,
 } from './auxiliaryCache';
+import {
+  DUMMY_1X1_PNG,
+  DUMMY_1X1_JPG,
+  DUMMY_1X1_PDF,
+  extractReferencedImages,
+  getPlaceholderGraphicBytes,
+  isGraphicFilename,
+} from './placeholderGraphics';
 
 export { resolveEntryFile } from './texProject';
 
@@ -76,13 +84,6 @@ export interface CompileOutcome {
 
 const ENGINE_BASE_PATH = '/core/busytex';
 const DEFAULT_REMOTE_ENDPOINT = 'https://texlive2026.texlyre.org';
-
-/**
- * Upper bound on passes per compile (one initial + reruns). LaTeX resolves most
- * cross-reference work in two passes; a third covers a table of contents that
- * shifts pagination. Beyond that a document is either unstable or pathological,
- * and spending more passes costs seconds without converging.
- */
 const MAX_COMPILE_PASSES = 3;
 
 function remoteEndpoint(): string | undefined {
@@ -98,6 +99,15 @@ function remoteEndpoint(): string | undefined {
   return DEFAULT_REMOTE_ENDPOINT;
 }
 
+function fastFnv1a(str: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${str.length}:${(hash >>> 0).toString(36)}`;
+}
+
 async function sha256Hex(str: string): Promise<string> {
   if (typeof crypto !== 'undefined' && crypto.subtle) {
     const data = new TextEncoder().encode(str);
@@ -106,26 +116,9 @@ async function sha256Hex(str: string): Promise<string> {
       .map((b) => b.toString(16).padStart(2, '0'))
       .join('');
   }
-  let hash = 5381;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
-  }
-  return (hash >>> 0).toString(36);
+  return fastFnv1a(str);
 }
 
-import {
-  DUMMY_1X1_PNG,
-  DUMMY_1X1_JPG,
-  DUMMY_1X1_PDF,
-  extractReferencedImages,
-  getPlaceholderGraphicBytes,
-  isGraphicFilename,
-} from './placeholderGraphics';
-
-/**
- * Finds all image filenames referenced in the document that are not present in `files`,
- * so we can pre-register them as kpathsea misses and avoid 404 network roundtrips.
- */
 function extractMissingImageKeys(texContent: string, files: ProjectFile[]): string[] {
   const existingNames = new Set<string>();
   for (const f of files) {
@@ -148,7 +141,7 @@ function extractMissingImageKeys(texContent: string, files: ProjectFile[]): stri
   return Array.from(misses);
 }
 
-async function extractPreambleSig(files: ProjectFile[]): Promise<{ sig: string; preambleText: string }> {
+function extractPreambleText(files: ProjectFile[]): string {
   const chunks: string[] = [];
   for (const f of files) {
     if (f.name.endsWith('.tex') || f.name.endsWith('.cls') || f.name.endsWith('.sty')) {
@@ -156,12 +149,12 @@ async function extractPreambleSig(files: ProjectFile[]): Promise<{ sig: string; 
       chunks.push(idx !== -1 ? f.content.slice(0, idx) : f.content);
     }
   }
-  const preambleText = chunks.join('\n');
-  const sig = await sha256Hex(preambleText);
-  return { sig, preambleText };
+  return chunks.join('\n');
 }
 
-async function extractAuxSignature(memfsFiles: Array<{ path: string; content: string | Uint8Array }>): Promise<string> {
+async function extractAuxSignature(
+  memfsFiles: Array<{ path: string; content: string | Uint8Array }>
+): Promise<string> {
   for (const f of memfsFiles) {
     if (f.path.toLowerCase().endsWith('.aux')) {
       const text = typeof f.content === 'string' ? f.content : new TextDecoder().decode(f.content);
@@ -188,8 +181,10 @@ export class TexEngineService {
   private queued: QueuedRequest | null = null;
   private nextRequestId = 1;
 
+  private lastPreambleFastSig = new Map<EngineId, string>();
   private lastPreambleSig = new Map<EngineId, string>();
   private mountedPackagesByEngine = new Map<EngineId, Set<string>>();
+  private unresolvablePackages = new Set<string>();
   private registeredMissesByEngine = new Map<EngineId, Set<string>>();
   private lastBibSignature = new Map<string, string>();
   private lastAuxSignature = new Map<string, string>();
@@ -225,24 +220,18 @@ export class TexEngineService {
     void this.ensureRunner(engine).catch(() => { });
   }
 
-  /**
-   * Explicitly clears initialization failures and retries engine priming.
-   */
   async retryPrewarm(engine: EngineId = 'pdflatex'): Promise<BusyTexRunner> {
     this.lastInitError.delete(engine);
     this.initPromises.delete(engine);
-    this.registeredMissesByEngine.clear();
-    this.lastPreambleSig.clear();
+    this.clearRegisteredMisses();
     return this.ensureRunner(engine);
   }
 
-  /**
-   * Clears transient package misses and preamble signatures.
-   * Call when returning online so newly accessible network can resolve packages.
-   */
   clearRegisteredMisses(): void {
     this.lastInitError.clear();
     this.registeredMissesByEngine.clear();
+    this.unresolvablePackages.clear();
+    this.lastPreambleFastSig.clear();
     this.lastPreambleSig.clear();
   }
 
@@ -253,8 +242,6 @@ export class TexEngineService {
     const pending = this.initPromises.get(engine);
     if (pending) return pending;
 
-    // Fail-fast guard: If runner initialization failed within the last 15s,
-    // do not loop resetting phase: 'fetching' on every keystroke/autosave.
     const lastErr = this.lastInitError.get(engine);
     if (lastErr && Date.now() - lastErr.timestamp < 15000) {
       throw lastErr.error;
@@ -278,8 +265,9 @@ export class TexEngineService {
   }
 
   private async initialiseRunner(engine: EngineId): Promise<BusyTexRunner> {
-    const ESTIMATED_TOTAL_BYTES = 127_694_000; // ~121.8 MB uncompressed engine + basic data
+    const ESTIMATED_TOTAL_BYTES = 127_694_000;
     const downloadStartTime = Date.now();
+    let lastProgressEmit = 0;
 
     this.setStatus({
       phase: 'fetching',
@@ -294,15 +282,17 @@ export class TexEngineService {
       busytexBasePath: ENGINE_BASE_PATH,
       engineMode: 'combined',
       verbose: false,
-      preloadDataPackages: [
-        `${ENGINE_BASE_PATH}/texlive-basic.js`,
-      ],
+      preloadDataPackages: [`${ENGINE_BASE_PATH}/texlive-basic.js`],
       catalogDataPackages: [],
       onDownloadProgress: ({ percent }) => {
+        const now = performance.now();
+        if (percent < 100 && now - lastProgressEmit < 80) return;
+        lastProgressEmit = now;
+
         const clampedPercent = Math.max(0, Math.min(100, percent));
         const loadedBytes = Math.round((clampedPercent / 100) * ESTIMATED_TOTAL_BYTES);
         const elapsedSec = Math.max(0.1, (Date.now() - downloadStartTime) / 1000);
-        const speedMbps = Number(((loadedBytes / elapsedSec) / (1024 * 1024)).toFixed(1));
+        const speedMbps = Number((loadedBytes / elapsedSec / (1024 * 1024)).toFixed(1));
 
         this.setStatus({
           phase: 'fetching',
@@ -320,13 +310,6 @@ export class TexEngineService {
       await runner.initialize(true);
 
       this.runners.set(engine, runner);
-      this.setStatus({
-        phase: 'ready',
-        progress: 100,
-        engine,
-        loadedBytes: ESTIMATED_TOTAL_BYTES,
-        totalBytes: ESTIMATED_TOTAL_BYTES,
-      });
 
       const mountedSet = new Set<string>();
       this.mountedPackagesByEngine.set(engine, mountedSet);
@@ -350,7 +333,13 @@ export class TexEngineService {
         // Non-fatal
       }
 
-      this.setStatus({ phase: 'ready', progress: 100, engine });
+      this.setStatus({
+        phase: 'ready',
+        progress: 100,
+        engine,
+        loadedBytes: ESTIMATED_TOTAL_BYTES,
+        totalBytes: ESTIMATED_TOTAL_BYTES,
+      });
       return runner;
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
@@ -397,7 +386,7 @@ export class TexEngineService {
     });
     this.inFlight = run;
     run.then(next.resolve, () =>
-      next.resolve(this.supersededOutcome(next.input, next.requestId)),
+      next.resolve(this.supersededOutcome(next.input, next.requestId))
     );
   }
 
@@ -416,6 +405,26 @@ export class TexEngineService {
       requestId,
       superseded: true,
     };
+  }
+
+  private async resolveAndMountPackages(
+    runner: BusyTexRunner,
+    engine: EngineId,
+    preambleText: string
+  ): Promise<number> {
+    const endpoint = remoteEndpoint();
+    const preloaded = await preloadDocumentPackages(preambleText, endpoint);
+    const mountedSet = this.mountedPackagesByEngine.get(engine) ?? new Set<string>();
+    const unmounted = preloaded.filter((pkg) => !mountedSet.has(pkg.name));
+
+    if (unmounted.length > 0) {
+      await runner.writeTexliveRemoteFiles(unmounted);
+      for (const pkg of unmounted) {
+        if (pkg.name) mountedSet.add(pkg.name);
+      }
+      this.mountedPackagesByEngine.set(engine, mountedSet);
+    }
+    return unmounted.length;
   }
 
   private async run(input: CompileInput, requestId: number): Promise<CompileOutcome> {
@@ -452,11 +461,7 @@ export class TexEngineService {
       };
     }
 
-    const failure = (
-      message: string,
-      hint?: string,
-      log = '',
-    ): CompileOutcome => ({
+    const failure = (message: string, hint?: string, log = ''): CompileOutcome => ({
       ok: false,
       pdf: null,
       synctex: null,
@@ -486,32 +491,14 @@ export class TexEngineService {
     } catch (cause) {
       return failure(
         `The ${engine} engine is unavailable.`,
-        cause instanceof Error ? cause.message : String(cause),
+        cause instanceof Error ? cause.message : String(cause)
       );
     }
 
     this.setStatus({ phase: 'compiling', engine });
-
-    /**
-     * The document is compiled exactly as written.
-     *
-     * Older versions ran the source through preamble rewrites, which
-     * commented out `\usepackage{lmodern}` and `{microtype}` and rewrote `xurl`
-     * to `url` before handing it to the engine. It was fast — `microtype` pulls
-     * a lot of files, and each one arrived as a separate synchronous XHR from
-     * inside the WASM worker — but it meant the PDF used different fonts and
-     * different line breaking from the document the user wrote, with nothing in
-     * the UI saying so. A preview that is not the document is not a preview.
-     *
-     * The latency it was hiding is addressed where it actually lives: step 2
-     * resolves the preamble's full dependency closure in parallel and mounts it
-     * before the engine starts, so those files are already in MEMFS.
-     */
     const source = entry.content;
 
-    // 1. Pre-register any missing image files (.jpg, .png, etc.) as instant misses.
-    //    This does not alter the document — it tells kpathsea up front that a
-    //    file it will ask for is absent, instead of paying a 404 round-trip.
+    // 1. Pre-register missing image files as instant kpathsea misses
     try {
       const missingImgs = extractMissingImageKeys(source, input.files);
       const missesSet = this.registeredMissesByEngine.get(engine) ?? new Set<string>();
@@ -525,23 +512,17 @@ export class TexEngineService {
       // Non-fatal
     }
 
-    // 2. Preload the preamble's package dependency closure in parallel before
-    //    launching WASM.
+    // 2. Preload preamble package dependency closure only when preamble changes
     try {
-      const { sig: preambleSig, preambleText } = await extractPreambleSig(input.files);
-      if (this.lastPreambleSig.get(engine) !== preambleSig) {
-        const preloaded = await preloadDocumentPackages(preambleText, remoteEndpoint());
-        const mountedSet = this.mountedPackagesByEngine.get(engine) ?? new Set<string>();
-        const unmounted = preloaded.filter((pkg) => !mountedSet.has(pkg.name));
-
-        if (unmounted.length > 0) {
-          await runner.writeTexliveRemoteFiles(unmounted);
-          for (const pkg of unmounted) {
-            if (pkg.name) mountedSet.add(pkg.name);
-          }
-          this.mountedPackagesByEngine.set(engine, mountedSet);
+      const preambleText = extractPreambleText(input.files);
+      const fastSig = fastFnv1a(preambleText);
+      if (this.lastPreambleFastSig.get(engine) !== fastSig) {
+        const preambleSig = await sha256Hex(preambleText);
+        if (this.lastPreambleSig.get(engine) !== preambleSig) {
+          await this.resolveAndMountPackages(runner, engine, preambleText);
+          this.lastPreambleSig.set(engine, preambleSig);
         }
-        this.lastPreambleSig.set(engine, preambleSig);
+        this.lastPreambleFastSig.set(engine, fastSig);
       }
     } catch {
       // Non-fatal
@@ -558,7 +539,6 @@ export class TexEngineService {
       const engineFiles = toEngineFiles(input.files, entry.name);
       const projectKey = input.projectId ?? 'default';
 
-      // Repair any existing engineFiles image entry that is empty or corrupted (e.g. unpopulated dataUrl)
       for (const ef of engineFiles) {
         if (isGraphicFilename(ef.path)) {
           const isEmpty =
@@ -571,7 +551,6 @@ export class TexEngineService {
         }
       }
 
-      // Synthesize lightweight placeholder graphics for missing image files to prevent pdfTeX fatal halting
       const existingFileNames = new Set<string>();
       for (const f of input.files) {
         existingFileNames.add(f.name);
@@ -586,7 +565,6 @@ export class TexEngineService {
         existingFileNames.add(ef.path.slice(ef.path.lastIndexOf('/') + 1));
       }
 
-      // Scan all documents in project, not just root entry
       const allDocContent = input.files
         .filter((f) => f.name.endsWith('.tex') || f.name.endsWith('.cls') || f.name.endsWith('.sty'))
         .map((f) => f.content)
@@ -596,7 +574,11 @@ export class TexEngineService {
       for (const imgName of referencedImages) {
         const baseName = imgName.slice(imgName.lastIndexOf('/') + 1);
         const cleanName = imgName.replace(/^\.\//, '');
-        if (!existingFileNames.has(imgName) && !existingFileNames.has(cleanName) && !existingFileNames.has(baseName)) {
+        if (
+          !existingFileNames.has(imgName) &&
+          !existingFileNames.has(cleanName) &&
+          !existingFileNames.has(baseName)
+        ) {
           const placeholderBytes = getPlaceholderGraphicBytes(imgName);
           engineFiles.push({ path: imgName, content: placeholderBytes });
           if (!imgName.startsWith('./') && !imgName.startsWith('/')) {
@@ -606,7 +588,6 @@ export class TexEngineService {
             engineFiles.push({ path: baseName, content: placeholderBytes });
             engineFiles.push({ path: `./${baseName}`, content: placeholderBytes });
           }
-          // Also provide common image extensions if referenced without extension
           if (!imgName.includes('.')) {
             engineFiles.push({ path: `${imgName}.png`, content: DUMMY_1X1_PNG });
             engineFiles.push({ path: `./${imgName}.png`, content: DUMMY_1X1_PNG });
@@ -625,10 +606,7 @@ export class TexEngineService {
           if (cachedAux.length > 0) {
             for (const aux of cachedAux) {
               if (!engineFiles.some((ef) => ef.path === aux.path)) {
-                engineFiles.push({
-                  path: aux.path,
-                  content: aux.content,
-                });
+                engineFiles.push({ path: aux.path, content: aux.content });
                 if (aux.path.toLowerCase().endsWith('.bbl')) {
                   this.hasSettledBbl.set(projectKey, true);
                 }
@@ -649,7 +627,6 @@ export class TexEngineService {
         const settled = this.hasSettledBbl.get(projectKey);
 
         if (settled && prevSig === bibSig) {
-          // Bibliography content and citations are unchanged; reuse existing .bbl
           bibtexNeeded = false;
         } else {
           this.lastBibSignature.set(projectKey, bibSig);
@@ -670,7 +647,44 @@ export class TexEngineService {
       let parsed = parseTexLog(log, { root: entry.name });
       let passes = 1;
 
-      // Pass-1 Instant PDF Streaming: provide rendered PDF to viewport immediately (< 1.1s)
+      // Self-healing missing package auto-fetch + single automatic retry
+      if (parsed.missingPackages.length > 0 && !this.queued) {
+        const candidates = parsed.missingPackages.filter(
+          (pkg) => !this.unresolvablePackages.has(pkg)
+        );
+        if (candidates.length > 0) {
+          try {
+            const syntheticPreamble = candidates
+              .map((pkg) => `\\usepackage{${pkg.replace(/\.(?:sty|cls)$/i, '')}}`)
+              .join('\n');
+            const newlyMounted = await this.resolveAndMountPackages(
+              runner,
+              engine,
+              syntheticPreamble
+            );
+            if (newlyMounted > 0) {
+              const healed = await tool.compile({
+                input: source,
+                mainTexPath: entry.name,
+                additionalFiles: engineFiles,
+                bibtex: bibtexNeeded,
+                makeindex: input.makeindex ?? needsMakeindex(source),
+                rerun: false,
+                remoteEndpoint: remoteEndpoint(),
+              });
+              result = healed;
+              log = result.log || '';
+              parsed = parseTexLog(log, { root: entry.name });
+            } else {
+              for (const pkg of candidates) this.unresolvablePackages.add(pkg);
+            }
+          } catch {
+            // Non-fatal; fall through to standard diagnostics
+          }
+        }
+      }
+
+      // Pass-1 Instant PDF Streaming
       if (result.pdf && result.pdf.byteLength > 0 && input.onIntermediateResult) {
         try {
           input.onIntermediateResult({
@@ -682,18 +696,16 @@ export class TexEngineService {
         }
       }
 
-      // Layer 8: Two-pass ceiling in 'fast' preview mode vs three-pass in 'publication' mode
+      // Layer 8 & 9: Two-pass ceiling in 'fast' mode + .aux signature bypass
       const maxPasses = input.compileMode === 'publication' ? MAX_COMPILE_PASSES : 2;
-
-      // Layer 9: Selective Second-Pass Bypass in 'fast' preview mode
       let shouldBypassSecondPass = false;
+
       if (input.compileMode !== 'publication' && parsed.rerunRequired) {
         try {
           const memfsFiles = await runner.readProjectFiles();
           const auxSig = await extractAuxSignature(memfsFiles);
           const prevAuxSig = this.lastAuxSignature.get(projectKey);
           if (auxSig && prevAuxSig && auxSig === prevAuxSig) {
-            // .aux contents are completely identical: all references and labels are already stable!
             shouldBypassSecondPass = true;
           }
         } catch {
@@ -701,14 +713,10 @@ export class TexEngineService {
         }
       }
 
-      /**
-       * Re-run while the log says cross-references are unresolved and not bypassed.
-       */
       while (
         parsed.rerunRequired &&
         !shouldBypassSecondPass &&
         passes < maxPasses &&
-        // A newer edit is waiting: stop burning passes on output nobody will see.
         !this.queued &&
         result.pdf &&
         result.pdf.byteLength > 0
@@ -717,8 +725,6 @@ export class TexEngineService {
           input: source,
           mainTexPath: entry.name,
           additionalFiles: engineFiles,
-          // Bibliography and index tools ran on the first pass; re-running them
-          // here would redo their work without new input.
           bibtex: false,
           makeindex: false,
           rerun: false,
@@ -726,8 +732,6 @@ export class TexEngineService {
         });
         passes++;
 
-        // Keep the last pass that produced a PDF: a later pass that fails is
-        // not a reason to show nothing.
         if (!followUp.pdf || followUp.pdf.byteLength === 0) break;
 
         result = followUp;
@@ -737,17 +741,20 @@ export class TexEngineService {
 
       const pdf = result.pdf && result.pdf.byteLength > 0 ? result.pdf : null;
 
-      // Layer 1 & 5: Persist PDF snapshot and auxiliary artifacts to IndexedDB
+      // Layer 1 & 5: Persist PDF snapshot and deduplicated auxiliary artifacts
       if (pdf && input.projectId) {
-        void saveCompiledPdfSnapshot(input.projectId, pdf, result.synctex).catch(() => {});
+        void saveCompiledPdfSnapshot(input.projectId, pdf, result.synctex).catch(() => { });
 
         void (async () => {
           try {
             const memfsFiles = await runner.readProjectFiles();
             const auxSig = await extractAuxSignature(memfsFiles);
+            const prevAuxSig = this.lastAuxSignature.get(projectKey);
+            if (auxSig && auxSig === prevAuxSig) return;
             if (auxSig) {
               this.lastAuxSignature.set(projectKey, auxSig);
             }
+
             const auxExtensions = ['.aux', '.bbl', '.toc', '.out', '.lot', '.lof', '.idx'];
             const auxToSave: AuxiliaryFileEntry[] = [];
             for (const f of memfsFiles) {
@@ -779,7 +786,6 @@ export class TexEngineService {
         pdf,
         synctex: result.synctex && result.synctex.byteLength > 0 ? result.synctex : null,
         log,
-        // Filter out harmless TeX Info messages that were masquerading as warnings
         diagnostics: parsed.diagnostics.filter((d) => {
           if (d.severity === 'error') return true;
           if (d.code === 'other') {
@@ -833,8 +839,10 @@ export class TexEngineService {
     for (const runner of this.runners.values()) runner.terminate();
     this.runners.clear();
     this.initPromises.clear();
+    this.lastPreambleFastSig.clear();
     this.lastPreambleSig.clear();
     this.mountedPackagesByEngine.clear();
+    this.unresolvablePackages.clear();
     this.registeredMissesByEngine.clear();
     this.lastBibSignature.clear();
     this.lastAuxSignature.clear();

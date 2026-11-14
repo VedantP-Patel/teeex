@@ -166,9 +166,14 @@ export function useCollaboration({
     if (!p || p.projectId !== activeProjectId || p.isDestroyed) {
       if (p && !p.isDestroyed) p.destroy();
       const currentFiles = projectStore.getState().files;
+      const resolvedSelfUser: Collaborator = {
+        ...selfUserRef.current,
+        role: initialRole,
+      };
+      selfUserRef.current = resolvedSelfUser;
       p = new SupabaseYjsProvider(
         activeProjectId,
-        selfUserRef.current,
+        resolvedSelfUser,
         currentFiles,
         (updatedFiles: ProjectFile[]) => {
           setFiles(prev => {

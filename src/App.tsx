@@ -86,14 +86,16 @@ export function App() {
     requestDurableStorage().catch(() => {});
   }, []);
 
-  // Forward compile trigger ref to break circular dependency
+  // Forward refs to break circular dependencies
   const compileTriggerRef = useRef<() => void>(() => {});
+  const providerRef = useRef<any>(null);
 
   // Project manager hook (composed of useProjectLifecycle & useFileOperations)
   const projectManager = useProjectManager({
     currentUser,
     onToast: (msg) => setToast(msg),
     triggerCompile: () => compileTriggerRef.current(),
+    providerRef,
   });
 
   const {
@@ -178,6 +180,7 @@ export function App() {
     handleRejectTrackedChange,
     isCloudConnected,
   } = collaboration;
+  providerRef.current = provider;
 
   // Checkpoints & Git version control hook — decoupled from keystroke updates
   const checkpointsManager = useProjectCheckpoints({

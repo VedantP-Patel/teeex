@@ -43,7 +43,7 @@ export function useCompilerIntegration({
   const setSelectedEngine = useCallback((engine: EngineId) => {
     try {
       localStorage.setItem('teeex_engine', engine);
-    } catch {}
+    } catch { }
     setSelectedEngineState(engine);
     if (onToast) {
       const labels: Record<EngineId, string> = {
@@ -67,13 +67,38 @@ export function useCompilerIntegration({
   const handleToggleCompileMode = useCallback((mode: CompileMode) => {
     try {
       localStorage.setItem('teeex_compile_mode', mode);
-    } catch {}
+    } catch { }
     setCompileMode(mode);
   }, []);
 
-  // Aggregated citations from .tex and .bib files
+  // Parse .bib files only when .bib content actually changes (isolated from .tex keystrokes)
+  const bibSignature = useMemo(() => {
+    return files
+      .filter(f => f.name.endsWith('.bib') || f.type === 'bib')
+      .map(f => `${f.name}:${f.content.length}:${f.content.slice(0, 64)}:${f.content.slice(-64)}`)
+      .join('|');
+  }, [files]);
+
+  const bibEntries = useMemo<BibEntry[]>(() => {
+    const bibFiles = files.filter(f => (f.name.endsWith('.bib') || f.type === 'bib') && f.content?.trim());
+    if (bibFiles.length === 0) return [];
+
+    const entriesMap = new Map<string, BibEntry>();
+    for (const bf of bibFiles) {
+      const parsed = parseBibtex(bf.content);
+      for (const entry of parsed) {
+        if (entry.key && !entriesMap.has(entry.key)) {
+          entriesMap.set(entry.key, entry);
+        }
+      }
+    }
+    return Array.from(entriesMap.values());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bibSignature]);
+
+  // Aggregated citations from .tex files + cached bibEntries
   const citations = useMemo(() => {
-    const keys = new Set<string>();
+    const keys = new Set<string>(bibEntries.map(e => e.key));
     const citeRegex = /\\(?:cite|citep|citet|parencite|textcite|autocite)\s*(?:\[[^\]]*\])*\s*\{([^}]+)\}/g;
     for (const f of files) {
       if (f.name.endsWith('.tex')) {
@@ -83,32 +108,10 @@ export function useCompilerIntegration({
             if (trimmed) keys.add(trimmed);
           }
         }
-      } else if (f.name.endsWith('.bib') || f.type === 'bib') {
-        const parsed = parseBibtex(f.content);
-        for (const entry of parsed) {
-          if (entry.key) keys.add(entry.key);
-        }
       }
     }
     return Array.from(keys);
-  }, [files]);
-
-  // Multi-file BibTeX parsed entries
-  const bibEntries = useMemo<BibEntry[]>(() => {
-    const bibFiles = files.filter(f => f.name.endsWith('.bib') && f.content?.trim());
-    if (bibFiles.length === 0) return [];
-
-    const entriesMap = new Map<string, BibEntry>();
-    for (const bf of bibFiles) {
-      const parsed = parseBibtex(bf.content);
-      for (const entry of parsed) {
-        if (!entriesMap.has(entry.key)) {
-          entriesMap.set(entry.key, entry);
-        }
-      }
-    }
-    return Array.from(entriesMap.values());
-  }, [files]);
+  }, [files, bibEntries]);
 
   // Invoking the TeX engine hook
   const texEngineView = useTexEngine({
@@ -200,7 +203,7 @@ export function useCompilerIntegration({
   const triggerCompile = useCallback(() => {
     setCompileState(prev => ({ ...prev, status: 'compiling' }));
     texEngineView.compile();
-  }, [texEngineView]);
+  }, [texEngineView.compile]);
 
   // SyncTeX Index
   const [syncTexIndex, setSyncTexIndex] = useState<SyncTexIndex | null>(null);

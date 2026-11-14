@@ -1,20 +1,17 @@
 /**
  * Teeex Studio — Client-Side End-to-End Encryption Service (AES-256-GCM)
- * Zero-Knowledge cryptographic privacy for proprietary research manuscripts
+ * Offloads PBKDF2 derivation & GCM operations to crypto.worker.ts with session key caching.
  */
 
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 
-// OWASP recommendation for PBKDF2-HMAC-SHA256: 600,000 iterations
 export const CURRENT_ITERATIONS = 600000;
 export const LEGACY_ITERATIONS = 100000;
 export const CURRENT_VERSION = 1;
 
-// 3-byte magic marker 'TEX' (0x54, 0x45, 0x58)
 const MAGIC_BYTES = new Uint8Array([0x54, 0x45, 0x58]);
-
-const BASE64_CHUNK_SIZE = 8192; // 8 KB chunks to prevent call-stack RangeError on large documents
+const BASE64_CHUNK_SIZE = 8192;
 
 export function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -68,12 +65,93 @@ export function generateSalt(): string {
   return bytesToBase64(salt);
 }
 
+// ------------------------------------------------------------------ Worker RPC --
+
+let cryptoWorker: Worker | null = null;
+let workerDisabled = false;
+let nextRpcId = 1;
+const pendingRpcs = new Map<
+  number,
+  { resolve: (val: string) => void; reject: (err: Error) => void }
+>();
+
+function getCryptoWorker(): Worker | null {
+  if (workerDisabled || typeof window === 'undefined' || typeof Worker === 'undefined') {
+    return null;
+  }
+  if (cryptoWorker) return cryptoWorker;
+
+  try {
+    const worker = new Worker(new URL('../workers/crypto.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    worker.onmessage = (
+      event: MessageEvent<{ id: number; ok: boolean; result?: string; error?: string }>
+    ) => {
+      const { id, ok, result, error } = event.data;
+      const pending = pendingRpcs.get(id);
+      if (!pending) return;
+      pendingRpcs.delete(id);
+      if (ok) {
+        pending.resolve(result ?? '');
+      } else {
+        pending.reject(new Error(error || 'Crypto worker failure'));
+      }
+    };
+    worker.onerror = () => {
+      workerDisabled = true;
+      cryptoWorker = null;
+      for (const [, pending] of pendingRpcs) {
+        pending.reject(new Error('Crypto worker crashed'));
+      }
+      pendingRpcs.clear();
+    };
+    cryptoWorker = worker;
+    return worker;
+  } catch {
+    workerDisabled = true;
+    return null;
+  }
+}
+
+function callCryptoWorker(payload: Record<string, unknown>): Promise<string> | null {
+  const worker = getCryptoWorker();
+  if (!worker) return null;
+
+  const id = nextRpcId++;
+  return new Promise<string>((resolve, reject) => {
+    pendingRpcs.set(id, { resolve, reject });
+    worker.postMessage({ id, ...payload });
+  });
+}
+
+/**
+ * Purges derived session keys cached inside the crypto worker (call on vault lock / sign-out).
+ */
+export function clearEncryptionSessionCache(): void {
+  void callCryptoWorker({ op: 'clear' })?.catch(() => { });
+}
+
+// ----------------------------------------------------------- Public Encrypt API --
+
 export async function encryptText(
   plainText: string,
   passphrase: string,
   saltB64: string,
   iterations: number = CURRENT_ITERATIONS
 ): Promise<string> {
+  const workerPromise = callCryptoWorker({
+    op: 'encrypt',
+    plainText,
+    passphrase,
+    saltB64,
+    iterations,
+  });
+  if (workerPromise) {
+    return workerPromise;
+  }
+
+  // Fallback for non-Worker environments (e.g., SSR / Vitest)
   const salt = base64ToBytes(saltB64);
   const key = await deriveKey(passphrase, salt, iterations);
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
@@ -86,19 +164,16 @@ export async function encryptText(
   );
 
   const cipherBytes = new Uint8Array(cipherBuffer);
-
-  // Payload format (v1):
-  // [0..2]: MAGIC 'TEX' (3 bytes)
-  // [3]: Version 1 (1 byte)
-  // [4..7]: Iterations (4 bytes, uint32 big-endian)
-  // [8..19]: IV (12 bytes)
-  // [20..end]: Ciphertext + GCM auth tag
-  const headerLen = 3 + 1 + 4 + IV_BYTES; // 20 bytes
+  const headerLen = 3 + 1 + 4 + IV_BYTES;
   const payload = new Uint8Array(headerLen + cipherBytes.length);
 
   payload.set(MAGIC_BYTES, 0);
   payload[3] = CURRENT_VERSION;
-  new DataView(payload.buffer, payload.byteOffset, payload.byteLength).setUint32(4, iterations, false);
+  new DataView(payload.buffer, payload.byteOffset, payload.byteLength).setUint32(
+    4,
+    iterations,
+    false
+  );
   payload.set(iv, 8);
   payload.set(cipherBytes, headerLen);
 
@@ -110,10 +185,20 @@ export async function decryptText(
   passphrase: string,
   saltB64: string
 ): Promise<string> {
+  const workerPromise = callCryptoWorker({
+    op: 'decrypt',
+    cipherB64,
+    passphrase,
+    saltB64,
+  });
+  if (workerPromise) {
+    return workerPromise;
+  }
+
+  // Fallback for non-Worker environments
   const salt = base64ToBytes(saltB64);
   const rawPayload = base64ToBytes(cipherB64);
 
-  // Check for Version 1 header: starts with 'TEX' (0x54, 0x45, 0x58) and version byte 1
   const isV1 =
     rawPayload.length >= 20 &&
     rawPayload[0] === 0x54 &&
@@ -131,7 +216,6 @@ export async function decryptText(
     iv = rawPayload.subarray(8, 20);
     cipherBytes = rawPayload.subarray(20);
   } else {
-    // Legacy v0 format: 12 bytes IV followed by ciphertext with default 100,000 iterations
     iv = rawPayload.subarray(0, IV_BYTES);
     cipherBytes = rawPayload.subarray(IV_BYTES);
   }
@@ -143,6 +227,5 @@ export async function decryptText(
     cipherBytes as unknown as BufferSource
   );
 
-  const dec = new TextDecoder();
-  return dec.decode(decryptedBuffer);
+  return new TextDecoder().decode(decryptedBuffer);
 }
