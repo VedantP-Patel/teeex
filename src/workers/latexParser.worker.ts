@@ -6,12 +6,18 @@ import {
   parseLatexDocument,
 } from '../services/latexParser';
 
+export interface SyncFilesWorkerRequest {
+  type: 'syncFiles';
+  files: ProjectFile[];
+}
+
 export interface ParseWorkerRequest {
   id: number;
   type: 'parse';
   content: string;
-  files: ProjectFile[];
+  activeFileId?: string;
   activeFileName: string;
+  files?: ProjectFile[];
 }
 
 export interface ParseWorkerResponse {
@@ -23,16 +29,35 @@ export interface ParseWorkerResponse {
   durationMs: number;
 }
 
-self.onmessage = (event: MessageEvent<ParseWorkerRequest>) => {
-  const data = event.data;
-  if (!data || data.type !== 'parse') return;
+let cachedFiles: ProjectFile[] = [];
 
-  const { id, content, files, activeFileName } = data;
+self.onmessage = (event: MessageEvent<ParseWorkerRequest | SyncFilesWorkerRequest>) => {
+  const data = event.data;
+  if (!data) return;
+
+  if (data.type === 'syncFiles') {
+    cachedFiles = data.files;
+    return;
+  }
+
+  if (data.type !== 'parse') return;
+
+  const { id, content, activeFileId, activeFileName } = data;
+  if (data.files) {
+    cachedFiles = data.files;
+  } else if (cachedFiles.length > 0) {
+    cachedFiles = cachedFiles.map((f) =>
+      (activeFileId && f.id === activeFileId) || f.name === activeFileName
+        ? { ...f, content }
+        : f
+    );
+  }
+
   const t0 = performance.now();
   const isTex = activeFileName.endsWith('.tex');
   const diagnostics = isTex ? diagnoseLatex(content) : [];
-  const parsedDoc = parseLatexDocument(content, files);
-  const labels = extractLatexLabels(files);
+  const parsedDoc = parseLatexDocument(content, cachedFiles);
+  const labels = extractLatexLabels(cachedFiles);
   const elapsed = performance.now() - t0;
 
   const response: ParseWorkerResponse = {

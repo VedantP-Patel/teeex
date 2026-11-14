@@ -3,6 +3,7 @@
  */
 
 import React, {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -64,6 +65,7 @@ type ZoomMode = 'fit-width' | 'fit-page' | 'custom';
 const ZOOM_STEPS = [0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3, 4];
 const PAGE_GAP = 20;
 const OVERSCAN = 1.5;
+const EMPTY_HIGHLIGHTS: ForwardMatch['rects'] = [];
 
 const ENGINE_LABELS: Record<EngineId, string> = {
   pdflatex: 'pdfLaTeX',
@@ -82,7 +84,7 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-function PdfPageView({
+const PdfPageView = memo(function PdfPageView({
   doc,
   geometry,
   displayZoom,
@@ -139,8 +141,9 @@ function PdfPageView({
     const textContainer = textRef.current;
 
     if (!active) {
-      // 1. Cancel in-flight PDF.js rendering task first to prevent writing into detached nodes
+      // 1. Cancel in-flight PDF.js rendering task and release decoded page resources
       doc.releaseTextLayer?.(geometry.pageNumber);
+      doc.cleanupPage?.(geometry.pageNumber);
       // 2. Release text layer DOM nodes and high-DPI bitmap backing store
       if (textContainer) {
         textContainer.replaceChildren();
@@ -338,7 +341,7 @@ function PdfPageView({
       ))}
     </div>
   );
-}
+});
 
 export function PdfPreviewPane({
   pdf,
@@ -1185,7 +1188,7 @@ export function PdfPreviewPane({
                     displayZoom={zoom}
                     rasterZoom={rasterZoom}
                     active={true}
-                    highlights={targetHighlight?.rects ?? []}
+                    highlights={targetHighlight?.rects ?? EMPTY_HIGHLIGHTS}
                     highlightNonce={targetHighlight?.nonce}
                     onPointerSync={onInverseSync ? handlePointerSync : undefined}
                     onInternalNavigate={handleInternalNavigate}

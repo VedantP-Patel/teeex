@@ -699,11 +699,12 @@ export class TexEngineService {
       // Layer 8 & 9: Two-pass ceiling in 'fast' mode + .aux signature bypass
       const maxPasses = input.compileMode === 'publication' ? MAX_COMPILE_PASSES : 2;
       let shouldBypassSecondPass = false;
+      let prefetchedMemfsFiles: Array<{ path: string; content: string | Uint8Array }> | null = null;
 
       if (input.compileMode !== 'publication' && parsed.rerunRequired) {
         try {
-          const memfsFiles = await runner.readProjectFiles();
-          const auxSig = await extractAuxSignature(memfsFiles);
+          prefetchedMemfsFiles = await runner.readProjectFiles();
+          const auxSig = await extractAuxSignature(prefetchedMemfsFiles);
           const prevAuxSig = this.lastAuxSignature.get(projectKey);
           if (auxSig && prevAuxSig && auxSig === prevAuxSig) {
             shouldBypassSecondPass = true;
@@ -732,6 +733,7 @@ export class TexEngineService {
         });
         passes++;
 
+        prefetchedMemfsFiles = null;
         if (!followUp.pdf || followUp.pdf.byteLength === 0) break;
 
         result = followUp;
@@ -747,7 +749,7 @@ export class TexEngineService {
 
         void (async () => {
           try {
-            const memfsFiles = await runner.readProjectFiles();
+            const memfsFiles = prefetchedMemfsFiles ?? (await runner.readProjectFiles());
             const auxSig = await extractAuxSignature(memfsFiles);
             const prevAuxSig = this.lastAuxSignature.get(projectKey);
             if (auxSig && auxSig === prevAuxSig) return;
@@ -823,7 +825,7 @@ export class TexEngineService {
       const message = cause instanceof Error ? cause.message : String(cause);
       if (message.includes('supported_drivers') || message.includes("reading 'includes'")) {
         if (typeof caches !== 'undefined') {
-          void caches.open('teeex-engine-v1.4.0').then((c) => {
+          void caches.open('teeex-engine-v1.4.2').then((c) => {
             void c.delete('/core/busytex/busytex_pipeline.js');
           });
         }

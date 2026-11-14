@@ -201,6 +201,7 @@ export function useProjectLifecycle({
 
     if (proj.files.some(f => (f as any)._persistedInIdb)) {
       hydrateProjectFromOffline(projId).then(offlineProj => {
+        if (projectStore.getState().activeProjectId !== projId) return;
         if (offlineProj && Array.isArray(offlineProj.files) && offlineProj.files.length > 0) {
           setProjectState({
             files: offlineProj.files,
@@ -295,8 +296,21 @@ export function useProjectLifecycle({
       openFileIds: [firstId],
       projectTitle: template.name,
     });
+    if (providerRef?.current) {
+      const doc = providerRef.current.getDoc();
+      doc.transact(() => {
+        for (const f of template.files) {
+          if (f.type === 'image') continue;
+          const yText = providerRef.current.getText(f.id);
+          if (yText.toString() !== f.content) {
+            yText.delete(0, yText.length);
+            yText.insert(0, f.content);
+          }
+        }
+      }, 'local-editor');
+    }
     setTimeout(() => triggerCompile(), 50);
-  }, [triggerCompile]);
+  }, [triggerCompile, providerRef]);
 
   // Project members
   const handleInviteMember = useCallback((email: string, role: ProjectRole) => {

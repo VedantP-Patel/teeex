@@ -13,7 +13,7 @@ import {
   extractLatexLabels,
   parseLatexDocument,
 } from '../services/latexParser';
-import type { ParseWorkerRequest, ParseWorkerResponse } from '../workers/latexParser.worker';
+import type { ParseWorkerRequest, ParseWorkerResponse, SyncFilesWorkerRequest } from '../workers/latexParser.worker';
 
 export interface UseLatexParserOptions {
   content: string;
@@ -100,6 +100,7 @@ export function useLatexParser({
   const nextRequestIdRef = useRef<number>(1);
   const activeRequestIdRef = useRef<number | null>(null);
   const lastFileNameRef = useRef<string>(activeFileName);
+  const lastSyncedFilesSigRef = useRef<string>('');
   const isFirstRunRef = useRef<boolean>(true);
 
   // Initialize Web Worker with Vite ES module syntax if supported
@@ -161,11 +162,21 @@ export function useLatexParser({
       if (worker) {
         const reqId = ++nextRequestIdRef.current;
         activeRequestIdRef.current = reqId;
+        const sanitized = sanitizeWorkerFiles(files);
+        const nonActiveSig = sanitized
+          .filter((f) => f.name !== activeFileName)
+          .map((f) => `${f.id}:${f.name}:${f.content.length}`)
+          .join('|');
+        const needsFullSync = nonActiveSig !== lastSyncedFilesSigRef.current;
+        if (needsFullSync) {
+          lastSyncedFilesSigRef.current = nonActiveSig;
+          const syncMsg: SyncFilesWorkerRequest = { type: 'syncFiles', files: sanitized };
+          worker.postMessage(syncMsg);
+        }
         const msg: ParseWorkerRequest = {
           id: reqId,
           type: 'parse',
           content,
-          files: sanitizeWorkerFiles(files),
           activeFileName,
         };
         worker.postMessage(msg);

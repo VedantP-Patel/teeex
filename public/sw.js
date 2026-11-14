@@ -19,6 +19,8 @@ const PRECACHE_STATIC_URLS = [
   '/',
   '/index.html',
   '/favicon.svg',
+];
+const PRECACHE_PACKAGE_URLS = [
   '/packages/IEEEtran.cls',
   '/packages/booktabs.sty',
   '/packages/microtype.sty',
@@ -37,7 +39,10 @@ try {
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_STATIC).then((cache) => cache.addAll(PRECACHE_STATIC_URLS).catch(() => { }))
+    Promise.all([
+      caches.open(CACHE_STATIC).then((cache) => cache.addAll(PRECACHE_STATIC_URLS).catch(() => { })),
+      caches.open(CACHE_PACKAGES).then((cache) => cache.addAll(PRECACHE_PACKAGE_URLS).catch(() => { })),
+    ])
   );
 });
 
@@ -124,6 +129,12 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       (async () => {
         try {
+          const preloadRes = await event.preloadResponse;
+          if (preloadRes && preloadRes.ok) {
+            const cache = await caches.open(CACHE_STATIC);
+            cache.put(request, preloadRes.clone()).catch(() => { });
+            return preloadRes;
+          }
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 2500);
           const networkRes = await fetch(request, { signal: controller.signal });

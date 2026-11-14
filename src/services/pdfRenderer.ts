@@ -38,9 +38,13 @@ export function prewarmPdfRenderer(): void {
   }
 }
 
-// Auto-prewarm when module is imported in browser
+// Defer prewarm to browser idle time so initial editor & TeX WASM boot are uncontested
 if (typeof window !== 'undefined') {
-  setTimeout(prewarmPdfRenderer, 50);
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(() => prewarmPdfRenderer(), { timeout: 3000 });
+  } else {
+    setTimeout(prewarmPdfRenderer, 1500);
+  }
 }
 
 export const CSS_PX_PER_PT = PixelsPerInch.PDF_TO_CSS_UNITS;
@@ -554,6 +558,7 @@ export class PdfDocument {
     this.textLayers.clear();
     for (const page of this.pages.values()) page.cleanup();
     this.pages.clear();
+    sharedCanvasPool.clear();
 
     await this.loadingTask.destroy();
   }

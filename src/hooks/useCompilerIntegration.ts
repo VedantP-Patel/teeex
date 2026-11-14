@@ -75,7 +75,14 @@ export function useCompilerIntegration({
   const bibSignature = useMemo(() => {
     return files
       .filter(f => f.name.endsWith('.bib') || f.type === 'bib')
-      .map(f => `${f.name}:${f.content.length}:${f.content.slice(0, 64)}:${f.content.slice(-64)}`)
+      .map(f => {
+        let h = 0x811c9dc5;
+        for (let i = 0; i < f.content.length; i++) {
+          h ^= f.content.charCodeAt(i);
+          h = Math.imul(h, 0x01000193);
+        }
+        return `${f.name}:${f.content.length}:${(h >>> 0).toString(36)}`;
+      })
       .join('|');
   }, [files]);
 

@@ -799,14 +799,7 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
       }
     }
 
-    const eqMatch = line.match(/\\begin\{(?:equation|align|gather|multline)\*?\}([\s\S]*?)\\end\{(?:equation|align|gather|multline)\*?\}/) || line.match(/\\\[([\s\S]*?)\\\]/);
-    if (eqMatch) {
-      mathBlocks.push({
-        latex: eqMatch[1].trim(),
-        display: true,
-        line: lineNum,
-      });
-    }
+
 
     const citeMatches = line.matchAll(/\\(?:cite|citep|citet|citealp|citealt)\{([^}]+)\}/g);
     for (const cm of citeMatches) {
@@ -819,6 +812,21 @@ export function parseLatexDocument(code: string, files?: ProjectFile[]): ParsedD
         }
       }
     }
+  }
+
+  const displayMathRegex = /\\begin\{(?:equation|align|gather|multline)\*?\}([\s\S]*?)\\end\{(?:equation|align|gather|multline)\*?\}|\\\[([\s\S]*?)\\\]/g;
+  for (const m of shieldedCode.matchAll(displayMathRegex)) {
+    const latexBody = (m[1] ?? m[2] ?? '').trim();
+    const startOffset = m.index ?? 0;
+    let eqLine = 1;
+    for (let k = 0; k < startOffset; k++) {
+      if (shieldedCode.charCodeAt(k) === 10) eqLine++;
+    }
+    mathBlocks.push({
+      latex: latexBody,
+      display: true,
+      line: eqLine,
+    });
   }
 
   return {
@@ -939,6 +947,10 @@ export function extractLatexLabelsForFile(file: ProjectFile): LatexLabel[] {
     }
   }
 
+  if (labelFileCache.size >= 64) {
+    const oldestKey = labelFileCache.keys().next().value;
+    if (oldestKey !== undefined) labelFileCache.delete(oldestKey);
+  }
   labelFileCache.set(fileKey, { content: file.content, labels: fileLabels });
   return fileLabels;
 }

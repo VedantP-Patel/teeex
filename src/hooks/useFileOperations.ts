@@ -21,6 +21,7 @@ import { applyDocumentClass, formatResolutionNotice, setTwoColumn, type PaperFor
 import { formatLatexCode } from '../services/latexFormatter';
 import { encryptText, decryptText } from '../services/encryptionService';
 import { logAuditAction } from '../services/auditService';
+import { texEngine } from '../services/latexCompiler';
 
 interface UseFileOperationsOptions {
   currentUser: UserProfile | null;
@@ -50,6 +51,22 @@ export function useFileOperations({
   const activeFile = useMemo(() => {
     return files.find(f => f.id === activeFileId) || files[0] || STARTER_TEMPLATES[0].files[0];
   }, [files, activeFileId]);
+
+  const syncFilesToYjs = useCallback((updatedFiles: ProjectFile[]) => {
+    const provider = providerRef?.current;
+    if (!provider) return;
+    const doc = provider.getDoc();
+    doc.transact(() => {
+      for (const f of updatedFiles) {
+        if (f.type === 'image') continue;
+        const yText = provider.getText(f.id);
+        if (yText.toString() !== f.content) {
+          yText.delete(0, yText.length);
+          yText.insert(0, f.content);
+        }
+      }
+    }, 'local-editor');
+  }, [providerRef]);
 
   // Tab & File selection
   const handleSelectFile = useCallback((fileId: string) => {
@@ -155,79 +172,84 @@ export function useFileOperations({
     if (!currentFile || !currentFile.name.endsWith('.tex')) return;
     const formatted = formatLatexCode(currentFile.content);
     if (formatted !== currentFile.content) {
-      setFiles(prev => prev.map(f => (f.id === currentFile.id ? { ...f, content: formatted } : f)));
+      const next = s.files.map(f => (f.id === currentFile.id ? { ...f, content: formatted } : f));
+      setFiles(next);
+      syncFilesToYjs(next);
     }
-  }, []);
+  }, [syncFilesToYjs]);
 
   const handleSelectFormat = useCallback((format: PaperFormatId) => {
     setPaperFormat(format);
-    setFiles(currFiles => {
-      const entry =
-        currFiles.find(f => f.name.endsWith('.tex') && f.isEntry) ??
-        currFiles.find(f => f.name === 'main.tex') ??
-        currFiles.find(f => /\\documentclass/.test(f.content));
-      if (!entry) {
-        onToast('No document with a \\documentclass to switch. Add one first.');
-        return currFiles;
-      }
-
+    const currFiles = projectStore.getState().files;
+    const entry =
+      currFiles.find(f => f.name.endsWith('.tex') && f.isEntry) ??
+      currFiles.find(f => f.name === 'main.tex') ??
+      currFiles.find(f => /\\documentclass/.test(f.content));
+    if (!entry) {
+      onToast('No document with a \\documentclass to switch. Add one first.');
+    } else {
       const updated = applyDocumentClass(entry.content, format);
-      if (updated === entry.content) return currFiles;
-      return currFiles.map(f => (f.id === entry.id ? { ...f, content: updated } : f));
-    });
+      if (updated !== entry.content) {
+        const nextFiles = currFiles.map(f => (f.id === entry.id ? { ...f, content: updated } : f));
+        setFiles(nextFiles);
+        syncFilesToYjs(nextFiles);
+      }
+    }
 
     const notice = formatResolutionNotice(format);
     if (notice) onToast(notice);
     setTimeout(() => triggerCompile(), 50);
-  }, [triggerCompile, onToast]);
+  }, [triggerCompile, onToast, syncFilesToYjs]);
 
   const handleToggleTwoColumn = useCallback(() => {
     const s = projectStore.getState();
     const next = !s.isTwoColumn;
     setIsTwoColumn(next);
 
-    setFiles(currFiles => {
-      const entry =
-        currFiles.find(f => f.name.endsWith('.tex') && f.isEntry) ??
-        currFiles.find(f => f.name === 'main.tex') ??
-        currFiles.find(f => /\\documentclass/.test(f.content));
-      if (!entry) return currFiles;
-
+    const currFiles = s.files;
+    const entry =
+      currFiles.find(f => f.name.endsWith('.tex') && f.isEntry) ??
+      currFiles.find(f => f.name === 'main.tex') ??
+      currFiles.find(f => /\\documentclass/.test(f.content));
+    if (entry) {
       const updated = setTwoColumn(entry.content, next);
-      if (updated === entry.content) return currFiles;
-      return currFiles.map(f => (f.id === entry.id ? { ...f, content: updated } : f));
-    });
+      if (updated !== entry.content) {
+        const nextFiles = currFiles.map(f => (f.id === entry.id ? { ...f, content: updated } : f));
+        setFiles(nextFiles);
+        syncFilesToYjs(nextFiles);
+      }
+    }
     setTimeout(() => triggerCompile(), 50);
-  }, [triggerCompile]);
+  }, [triggerCompile, syncFilesToYjs]);
 
   const handleAddPreambleMacro = useCallback((macroDef: string) => {
-    setFiles(prev => {
-      const mainFile = prev.find(f => f.name.endsWith('.tex') && f.isEntry) || prev.find(f => f.name.endsWith('.tex')) || prev[0];
-      if (!mainFile) return prev;
+    const prev = projectStore.getState().files;
+    const mainFile = prev.find(f => f.name.endsWith('.tex') && f.isEntry) || prev.find(f => f.name.endsWith('.tex')) || prev[0];
+    if (mainFile && !mainFile.content.includes(macroDef.trim())) {
       let content = mainFile.content;
-      if (content.includes(macroDef.trim())) {
-        return prev;
-      }
       const beginDocIdx = content.indexOf('\\begin{document}');
       if (beginDocIdx !== -1) {
         content = content.slice(0, beginDocIdx) + macroDef.trim() + '\n\n' + content.slice(beginDocIdx);
       } else {
         content = macroDef.trim() + '\n\n' + content;
       }
-      return prev.map(f => (f.id === mainFile.id ? { ...f, content } : f));
-    });
+      const nextFiles = prev.map(f => (f.id === mainFile.id ? { ...f, content } : f));
+      setFiles(nextFiles);
+      syncFilesToYjs(nextFiles);
+    }
     setTimeout(() => triggerCompile(), 50);
-  }, [triggerCompile]);
+  }, [triggerCompile, syncFilesToYjs]);
 
-  // Code mutations
-  const handleCodeChange = useCallback((newCode: string, onPulseTyping?: () => void) => {
+  // Code mutations (yCollab already mutates Y.Text character-by-character on keystrokes;
+  // programmatic mutations pass syncYjs = true so non-editor updates propagate to Yjs)
+  const handleCodeChange = useCallback((newCode: string, onPulseTyping?: () => void, syncYjs = false) => {
     if (onPulseTyping) onPulseTyping();
     const s = projectStore.getState();
     const currentId = s.activeFileId;
     const updatedFiles = s.files.map(f => (f.id === currentId ? { ...f, content: newCode } : f));
     setFiles(updatedFiles);
 
-    if (providerRef?.current) {
+    if (syncYjs && providerRef?.current) {
       const yText = providerRef.current.getText(currentId);
       if (yText.toString() !== newCode) {
         providerRef.current.getDoc().transact(() => {
@@ -258,7 +280,7 @@ export function useFileOperations({
       lines.splice(startIdx, deleteCount, fix.replacement);
     }
 
-    handleCodeChange(lines.join('\n'));
+    handleCodeChange(lines.join('\n'), undefined, true);
     setTimeout(() => triggerCompile(), 50);
   }, [handleCodeChange, triggerCompile]);
 
@@ -267,7 +289,7 @@ export function useFileOperations({
     const currentFile = s.files.find(f => f.id === s.activeFileId) || s.files[0];
     if (!currentFile) return;
     const updated = currentFile.content + '\n' + latexSnippet + '\n';
-    handleCodeChange(updated);
+    handleCodeChange(updated, undefined, true);
     setTimeout(() => triggerCompile(), 50);
   }, [handleCodeChange, triggerCompile]);
 
@@ -285,6 +307,7 @@ export function useFileOperations({
       folder: targetFolder,
     };
 
+    texEngine.clearRegisteredMisses();
     setFiles(prev => [...prev, fileToSave]);
   }, []);
 
@@ -361,6 +384,7 @@ export function useFileOperations({
       return mergedFiles;
     });
 
+    texEngine.clearRegisteredMisses();
     setFolders(Array.from(addedFolders));
 
     const firstTextFile = newFiles.find(f => f.type === 'tex' || f.type === 'bib');
@@ -441,6 +465,7 @@ export function useFileOperations({
 
     const cloned = structuredClone ? structuredClone(cp.files) : JSON.parse(JSON.stringify(cp.files));
     setFiles(cloned);
+    syncFilesToYjs(cloned);
     updateProject(s.activeProjectId, { files: cloned });
     setTimeout(() => triggerCompile(), 50);
     onToast(`Restored to "${cp.name}"`);
@@ -450,6 +475,7 @@ export function useFileOperations({
     const s = projectStore.getState();
     const updated = s.files.map(f => (f.id === file.id || f.name === file.name ? { ...file } : f));
     setFiles(updated);
+    syncFilesToYjs(updated);
     updateProject(s.activeProjectId, { files: updated });
     setTimeout(() => triggerCompile(), 50);
     onToast(`Restored ${file.name}`);
