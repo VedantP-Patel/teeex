@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+﻿import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { UploadCloud, Loader2, AlertCircle } from 'lucide-react';
 import { AuthPortal } from './components/AuthPortal';
 import { Navbar } from './components/Navbar';
@@ -343,12 +343,30 @@ export function App() {
     }, 450);
   }, []);
 
+  const deskPetCursorContext = useMemo(() => {
+    if (activeFile.name.toLowerCase().endsWith('.bib')) return 'bib' as const;
+    const line = activeCursorLine ?? 1;
+    const inMath = parsedDoc.mathBlocks.some(block => {
+      const b = block as { startLine?: number; endLine?: number; line?: number };
+      const start = b.startLine ?? b.line ?? -1;
+      const end = b.endLine ?? b.line ?? start;
+      return line >= start && line <= end;
+    });
+    if (inMath) return 'math' as const;
+    const firstSectionLine = parsedDoc.sections[0]?.line;
+    if (typeof firstSectionLine === 'number' && line < firstSectionLine) {
+      return 'preamble' as const;
+    }
+    return 'text' as const;
+  }, [activeFile.name, activeCursorLine, parsedDoc.mathBlocks, parsedDoc.sections]);
+
   const deskPet = useDeskPet({
     compileStatus: compileState.status,
     lastCompiledAt: texEngineView.lastCompiledAt,
     errorCount: compileState.errorCount,
     warningCount: compileState.warningCount,
     isTypingActive,
+    cursorContext: deskPetCursorContext,
   });
 
   // Debounced Word Count
@@ -805,6 +823,12 @@ export function App() {
             onInsertFormula={(formula) => {
               handleInsertCode(`$${formula}$`);
               setToast(`Inserted $${formula}$ from TeXCat dream!`);
+            }}
+            onJumpToFirstError={() => {
+              const firstErr = diagnostics.find(d => d.severity === 'error') ?? diagnostics[0];
+              if (firstErr?.line) {
+                setTargetLine(firstErr.line);
+              }
             }}
           />
         )}

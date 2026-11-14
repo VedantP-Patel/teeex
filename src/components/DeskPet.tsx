@@ -1,12 +1,15 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+﻿import React, { useState, useMemo, useEffect, useRef } from 'react';
 import katex from 'katex';
-import type {
-  DeskPetActionState,
-  DeskPetSkin,
-  DeskPetAccessory,
-  DeskPetEntryVariant,
-  DeskPetExitVariant,
-  DeskPetRoamMode,
+import '../styles/deskPetEnhancements.css';
+import {
+  PRESTIGE_SKIN_UNLOCKS,
+  PRESTIGE_ACCESSORY_UNLOCKS,
+  type DeskPetActionState,
+  type DeskPetSkin,
+  type DeskPetAccessory,
+  type DeskPetEntryVariant,
+  type DeskPetExitVariant,
+  type DeskPetRoamMode,
 } from '../hooks/useDeskPet';
 import {
   Heart,
@@ -28,6 +31,7 @@ import {
   Award,
   Flame,
   Music,
+  Lock,
 } from 'lucide-react';
 
 export interface DeskPetProps {
@@ -38,6 +42,7 @@ export interface DeskPetProps {
   state: DeskPetActionState;
   direction: 'left' | 'right';
   pacingOffset: number;
+  dodgeOffsetX?: number;
   isSleeping: boolean;
   isReducedMotion: boolean;
   isPaused: boolean;
@@ -66,7 +71,6 @@ export interface DeskPetProps {
   triggerPet?: () => void;
   wakeUp?: () => void;
   toggleSleep?: () => void;
-  // Stage 15 additions:
   roamMode?: DeskPetRoamMode;
   setRoamMode?: (mode: DeskPetRoamMode) => void;
   toggleRoamMode?: () => void;
@@ -84,13 +88,14 @@ export interface DeskPetProps {
   triggerEarScratch?: () => void;
   triggerNapYawn?: () => void;
   triggerRoam?: () => void;
-  // Stage 19 additions:
+  triggerRandomTrick?: () => void;
   annoyanceLevel?: number;
   annoyanceReason?: string | null;
   scholarXp?: number;
   scholarLevel?: number;
   scholarTitle?: string;
   scholarProgress?: number;
+  recentLevelUpBanner?: string | null;
   addScholarXp?: (amount: number) => void;
   playSpecificAnimation?: (anim: DeskPetActionState, durationMs?: number) => void;
   triggerAnnoyanceReaction?: (reason?: string) => void;
@@ -107,6 +112,7 @@ export interface DeskPetProps {
   triggerFocusScholar?: () => void;
   triggerQedCelebration?: () => void;
   onInsertFormula?: (formula: string) => void;
+  onJumpToFirstError?: () => void;
 }
 
 interface SkinPalette {
@@ -158,6 +164,30 @@ const SKIN_PALETTES: Record<DeskPetSkin, SkinPalette> = {
     stripeColor: '#06b6d4',
     earPink: '#ec4899',
   },
+  blueprint: {
+    furFill: '#1e3a8a',
+    furStroke: '#93c5fd',
+    chestFill: '#dbeafe',
+    eyeColor: '#fde047',
+    stripeColor: '#60a5fa',
+    earPink: '#38bdf8',
+  },
+  solarized: {
+    furFill: '#eee8d5',
+    furStroke: '#586e75',
+    chestFill: '#fdf6e3',
+    eyeColor: '#2aa198',
+    stripeColor: '#93a1a1',
+    earPink: '#d33682',
+  },
+  'gold-tex': {
+    furFill: '#f59e0b',
+    furStroke: '#78350f',
+    chestFill: '#fef3c7',
+    eyeColor: '#10b981',
+    stripeColor: '#d97706',
+    earPink: '#fb7185',
+  },
 };
 
 export const DeskPet: React.FC<DeskPetProps> = ({
@@ -168,6 +198,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
   state,
   direction,
   pacingOffset,
+  dodgeOffsetX = 0,
   isSleeping: _isSleeping,
   isReducedMotion,
   isPaused,
@@ -196,7 +227,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
   triggerPet,
   wakeUp,
   toggleSleep,
-  // Stage 15 additions:
   roamMode = 'dock',
   toggleRoamMode,
   isLaserActive = false,
@@ -212,13 +242,14 @@ export const DeskPet: React.FC<DeskPetProps> = ({
   triggerEarScratch,
   triggerNapYawn,
   triggerRoam,
-  // Stage 19 additions:
+  triggerRandomTrick,
   annoyanceLevel = 0,
   annoyanceReason = null,
   scholarXp = 0,
   scholarLevel = 1,
   scholarTitle = 'Novice Kitten',
   scholarProgress = 0,
+  recentLevelUpBanner = null,
   playSpecificAnimation,
   triggerAnnoyanceReaction,
   triggerPouncePrep,
@@ -234,53 +265,91 @@ export const DeskPet: React.FC<DeskPetProps> = ({
   triggerFocusScholar,
   triggerQedCelebration,
   onInsertFormula,
+  onJumpToFirstError,
 }) => {
   const [showToolbar, setShowToolbar] = useState(false);
   const [companionTab, setCompanionTab] = useState<'play' | 'jukebox' | 'wardrobe' | 'settings'>('play');
+  const [jukeboxFilter, setJukeboxFilter] = useState('');
   const [showHearts, setShowHearts] = useState(false);
   const [hasCopiedFormula, setHasCopiedFormula] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const mascotRef = useRef<HTMLDivElement>(null);
   const clickTimestampsRef = useRef<number[]>([]);
+  const heartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastProximityTriggerRef = useRef<number>(0);
+  const lastPointerPosRef = useRef<{ x: number; y: number; t: number } | null>(null);
 
-  // Eye tracking pupil look-at offset (-2px to +2px)
   const [pupilOffset, setPupilOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   useEffect(() => {
     if (!isEnabled || isPaused || isReducedMotion || state === 'sleep' || state === 'loaf' || isDragging) {
-      setPupilOffset({ x: 0, y: 0 });
+      setPupilOffset(prev => (prev.x === 0 && prev.y === 0 ? prev : { x: 0, y: 0 }));
       return;
     }
 
-    const handlePointerMove = (e: PointerEvent) => {
-      if (!mascotRef.current) return;
-      const rect = mascotRef.current.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      const dx = e.clientX - centerX;
-      const dy = e.clientY - centerY;
-      const distance = Math.sqrt(dx * dx + dy * dy);
+    let rafId: number | null = null;
+    let latestClientX = 0;
+    let latestClientY = 0;
 
-      // Proximity cursor look-at within 140px
-      if (distance < 140 && distance > 5) {
-        const angle = Math.atan2(dy, dx);
-        const lookRadius = Math.min(2, distance / 40);
-        setPupilOffset({
-          x: Math.cos(angle) * lookRadius,
-          y: Math.sin(angle) * lookRadius,
-        });
-      } else {
-        setPupilOffset({ x: 0, y: 0 });
-      }
+    const handlePointerMove = (e: PointerEvent) => {
+      latestClientX = e.clientX;
+      latestClientY = e.clientY;
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        if (!mascotRef.current) return;
+        const now = performance.now();
+        const rect = mascotRef.current.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const dx = latestClientX - centerX;
+        const dy = latestClientY - centerY;
+        const distSq = dx * dx + dy * dy;
+
+        const prevPtr = lastPointerPosRef.current;
+        lastPointerPosRef.current = { x: latestClientX, y: latestClientY, t: now };
+
+        if (prevPtr && state === 'idle' && now - lastProximityTriggerRef.current > 6500) {
+          const dtSec = Math.max(0.008, (now - prevPtr.t) / 1000);
+          const speed = Math.hypot(latestClientX - prevPtr.x, latestClientY - prevPtr.y) / dtSec;
+          if (distSq < 2600 && speed > 750) {
+            lastProximityTriggerRef.current = now;
+            triggerSwatCursor?.();
+          } else if (distSq < 1800 && speed < 140) {
+            lastProximityTriggerRef.current = now;
+            triggerSlowBlink?.();
+          }
+        }
+
+        if (distSq < 19600 && distSq > 25) {
+          const distance = Math.sqrt(distSq);
+          const lookRadius = Math.min(2, distance / 40);
+          const nextX = (dx / distance) * lookRadius;
+          const nextY = (dy / distance) * lookRadius;
+          setPupilOffset(prev =>
+            Math.abs(nextX - prev.x) > 0.08 || Math.abs(nextY - prev.y) > 0.08 ? { x: nextX, y: nextY } : prev
+          );
+        } else {
+          setPupilOffset(prev => (prev.x === 0 && prev.y === 0 ? prev : { x: 0, y: 0 }));
+        }
+      });
     };
 
     window.addEventListener('pointermove', handlePointerMove, { passive: true });
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
     };
-  }, [isEnabled, isPaused, isReducedMotion, state, isDragging]);
+  }, [isEnabled, isPaused, isReducedMotion, state, isDragging, triggerSwatCursor, triggerSlowBlink]);
 
-  // Click outside to dismiss toolbar
+  useEffect(() => {
+    return () => {
+      if (heartTimerRef.current) clearTimeout(heartTimerRef.current);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (!showToolbar) return;
     const handleGlobalClick = (e: PointerEvent) => {
@@ -292,7 +361,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
     return () => window.removeEventListener('pointerdown', handleGlobalClick);
   }, [showToolbar]);
 
-  // Human-readable status label for ARIA and tooltip
   const stateLabel = useMemo(() => {
     switch (state) {
       case 'lifted-scruff':
@@ -336,6 +404,10 @@ export const DeskPet: React.FC<DeskPetProps> = ({
         return 'Playfully swatting towards your cursor with an extended paw';
       case 'knock-mug':
         return 'Playfully tapping and knocking the mini TeX coffee mug off the ledge!';
+      case 'coffee-sip':
+        return 'Sipping warm espresso during a late-night typesetting session';
+      case 'origami-crane':
+        return 'Folding a crisp mathematical origami crane';
       case 'nap-yawn':
         return 'Yawning sleepily with an arched back stretch';
       case 'belly-flop':
@@ -354,7 +426,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
         return 'Sleeping peacefully, dreaming of LaTeX formulas';
       case 'waking-stretch':
         return 'Waking up with an arch-back stretch';
-      // Stage 19 Feline Annoyance States
       case 'airplane-ears':
         return 'Flattening ears in mild disapproval (airplane ears)';
       case 'annoyed-hiss':
@@ -379,7 +450,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
         return 'Coughing melodramatically over an unclosed curly brace';
       case 'drama-flop':
         return 'Collapsing with dramatic feline theatricality';
-      // Stage 19 Authentic Feline & Scholar States
       case 'pounce-prep':
         return 'Wiggling butt in pre-pounce concentration!';
       case 'flehmen-sniff':
@@ -414,24 +484,20 @@ export const DeskPet: React.FC<DeskPetProps> = ({
 
   const activePalette = SKIN_PALETTES[skin] || SKIN_PALETTES.tuxedo;
 
-  // 2D Coordinates & Dock Elevation Calculation
   const dockHeight = dockCollapsed ? 32 : 180;
   const bottomPosition = isSnappedToDock ? dockHeight + 4 : perchY;
 
-  // Snappy Triple-Click Trigger & Annoyance Engine
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     const now = Date.now();
     clickTimestampsRef.current = [...clickTimestampsRef.current.filter(t => now - t < 1200), now];
 
-    // Rapid poke abuse (> 4 clicks in 1.2s) triggers annoyance reaction
     if (clickTimestampsRef.current.length >= 5) {
       clickTimestampsRef.current = [];
       triggerAnnoyanceReaction?.('click_spam');
       return;
     }
 
-    // Triple click (e.detail >= 3) or 3 rapid clicks toggles options menu
     if (e.detail >= 3 || clickTimestampsRef.current.length === 3) {
       setShowToolbar(prev => !prev);
       return;
@@ -439,7 +505,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
 
     if (state === 'sleep' || state === 'loaf') {
       if (state === 'sleep') {
-        // Melodramatic annoyed reaction to being woken up abruptly
         if (triggerAnnoyanceReaction) {
           triggerAnnoyanceReaction('disturbed_sleep');
         } else if (playSpecificAnimation) {
@@ -453,7 +518,11 @@ export const DeskPet: React.FC<DeskPetProps> = ({
     } else {
       triggerPet?.();
       setShowHearts(true);
-      setTimeout(() => setShowHearts(false), 1400);
+      if (heartTimerRef.current) clearTimeout(heartTimerRef.current);
+      heartTimerRef.current = setTimeout(() => {
+        setShowHearts(false);
+        heartTimerRef.current = null;
+      }, 1400);
     }
   };
 
@@ -462,7 +531,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
     triggerYarnChase?.();
   };
 
-  // Click-to-copy & insert mathematical dream formula (Surprise Easter Egg)
   const handleCopyFormula = (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
@@ -476,11 +544,15 @@ export const DeskPet: React.FC<DeskPetProps> = ({
       onInsertFormula(currentDreamFormula);
     }
     setHasCopiedFormula(true);
-    setTimeout(() => setHasCopiedFormula(false), 1600);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => {
+      setHasCopiedFormula(false);
+      copyTimerRef.current = null;
+    }, 1600);
   };
 
-  // Keyboard accessibility handler
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
     const key = e.key.toLowerCase();
     if (key === ' ' || key === 'enter') {
       e.preventDefault();
@@ -548,7 +620,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
     }
   };
 
-  // KaTeX Mathematical Dream Formula Rendering
   const renderedDreamHtml = useMemo(() => {
     try {
       return katex.renderToString(currentDreamFormula, { displayMode: false, throwOnError: false });
@@ -557,14 +628,17 @@ export const DeskPet: React.FC<DeskPetProps> = ({
     }
   }, [currentDreamFormula]);
 
-  // If disabled and not mid-exit animation, render zero DOM elements
+  const matchesJukeboxFilter = (label: string) => {
+    const q = jukeboxFilter.trim().toLowerCase();
+    return !q || label.toLowerCase().includes(q);
+  };
+
   if (!isEnabled && !isExiting) {
     return null;
   }
 
   return (
     <>
-      {/* Stage 15: Glowing Red Laser Dot Tracker */}
       {isLaserActive && (
         <div
           className="pet-laser-dot"
@@ -596,34 +670,42 @@ export const DeskPet: React.FC<DeskPetProps> = ({
           display: 'flex',
           flexDirection: 'column',
           alignItems: typeof window !== 'undefined' && perchX > window.innerWidth * 0.45 ? 'flex-start' : 'flex-end',
-          transition: isReducedMotion || isDragging
-            ? 'none'
-            : 'bottom 0.28s cubic-bezier(0.16, 1, 0.3, 1), right 0.28s cubic-bezier(0.16, 1, 0.3, 1)',
+          transition:
+            isReducedMotion || isDragging
+              ? 'none'
+              : 'bottom 0.28s cubic-bezier(0.16, 1, 0.3, 1), right 0.28s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
-        {/* Compact Glassmorphic Companion Card Popover (Opened via 3 clicks or 'O') */}
         {showToolbar && (
           <div
             role="dialog"
             aria-label="TeXCat Desk Companion Menu"
             className="texcat-companion-card"
           >
-            {/* Header: Avatar, title, state badge, pet count, and close button */}
             <div className="companion-card-header">
               <div className="companion-header-title">
-                <span style={{ fontSize: 13 }}>🐱</span>
+                <span style={{ fontSize: 13 }}>{'\u{1F431}'}</span>
                 <span>TeXCat</span>
                 <span className="companion-state-badge">{state.replace('-', ' ')}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 10, color: '#f43f5e', display: 'inline-flex', alignItems: 'center', gap: 2, fontWeight: 600 }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: '#f43f5e',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 2,
+                    fontWeight: 600,
+                  }}
+                >
                   <Heart size={10} fill="#f43f5e" /> {petCount}
                 </span>
                 <button
                   type="button"
                   className="btn-ghost"
                   style={{ padding: '2px 4px', fontSize: 11, color: 'var(--text-muted)' }}
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     setShowToolbar(false);
                   }}
@@ -634,7 +716,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               </div>
             </div>
 
-            {/* Stage 19: LaTeX Scholar XP Progression Bar */}
             <div className="scholar-xp-container">
               <div className="scholar-xp-header">
                 <span className="scholar-xp-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -648,18 +729,18 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               {annoyanceLevel > 0 && (
                 <div className="annoyance-meter" style={{ marginTop: 4 }}>
                   <span className="annoyance-meter-badge">
-                    <Flame size={10} color="#fb7185" /> Annoyance: {annoyanceLevel}% {annoyanceReason ? `(${annoyanceReason.replace('_', ' ')})` : ''}
+                    <Flame size={10} color="#fb7185" /> Annoyance: {annoyanceLevel}%{' '}
+                    {annoyanceReason ? `(${annoyanceReason.replace('_', ' ')})` : ''}
                   </span>
                 </div>
               )}
             </div>
 
-            {/* Segmented Tabs: Play, Jukebox, Wardrobe, Settings */}
             <div className="companion-tabs">
               <button
                 type="button"
                 className={`companion-tab-btn ${companionTab === 'play' ? 'is-active' : ''}`}
-                onClick={(e) => {
+                onClick={e => {
                   e.stopPropagation();
                   setCompanionTab('play');
                 }}
@@ -669,7 +750,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               <button
                 type="button"
                 className={`companion-tab-btn ${companionTab === 'wardrobe' ? 'is-active' : ''}`}
-                onClick={(e) => {
+                onClick={e => {
                   e.stopPropagation();
                   setCompanionTab('wardrobe');
                 }}
@@ -679,7 +760,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               <button
                 type="button"
                 className={`companion-tab-btn ${companionTab === 'settings' ? 'is-active' : ''}`}
-                onClick={(e) => {
+                onClick={e => {
                   e.stopPropagation();
                   setCompanionTab('settings');
                 }}
@@ -689,7 +770,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               <button
                 type="button"
                 className={`companion-tab-btn ${companionTab === 'jukebox' ? 'is-active' : ''}`}
-                onClick={(e) => {
+                onClick={e => {
                   e.stopPropagation();
                   setCompanionTab('jukebox');
                 }}
@@ -700,13 +781,12 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               </button>
             </div>
 
-            {/* Tab 1: Play & Tricks (2-column compact grid of 8 toys) */}
             {companionTab === 'play' && (
               <div className="companion-toy-grid">
                 <button
                   type="button"
                   className={`companion-toy-chip ${isLaserActive ? 'is-active' : ''}`}
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     triggerLaser?.();
                   }}
@@ -719,11 +799,11 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 <button
                   type="button"
                   className="companion-toy-chip"
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     triggerBox?.();
                   }}
-                  title="Rest in cozy \\hbox cardboard box (B)"
+                  title="Rest in cozy \hbox cardboard box (B)"
                 >
                   <Box size={12} color="#f59e0b" />
                   <span>Box</span>
@@ -732,7 +812,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 <button
                   type="button"
                   className="companion-toy-chip"
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     triggerFish?.();
                   }}
@@ -745,7 +825,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 <button
                   type="button"
                   className="companion-toy-chip"
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     triggerYarnChase?.();
                   }}
@@ -758,7 +838,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 <button
                   type="button"
                   className="companion-toy-chip"
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     triggerKnockMug?.();
                   }}
@@ -771,7 +851,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 <button
                   type="button"
                   className="companion-toy-chip"
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     triggerPeekABoo?.();
                   }}
@@ -784,7 +864,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 <button
                   type="button"
                   className="companion-toy-chip"
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     triggerBellyFlop?.();
                   }}
@@ -797,7 +877,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 <button
                   type="button"
                   className="companion-toy-chip"
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     triggerKnuthCelebration?.();
                   }}
@@ -809,350 +889,488 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               </div>
             )}
 
-            {/* Tab 2: Stage 19 Animation Jukebox (Direct instant trigger of all 35+ animations) */}
             {companionTab === 'jukebox' && (
               <div className="companion-jukebox-container">
-                {/* Section A: Authentic Cat Behaviors */}
+                <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+                  <input
+                    type="text"
+                    value={jukeboxFilter}
+                    onChange={e => setJukeboxFilter(e.target.value)}
+                    onClick={e => e.stopPropagation()}
+                    onKeyDown={e => e.stopPropagation()}
+                    placeholder="Filter 35+ animations..."
+                    aria-label="Filter animations"
+                    style={{
+                      flex: 1,
+                      fontSize: 10.5,
+                      padding: '3px 6px',
+                      borderRadius: 4,
+                      border: '1px solid var(--border-subtle, rgba(255,255,255,0.12))',
+                      background: 'rgba(15, 23, 42, 0.6)',
+                      color: 'inherit',
+                      outline: 'none',
+                    }}
+                  />
+                  {triggerRandomTrick && (
+                    <button
+                      type="button"
+                      className="companion-jukebox-chip"
+                      style={{ width: 'auto', padding: '3px 7px', flexShrink: 0 }}
+                      onClick={e => {
+                        e.stopPropagation();
+                        triggerRandomTrick();
+                      }}
+                      title="Play a random trick"
+                    >
+                      <Sparkles size={10} color="#38bdf8" />
+                      <span>Surprise</span>
+                    </button>
+                  )}
+                </div>
+
                 <div className="companion-jukebox-section">
                   <div className="companion-jukebox-title">Authentic Cat Behaviors</div>
                   <div className="companion-jukebox-grid">
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'knead-dough' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerKneadDough ? triggerKneadDough() : playSpecificAnimation?.('knead-dough', 3000);
-                      }}
-                    >
-                      <span>🥐 Biscuits Dough</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'pounce-prep' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerPouncePrep ? triggerPouncePrep() : playSpecificAnimation?.('pounce-prep', 2400);
-                      }}
-                    >
-                      <span>🎯 Butt Wiggle</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'midnight-zoomies' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerMidnightZoomies ? triggerMidnightZoomies() : playSpecificAnimation?.('midnight-zoomies', 2800);
-                      }}
-                    >
-                      <span>🚀 3 AM Zoomies</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'slow-blink' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerSlowBlink ? triggerSlowBlink() : playSpecificAnimation?.('slow-blink', 3000);
-                      }}
-                    >
-                      <span>💖 Love Blink</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'cheek-bunt' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerCheekBunt ? triggerCheekBunt() : playSpecificAnimation?.('cheek-bunt', 2400);
-                      }}
-                    >
-                      <span>🥰 Cheek Bunt</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'cello-leg' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerCelloLeg ? triggerCelloLeg() : playSpecificAnimation?.('cello-leg', 3200);
-                      }}
-                    >
-                      <span>🎻 Cello Leg</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'blep' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerBlep ? triggerBlep() : playSpecificAnimation?.('blep', 3000);
-                      }}
-                    >
-                      <span>👅 Tongue Blep</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'flehmen-sniff' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerFlehmenSniff ? triggerFlehmenSniff() : playSpecificAnimation?.('flehmen-sniff', 2800);
-                      }}
-                    >
-                      <span>👃 Flehmen Grimace</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'loaf-wiggle' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerLoafWiggle ? triggerLoafWiggle() : playSpecificAnimation?.('loaf-wiggle', 2400);
-                      }}
-                    >
-                      <span>🍞 Loaf Wiggle</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'focus-scholar' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerFocusScholar ? triggerFocusScholar() : playSpecificAnimation?.('focus-scholar', 4000);
-                      }}
-                    >
-                      <span>🧘 Zen Scholar</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'qed-celebration' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerQedCelebration ? triggerQedCelebration() : playSpecificAnimation?.('qed-celebration', 3200);
-                      }}
-                    >
-                      <span>🏆 Q.E.D. Proof</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'math-zoomies' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerMathZoomies ? triggerMathZoomies() : playSpecificAnimation?.('math-zoomies', 2800);
-                      }}
-                    >
-                      <span>📐 Math Zoomies</span>
-                    </button>
+                    {matchesJukeboxFilter('Biscuits Dough knead') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'knead-dough' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerKneadDough ? triggerKneadDough() : playSpecificAnimation?.('knead-dough', 3000);
+                        }}
+                      >
+                        <span>{'\u{1F950}'} Biscuits Dough</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Butt Wiggle pounce') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'pounce-prep' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerPouncePrep ? triggerPouncePrep() : playSpecificAnimation?.('pounce-prep', 2400);
+                        }}
+                      >
+                        <span>{'\u{1F3AF}'} Butt Wiggle</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('3 AM Zoomies midnight') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'midnight-zoomies' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerMidnightZoomies
+                            ? triggerMidnightZoomies()
+                            : playSpecificAnimation?.('midnight-zoomies', 2800);
+                        }}
+                      >
+                        <span>{'\u{1F680}'} 3 AM Zoomies</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Love Blink slow') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'slow-blink' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerSlowBlink ? triggerSlowBlink() : playSpecificAnimation?.('slow-blink', 3000);
+                        }}
+                      >
+                        <span>{'\u{1F496}'} Love Blink</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Cheek Bunt') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'cheek-bunt' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerCheekBunt ? triggerCheekBunt() : playSpecificAnimation?.('cheek-bunt', 2400);
+                        }}
+                      >
+                        <span>{'\u{1F970}'} Cheek Bunt</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Cello Leg groom') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'cello-leg' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerCelloLeg ? triggerCelloLeg() : playSpecificAnimation?.('cello-leg', 3200);
+                        }}
+                      >
+                        <span>{'\u{1F3BB}'} Cello Leg</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Tongue Blep') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'blep' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerBlep ? triggerBlep() : playSpecificAnimation?.('blep', 3000);
+                        }}
+                      >
+                        <span>{'\u{1F445}'} Tongue Blep</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Flehmen Grimace sniff') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'flehmen-sniff' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerFlehmenSniff ? triggerFlehmenSniff() : playSpecificAnimation?.('flehmen-sniff', 2800);
+                        }}
+                      >
+                        <span>{'\u{1F443}'} Flehmen Grimace</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Loaf Wiggle') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'loaf-wiggle' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerLoafWiggle ? triggerLoafWiggle() : playSpecificAnimation?.('loaf-wiggle', 2400);
+                        }}
+                      >
+                        <span>{'\u{1F35E}'} Loaf Wiggle</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Zen Scholar focus') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'focus-scholar' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerFocusScholar ? triggerFocusScholar() : playSpecificAnimation?.('focus-scholar', 4000);
+                        }}
+                      >
+                        <span>{'\u{1F9D8}'} Zen Scholar</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Q.E.D. Proof celebration') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'qed-celebration' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerQedCelebration
+                            ? triggerQedCelebration()
+                            : playSpecificAnimation?.('qed-celebration', 3200);
+                        }}
+                      >
+                        <span>{'\u{1F3C6}'} Q.E.D. Proof</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Math Zoomies') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'math-zoomies' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerMathZoomies ? triggerMathZoomies() : playSpecificAnimation?.('math-zoomies', 2800);
+                        }}
+                      >
+                        <span>{'\u{1F4D0}'} Math Zoomies</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Section B: Feline Annoyance Engine */}
                 <div className="companion-jukebox-section">
-                  <div className="companion-jukebox-title" style={{ color: '#fb7185' }}>Feline Annoyances</div>
+                  <div className="companion-jukebox-title" style={{ color: '#fb7185' }}>
+                    Feline Annoyances
+                  </div>
                   <div className="companion-jukebox-grid">
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'airplane-ears' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('airplane-ears', 2200);
-                      }}
-                    >
-                      <span>✈️ Airplane Ears</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'annoyed-hiss' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('annoyed-hiss', 1800);
-                      }}
-                    >
-                      <span>😾 Angry Hiss</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'swat-aggressive' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('swat-aggressive', 1400);
-                      }}
-                    >
-                      <span>💥 Double Swat</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'tail-thump' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('tail-thump', 2400);
-                      }}
-                    >
-                      <span>🥁 Desk Tail Thump</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'cold-shoulder' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('cold-shoulder', 3200);
-                      }}
-                    >
-                      <span>❄️ Cold Shoulder</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'facepalm-paw' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('facepalm-paw', 2600);
-                      }}
-                    >
-                      <span>🤦 Error Facepalm</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'paper-shred' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('paper-shred', 2000);
-                      }}
-                    >
-                      <span>📄 Paper Shred</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'glare-judge' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('glare-judge', 3000);
-                      }}
-                    >
-                      <span>👁️ Judging Glare</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'dizzy-wobble' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('dizzy-wobble', 2600);
-                      }}
-                    >
-                      <span>💫 Dizzy Wobble</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'keyboard-sprawl' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('keyboard-sprawl', 3500);
-                      }}
-                    >
-                      <span>⌨️ Keyboard Sprawl</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'hairball-cough' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('hairball-cough', 2400);
-                      }}
-                    >
-                      <span>📦 Brace Cough</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'drama-flop' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('drama-flop', 2800);
-                      }}
-                    >
-                      <span>🎭 Melodrama Flop</span>
-                    </button>
+                    {matchesJukeboxFilter('Airplane Ears') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'airplane-ears' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('airplane-ears', 2200);
+                        }}
+                      >
+                        <span>{'\u2708\uFE0F'} Airplane Ears</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Angry Hiss') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'annoyed-hiss' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('annoyed-hiss', 1800);
+                        }}
+                      >
+                        <span>{'\u{1F63E}'} Angry Hiss</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Double Swat') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'swat-aggressive' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('swat-aggressive', 1400);
+                        }}
+                      >
+                        <span>{'\u{1F4A5}'} Double Swat</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Desk Tail Thump') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'tail-thump' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('tail-thump', 2400);
+                        }}
+                      >
+                        <span>{'\u{1F941}'} Desk Tail Thump</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Cold Shoulder') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'cold-shoulder' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('cold-shoulder', 3200);
+                        }}
+                      >
+                        <span>{'\u2744\uFE0F'} Cold Shoulder</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Error Facepalm') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'facepalm-paw' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('facepalm-paw', 2600);
+                        }}
+                      >
+                        <span>{'\u{1F926}'} Error Facepalm</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Paper Shred') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'paper-shred' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('paper-shred', 2000);
+                        }}
+                      >
+                        <span>{'\u{1F4C4}'} Paper Shred</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Judging Glare') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'glare-judge' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('glare-judge', 3000);
+                        }}
+                      >
+                        <span>{'\u{1F441}\uFE0F'} Judging Glare</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Dizzy Wobble') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'dizzy-wobble' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('dizzy-wobble', 2600);
+                        }}
+                      >
+                        <span>{'\u{1F4AB}'} Dizzy Wobble</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Keyboard Sprawl') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'keyboard-sprawl' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('keyboard-sprawl', 3500);
+                        }}
+                      >
+                        <span>{'\u2328\uFE0F'} Keyboard Sprawl</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Brace Cough hairball') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'hairball-cough' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('hairball-cough', 2400);
+                        }}
+                      >
+                        <span>{'\u{1F4E6}'} Brace Cough</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Melodrama Flop') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'drama-flop' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('drama-flop', 2800);
+                        }}
+                      >
+                        <span>{'\u{1F3AD}'} Melodrama Flop</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Section C: Classics & Tricks */}
                 <div className="companion-jukebox-section">
                   <div className="companion-jukebox-title">Classics & Tricks</div>
                   <div className="companion-jukebox-grid">
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'laser-pounce' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('laser-pounce', 1800);
-                      }}
-                    >
-                      <span>⚡ Laser Pounce</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'tail-chase' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('tail-chase', 2000);
-                      }}
-                    >
-                      <span>🔄 Tail Chase</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'yoga-stretch' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('yoga-stretch', 2200);
-                      }}
-                    >
-                      <span>🧘 Yoga Stretch</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'face-wash' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('face-wash', 2200);
-                      }}
-                    >
-                      <span>🧼 Paw Face Wash</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'butterfly-bat' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('butterfly-bat', 2400);
-                      }}
-                    >
-                      <span>🦋 Butterfly Bat</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`companion-jukebox-chip ${state === 'knuth-texbook' ? 'is-active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playSpecificAnimation?.('knuth-texbook', 3200);
-                      }}
-                    >
-                      <span>📖 The TeXbook</span>
-                    </button>
+                    {matchesJukeboxFilter('Espresso Coffee Sip') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'coffee-sip' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('coffee-sip', 3200);
+                        }}
+                      >
+                        <span>{'\u2615'} Espresso Sip</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Origami Crane') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'origami-crane' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('origami-crane', 3200);
+                        }}
+                      >
+                        <span>{'\u{1F54A}\uFE0F'} Origami Crane</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Laser Pounce') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'laser-pounce' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('laser-pounce', 1800);
+                        }}
+                      >
+                        <span>{'\u26A1'} Laser Pounce</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Tail Chase') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'tail-chase' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('tail-chase', 2000);
+                        }}
+                      >
+                        <span>{'\u{1F504}'} Tail Chase</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Yoga Stretch') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'yoga-stretch' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('yoga-stretch', 2200);
+                        }}
+                      >
+                        <span>{'\u{1F9D8}'} Yoga Stretch</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Paw Face Wash') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'face-wash' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('face-wash', 2200);
+                        }}
+                      >
+                        <span>{'\u{1F9FC}'} Paw Face Wash</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('Butterfly Bat') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'butterfly-bat' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('butterfly-bat', 2400);
+                        }}
+                      >
+                        <span>{'\u{1F98B}'} Butterfly Bat</span>
+                      </button>
+                    )}
+                    {matchesJukeboxFilter('The TeXbook Knuth') && (
+                      <button
+                        type="button"
+                        className={`companion-jukebox-chip ${state === 'knuth-texbook' ? 'is-active' : ''}`}
+                        onClick={e => {
+                          e.stopPropagation();
+                          playSpecificAnimation?.('knuth-texbook', 3200);
+                        }}
+                      >
+                        <span>{'\u{1F4D6}'} The TeXbook</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Tab 2: Wardrobe & Skins */}
             {companionTab === 'wardrobe' && (
               <div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: 'var(--text-muted)',
+                    marginBottom: 4,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}
+                >
                   Coat Skin ({skin})
                 </div>
                 <div className="companion-swatches-row">
-                  {(['tuxedo', 'ginger', 'calico', 'siamese', 'cyberpunk'] as DeskPetSkin[]).map((s) => (
+                  {(['tuxedo', 'ginger', 'calico', 'siamese', 'cyberpunk'] as DeskPetSkin[]).map(s => (
                     <button
                       key={s}
                       type="button"
                       className={`coat-swatch-circle ${skin === s ? 'is-active' : ''}`}
                       style={{
                         backgroundColor:
-                          s === 'tuxedo' ? '#1e293b' : s === 'ginger' ? '#ea580c' : s === 'calico' ? '#f8fafc' : s === 'siamese' ? '#fef3c7' : '#090d16',
+                          s === 'tuxedo'
+                            ? '#1e293b'
+                            : s === 'ginger'
+                            ? '#ea580c'
+                            : s === 'calico'
+                            ? '#f8fafc'
+                            : s === 'siamese'
+                            ? '#fef3c7'
+                            : '#090d16',
                         border: s === 'calico' ? '1px solid #94a3b8' : 'none',
                       }}
-                      onClick={(e) => {
+                      onClick={e => {
                         e.stopPropagation();
                         setSkin?.(s);
                       }}
@@ -1164,16 +1382,68 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   ))}
                 </div>
 
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', margin: '6px 0 4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <div
+                  style={{
+                    fontSize: 9.5,
+                    color: 'var(--text-muted)',
+                    margin: '6px 0 4px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  Prestige Coats (XP Unlocks)
+                </div>
+                <div className="companion-swatches-row">
+                  {PRESTIGE_SKIN_UNLOCKS.map(p => {
+                    const unlocked = scholarLevel >= p.unlockLevel;
+                    const bg = p.id === 'blueprint' ? '#1e3a8a' : p.id === 'solarized' ? '#eee8d5' : '#f59e0b';
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        disabled={!unlocked}
+                        className={`prestige-swatch-circle ${skin === p.id ? 'is-active' : ''}`}
+                        style={{
+                          backgroundColor: bg,
+                          opacity: unlocked ? 1 : 0.45,
+                          cursor: unlocked ? 'pointer' : 'not-allowed',
+                          border: '1px dashed #38bdf8',
+                        }}
+                        onClick={e => {
+                          e.stopPropagation();
+                          if (unlocked) setSkin?.(p.id);
+                        }}
+                        title={unlocked ? `${p.label} (Prestige)` : `Unlocks at Scholar Lv.${p.unlockLevel}`}
+                        aria-label={`${p.label} prestige skin`}
+                      >
+                        {!unlocked ? (
+                          <Lock size={9} color={p.id === 'solarized' ? '#0f172a' : '#ffffff'} />
+                        ) : (
+                          skin === p.id && <Check size={11} color={p.id === 'solarized' ? '#0f172a' : '#ffffff'} />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: 'var(--text-muted)',
+                    margin: '6px 0 4px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}
+                >
                   Academic Attire ({accessory})
                 </div>
                 <div className="outfit-chips-grid">
-                  {(['none', 'mortarboard', 'scarf', 'detective', 'bowtie'] as DeskPetAccessory[]).map((acc) => (
+                  {(['none', 'mortarboard', 'scarf', 'detective', 'bowtie'] as DeskPetAccessory[]).map(acc => (
                     <button
                       key={acc}
                       type="button"
                       className={`outfit-chip ${accessory === acc ? 'is-active' : ''}`}
-                      onClick={(e) => {
+                      onClick={e => {
                         e.stopPropagation();
                         setAccessory?.(acc);
                       }}
@@ -1181,21 +1451,45 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                       {acc === 'none' ? 'No Outfit' : acc}
                     </button>
                   ))}
+                  {PRESTIGE_ACCESSORY_UNLOCKS.map(acc => {
+                    const unlocked = scholarLevel >= acc.unlockLevel;
+                    return (
+                      <button
+                        key={acc.id}
+                        type="button"
+                        disabled={!unlocked}
+                        className={`outfit-chip ${accessory === acc.id ? 'is-active' : ''}`}
+                        style={{
+                          opacity: unlocked ? 1 : 0.5,
+                          cursor: unlocked ? 'pointer' : 'not-allowed',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 3,
+                        }}
+                        onClick={e => {
+                          e.stopPropagation();
+                          if (unlocked) setAccessory?.(acc.id);
+                        }}
+                        title={unlocked ? acc.label : `Unlocks at Scholar Lv.${acc.unlockLevel}`}
+                      >
+                        {!unlocked && <Lock size={9} />}
+                        <span>{unlocked ? acc.id : `Lv.${acc.unlockLevel} ${acc.id}`}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
-            {/* Tab 3: Perch & Settings */}
             {companionTab === 'settings' && (
               <div className="companion-settings-group">
-                {/* Roam Mode Toggle */}
                 <div className="companion-settings-row">
                   <span>Navigation:</span>
                   <button
                     type="button"
                     className="btn-ghost"
                     style={{ padding: '2px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                    onClick={(e) => {
+                    onClick={e => {
                       e.stopPropagation();
                       toggleRoamMode?.();
                     }}
@@ -1205,14 +1499,20 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   </button>
                 </div>
 
-                {/* Return to Ledge Button */}
                 <div className="companion-settings-row">
                   <span>Dock Ledge:</span>
                   <button
                     type="button"
                     className="btn-ghost"
-                    style={{ padding: '2px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4, color: '#38bdf8' }}
-                    onClick={(e) => {
+                    style={{
+                      padding: '2px 8px',
+                      fontSize: 11,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      color: '#38bdf8',
+                    }}
+                    onClick={e => {
                       e.stopPropagation();
                       resetPositionToDock?.();
                     }}
@@ -1223,7 +1523,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   </button>
                 </div>
 
-                {/* Sound & Volume */}
                 <div className="companion-settings-row">
                   <span>Sound ({Math.round((volume || 0.6) * 100)}%):</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1231,13 +1530,17 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                       type="button"
                       className="btn-ghost"
                       style={{ padding: '2px 4px' }}
-                      onClick={(e) => {
+                      onClick={e => {
                         e.stopPropagation();
                         toggleSound?.();
                       }}
                       title="Toggle sound"
                     >
-                      {isSoundEnabled ? <Volume2 size={12} color="#10b981" /> : <VolumeX size={12} color="var(--text-muted)" />}
+                      {isSoundEnabled ? (
+                        <Volume2 size={12} color="#10b981" />
+                      ) : (
+                        <VolumeX size={12} color="var(--text-muted)" />
+                      )}
                     </button>
                     <input
                       type="range"
@@ -1245,7 +1548,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                       max="1"
                       step="0.05"
                       value={volume ?? 0.6}
-                      onChange={(e) => {
+                      onChange={e => {
                         e.stopPropagation();
                         setVolume?.(parseFloat(e.target.value));
                       }}
@@ -1254,14 +1557,13 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   </div>
                 </div>
 
-                {/* Sleep / Wake */}
                 <div className="companion-settings-row">
                   <span>Power State:</span>
                   <button
                     type="button"
                     className="btn-ghost"
                     style={{ padding: '2px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                    onClick={(e) => {
+                    onClick={e => {
                       e.stopPropagation();
                       if (toggleSleep) {
                         toggleSleep();
@@ -1275,14 +1577,29 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   </button>
                 </div>
 
-                <div style={{ width: '100%', height: 1, backgroundColor: 'var(--border-subtle, rgba(255,255,255,0.08))', margin: '2px 0' }} />
+                <div
+                  style={{
+                    width: '100%',
+                    height: 1,
+                    backgroundColor: 'var(--border-subtle, rgba(255,255,255,0.08))',
+                    margin: '2px 0',
+                  }}
+                />
 
-                {/* Disable Companion */}
                 <button
                   type="button"
                   className="btn-ghost"
-                  style={{ width: '100%', padding: '3px 0', fontSize: 10.5, color: '#f87171', justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 4 }}
-                  onClick={(e) => {
+                  style={{
+                    width: '100%',
+                    padding: '3px 0',
+                    fontSize: 10.5,
+                    color: '#f87171',
+                    justifyContent: 'center',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                  onClick={e => {
                     e.stopPropagation();
                     onToggleEnabled?.();
                   }}
@@ -1295,7 +1612,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
           </div>
         )}
 
-        {/* Main Mascot Wrapper with 2D Drag & Fling Physics - Guaranteed full opacity (ghost-hover completely removed) */}
         <div
           ref={mascotRef}
           className="desk-pet-mascot-wrapper"
@@ -1310,7 +1626,7 @@ export const DeskPet: React.FC<DeskPetProps> = ({
               ? `rotate(${dragTilt}deg) scale(0.92, 1.12)`
               : state === 'fling-air'
               ? 'rotate(25deg) scale(0.95)'
-              : `translate3d(-${pacingOffset}px, 0, 0)`,
+              : `translate3d(-${pacingOffset + dodgeOffsetX}px, 0, 0)`,
             transition: isReducedMotion || isDragging ? 'none' : 'transform 0.35s cubic-bezier(0.25, 1, 0.5, 1)',
           }}
           onClick={handleClick}
@@ -1321,16 +1637,20 @@ export const DeskPet: React.FC<DeskPetProps> = ({
           aria-label={`TeXCat Desk Companion: ${stateLabel}. Coat: ${skin}. Outfit: ${accessory}. Pet count: ${petCount}. (Triple-click for menu, drag anywhere in 2D, double-click for yarn)`}
           onKeyDown={handleKeyDown}
         >
-          {/* Floating Heart Particles */}
-          {showHearts && (
-            <div className="pet-heart-particles" aria-hidden="true">
-              <span className="floating-heart heart-1">♥</span>
-              <span className="floating-heart heart-2">♥</span>
-              <span className="floating-heart heart-3">♥</span>
+          {recentLevelUpBanner && (
+            <div className="texcat-levelup-toast" role="status">
+              {'\u2728'} {recentLevelUpBanner}
             </div>
           )}
 
-          {/* Floating Zzz Particles during Sleep */}
+          {showHearts && (
+            <div className="pet-heart-particles" aria-hidden="true">
+              <span className="floating-heart heart-1">{'\u2665'}</span>
+              <span className="floating-heart heart-2">{'\u2665'}</span>
+              <span className="floating-heart heart-3">{'\u2665'}</span>
+            </div>
+          )}
+
           {state === 'sleep' && (
             <div className="pet-sleep-particles" aria-hidden="true">
               <span className="floating-z z-1">z</span>
@@ -1339,21 +1659,20 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             </div>
           )}
 
-          {/* High-DPI KaTeX Mathematical Dream Thought Bubble during Sleep (Surprise Click-to-Insert) */}
           {state === 'sleep' && (
             <div
               className="pet-dream-bubble"
               role="button"
               tabIndex={0}
               onClick={handleCopyFormula}
-              onKeyDown={(e) => {
+              onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   handleCopyFormula(e as unknown as React.MouseEvent);
                 }
               }}
               style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-              title="✨ TeXCat's mathematical dream — click to insert into editor"
+              title={`\u2728 TeXCat's mathematical dream \u2014 click to insert into editor`}
             >
               <span className="dream-formula" dangerouslySetInnerHTML={{ __html: renderedDreamHtml }} />
               {hasCopiedFormula && (
@@ -1368,16 +1687,17 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             </div>
           )}
 
-          {/* Floating Sparkles on Compile Success / Knuth Celebration */}
-          {(state === 'compile-success' || state === 'knuth-texbook' || state === 'knuth-check' || state === 'qed-celebration') && (
+          {(state === 'compile-success' ||
+            state === 'knuth-texbook' ||
+            state === 'knuth-check' ||
+            state === 'qed-celebration') && (
             <div className="pet-sparkle-particles" aria-hidden="true">
-              <span className="floating-sparkle sparkle-1">✦</span>
-              <span className="floating-sparkle sparkle-2">✧</span>
-              <span className="floating-sparkle sparkle-3">⋆</span>
+              <span className="floating-sparkle sparkle-1">{'\u2726'}</span>
+              <span className="floating-sparkle sparkle-2">{'\u2727'}</span>
+              <span className="floating-sparkle sparkle-3">{'\u22C6'}</span>
             </div>
           )}
 
-          {/* Interactive Bouncy Yarn Ball with Physics Bounce Arc */}
           {state === 'yarn-chase' && (
             <div className="pet-yarn-ball pet-bouncy-ball" aria-hidden="true">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -1390,7 +1710,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             </div>
           )}
 
-          {/* Pixel Butterfly for Idle Butterfly Batting */}
           {state === 'butterfly-bat' && (
             <div className="pet-pixel-butterfly" aria-hidden="true">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -1400,197 +1719,220 @@ export const DeskPet: React.FC<DeskPetProps> = ({
             </div>
           )}
 
-          {/* Status Speech Bubbles (Classics + Stage 19 Behaviors & Annoyances) */}
           {state === 'compile-fail' && (
-            <div className="pet-reaction-bubble reaction-fail" aria-hidden="true">
-              <span>❓ Log alert</span>
+            <div
+              className="pet-reaction-bubble reaction-fail"
+              style={onJumpToFirstError ? { cursor: 'pointer' } : undefined}
+              onClick={
+                onJumpToFirstError
+                  ? e => {
+                      e.stopPropagation();
+                      onJumpToFirstError();
+                    }
+                  : undefined
+              }
+              aria-hidden={!onJumpToFirstError}
+            >
+              <span>{'\u2753'} {onJumpToFirstError ? 'Jump to error' : 'Log alert'}</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'compile-warning' && (
             <div className="pet-reaction-bubble reaction-warning" aria-hidden="true">
-              <span>📏 Margins ok</span>
+              <span>{'\u{1F4D0}'} Margins ok</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'compile-success' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>✨ Q.E.D.</span>
+              <span>{'\u2728'} Q.E.D.</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'knuth-texbook' && (
             <div className="pet-reaction-bubble reaction-knuth" aria-hidden="true">
-              <span>📖 The TeXbook</span>
+              <span>{'\u{1F4D6}'} The TeXbook</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'knuth-check' && (
             <div className="pet-reaction-bubble reaction-knuth" aria-hidden="true">
-              <span>🏆 $2.56 Bug Reward</span>
+              <span>{'\u{1F3C6}'} $2.56 Bug Reward</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'knock-mug' && (
             <div className="pet-reaction-bubble reaction-warning" aria-hidden="true">
-              <span>☕ Oops! (mug tap)</span>
+              <span>{'\u2615'} Oops! (mug tap)</span>
+              <div className="bubble-arrow" />
+            </div>
+          )}
+          {state === 'coffee-sip' && (
+            <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
+              <span>{'\u2615'} *Sip...*</span>
+              <div className="bubble-arrow" />
+            </div>
+          )}
+          {state === 'origami-crane' && (
+            <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
+              <span>{'\u{1F54A}\uFE0F'} Origami fold</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'swat-cursor' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>🐾 Swat!</span>
+              <span>{'\u{1F43E}'} Swat!</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'peek-a-boo' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>👀 Peek-a-boo!</span>
+              <span>{'\u{1F440}'} Peek-a-boo!</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'airplane-ears' && (
             <div className="pet-reaction-bubble reaction-warning" aria-hidden="true">
-              <span>✈️ Unimpressed</span>
+              <span>{'\u2708\uFE0F'} Unimpressed</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'annoyed-hiss' && (
             <div className="pet-reaction-bubble reaction-fail" aria-hidden="true">
-              <span>😾 *Hisss!*</span>
+              <span>{'\u{1F63E}'} *Hisss!*</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'swat-aggressive' && (
             <div className="pet-reaction-bubble reaction-fail" aria-hidden="true">
-              <span>💥 *WHAP!*</span>
+              <span>{'\u{1F4A5}'} *WHAP!*</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'tail-thump' && (
             <div className="pet-reaction-bubble reaction-warning" aria-hidden="true">
-              <span>🥁 *Thump...*</span>
+              <span>{'\u{1F941}'} *Thump...*</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'cold-shoulder' && (
             <div className="pet-reaction-bubble reaction-warning" aria-hidden="true">
-              <span>❄️ Hmph.</span>
+              <span>{'\u2744\uFE0F'} Hmph.</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'facepalm-paw' && (
             <div className="pet-reaction-bubble reaction-fail" aria-hidden="true">
-              <span>🤦 *Sigh* (LaTeX syntax)</span>
+              <span>{'\u{1F926}'} *Sigh* (LaTeX syntax)</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'paper-shred' && (
             <div className="pet-reaction-bubble reaction-warning" aria-hidden="true">
-              <span>📄 Shredding bad math</span>
+              <span>{'\u{1F4C4}'} Shredding bad math</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'glare-judge' && (
             <div className="pet-reaction-bubble reaction-warning" aria-hidden="true">
-              <span>👁️ Judging your code</span>
+              <span>{'\u{1F441}\uFE0F'} Judging your code</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'dizzy-wobble' && (
             <div className="pet-reaction-bubble reaction-warning" aria-hidden="true">
-              <span>💫 Woah dizzy!</span>
+              <span>{'\u{1F4AB}'} Woah dizzy!</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'keyboard-sprawl' && (
             <div className="pet-reaction-bubble reaction-warning" aria-hidden="true">
-              <span>⌨️ Pet me now!</span>
+              <span>{'\u2328\uFE0F'} Pet me now!</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'hairball-cough' && (
             <div className="pet-reaction-bubble reaction-warning" aria-hidden="true">
-              <span>📦 *Agh!* (unclosed brace)</span>
+              <span>{'\u{1F4E6}'} *Agh!* (unclosed brace)</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'drama-flop' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>🎭 The melodrama!</span>
+              <span>{'\u{1F3AD}'} The melodrama!</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'pounce-prep' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>🎯 Butt wiggle locked on</span>
+              <span>{'\u{1F3AF}'} Butt wiggle locked on</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'laser-pounce' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>⚡ Pounce!</span>
+              <span>{'\u26A1'} Pounce!</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'knead-dough' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>🥐 Making biscuits</span>
+              <span>{'\u{1F950}'} Making biscuits</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'midnight-zoomies' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>🚀 3 AM Zoomies!</span>
+              <span>{'\u{1F680}'} 3 AM Zoomies!</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'slow-blink' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>💖 Cat love & trust</span>
+              <span>{'\u{1F496}'} Cat love & trust</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'cheek-bunt' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>🥰 Scent marked</span>
+              <span>{'\u{1F970}'} Scent marked</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'cello-leg' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>🎻 Cello groom pose</span>
+              <span>{'\u{1F3BB}'} Cello groom pose</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'blep' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>👅 *Blep*</span>
+              <span>{'\u{1F445}'} *Blep*</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'math-zoomies' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>📐 \int Zoomies!</span>
+              <span>{'\u{1F4D0}'} \int Zoomies!</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'focus-scholar' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>🧘 LaTeX Zen Focus</span>
+              <span>{'\u{1F9D8}'} LaTeX Zen Focus</span>
               <div className="bubble-arrow" />
             </div>
           )}
           {state === 'qed-celebration' && (
             <div className="pet-reaction-bubble reaction-success" aria-hidden="true">
-              <span>🏆 Q.E.D. Complete!</span>
+              <span>{'\u{1F3C6}'} Q.E.D. Complete!</span>
               <div className="bubble-arrow" />
             </div>
           )}
 
           {/* Procedural High-DPI Vector Mascot Rig */}
           <div
-            className={`texcat-rig state-${state} ${state === 'walk' && direction === 'left' ? 'facing-left' : ''}`}
+            className={`texcat-rig state-${state} ${state === 'landing' ? 'is-landing-squash' : ''} ${state === 'walk' && direction === 'left' ? 'facing-left' : ''}`}
             style={{
               width: 52,
               height: 52,
@@ -1612,7 +1954,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 </filter>
               </defs>
 
-              {/* Base platform shadow */}
               <ellipse
                 cx="32"
                 cy="56"
@@ -1622,10 +1963,14 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 opacity={state === 'lifted-scruff' ? 0.35 : 0.8}
               />
 
-              {/* Tail Layer with Sway Animation */}
+              {/* Tail Layer */}
               <g className={`texcat-tail ${state === 'loaf' ? 'tail-tucked' : ''}`} style={{ transformOrigin: '48px 50px' }}>
                 <path
-                  d={state === 'loaf' ? 'M42 48 C 48 52, 36 56, 26 55' : 'M44 48 C 54 44, 58 36, 56 30 C 54 26, 50 28, 51 32 C 52 38, 48 42, 42 46'}
+                  d={
+                    state === 'loaf'
+                      ? 'M42 48 C 48 52, 36 56, 26 55'
+                      : 'M44 48 C 54 44, 58 36, 56 30 C 54 26, 50 28, 51 32 C 52 38, 48 42, 42 46'
+                  }
                   stroke={activePalette.furStroke}
                   strokeWidth="4"
                   strokeLinecap="round"
@@ -1645,7 +1990,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   strokeWidth="2"
                 />
 
-                {/* Tiger Stripes for Ginger or Calico */}
                 {activePalette.stripeColor && (
                   <g className="texcat-stripes" opacity="0.45">
                     <path d="M22 41 L 28 43" stroke={activePalette.stripeColor} strokeWidth="1.5" strokeLinecap="round" />
@@ -1655,11 +1999,16 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   </g>
                 )}
 
-                {/* Chest Marking */}
-                <ellipse cx="32" cy={state === 'loaf' ? 47 : 45} rx={state === 'loaf' ? 10 : 8} ry={state === 'loaf' ? 7 : 9} fill={activePalette.chestFill} opacity="0.8" />
+                <ellipse
+                  cx="32"
+                  cy={state === 'loaf' ? 47 : 45}
+                  rx={state === 'loaf' ? 10 : 8}
+                  ry={state === 'loaf' ? 7 : 9}
+                  fill={activePalette.chestFill}
+                  opacity="0.8"
+                />
               </g>
 
-              {/* Academic Accessory: Professor Bowtie */}
               {accessory === 'bowtie' && (
                 <g className="texcat-accessory-bowtie" aria-hidden="true">
                   <polygon points="26,38 32,41 26,44" fill="#dc2626" />
@@ -1668,20 +2017,24 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                 </g>
               )}
 
-              {/* Academic Accessory: Knitted Scholar Scarf */}
               {accessory === 'scarf' && (
                 <g className="texcat-accessory-scarf" aria-hidden="true">
                   <ellipse cx="32" cy="38" rx="14" ry="4.5" fill="#b91c1c" stroke="#7f1d1d" strokeWidth="1" />
                   <line x1="22" y1="38" x2="42" y2="38" stroke="#fbbf24" strokeWidth="1.5" strokeDasharray="3 2" />
-                  {/* Flowing scarf tail with tassel fringe */}
-                  <path d="M38 40 Q 42 48 40 54" stroke="#b91c1c" strokeWidth="4.5" strokeLinecap="round" fill="none" className="scarf-flutter" />
+                  <path
+                    d="M38 40 Q 42 48 40 54"
+                    stroke="#b91c1c"
+                    strokeWidth="4.5"
+                    strokeLinecap="round"
+                    fill="none"
+                    className="scarf-flutter"
+                  />
                   <line x1="38" y1="54" x2="42" y2="54" stroke="#fbbf24" strokeWidth="1.5" />
                 </g>
               )}
 
               {/* Cat Head Layer */}
               <g className="texcat-head" style={{ transformOrigin: '32px 30px' }}>
-                {/* Left Ear */}
                 <g
                   className="texcat-ear-left-group"
                   style={{
@@ -1701,7 +2054,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   <path d="M22 19 L 24 13 L 29 18 Z" fill={activePalette.earPink} opacity="0.8" />
                 </g>
 
-                {/* Right Ear */}
                 <g
                   className="texcat-ear-right-group"
                   style={{
@@ -1721,7 +2073,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   <path d="M42 19 L 40 13 L 35 18 Z" fill={activePalette.earPink} opacity="0.8" />
                 </g>
 
-                {/* Head Circle */}
                 <ellipse
                   cx="32"
                   cy="28"
@@ -1732,14 +2083,11 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   strokeWidth="2"
                 />
 
-                {/* Cheeks / Whiskers */}
                 <path d="M12 28 L 22 29 M 11 32 L 21 31" stroke="var(--text-muted, #94a3b8)" strokeWidth="1.2" strokeLinecap="round" />
                 <path d="M52 28 L 42 29 M 53 32 L 43 31" stroke="var(--text-muted, #94a3b8)" strokeWidth="1.2" strokeLinecap="round" />
 
-                {/* Nose */}
                 <polygon points="30,31 34,31 32,33" fill={activePalette.earPink} />
 
-                {/* Mouth & Sleepy Nap Yawn / Hiss / Blep / Flehmen */}
                 {state === 'nap-yawn' ? (
                   <g className="texcat-mouth-yawn">
                     <ellipse cx="32" cy="35" rx="4.5" ry="5" fill="#f43f5e" />
@@ -1774,7 +2122,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   />
                 )}
 
-                {/* Eyes Expression System */}
                 {state === 'sleep' ? (
                   <g className="texcat-eyes-sleep">
                     <path d="M22 27 Q 26 23 29 27" stroke="var(--text-primary, #f8fafc)" strokeWidth="2" strokeLinecap="round" fill="none" />
@@ -1786,7 +2133,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                     <path d="M35 26.5 Q 38 25 42 26.5" stroke={activePalette.eyeColor} strokeWidth="2.2" strokeLinecap="round" fill="none" />
                   </g>
                 ) : state === 'loaf' ? (
-                  // Relaxed half-closed loaf eyes
                   <g className="texcat-eyes-loaf">
                     <path d="M22 27 Q 26 25 29 27" stroke={activePalette.eyeColor} strokeWidth="2.2" strokeLinecap="round" fill="none" />
                     <path d="M35 27 Q 38 25 42 27" stroke={activePalette.eyeColor} strokeWidth="2.2" strokeLinecap="round" fill="none" />
@@ -1797,14 +2143,17 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                     <path d="M37 26 C 37 24, 41 24, 41 26 C 41 28, 38 28, 38 26" stroke="#f59e0b" strokeWidth="1.8" fill="none" />
                   </g>
                 ) : state === 'glare-judge' || state === 'airplane-ears' ? (
-                  // Narrow slitted pupils
                   <g className="texcat-eyes-glare">
                     <ellipse cx="25" cy="26" rx="3.5" ry="4" fill="#fef08a" />
                     <ellipse cx="39" cy="26" rx="3.5" ry="4" fill="#fef08a" />
                     <ellipse cx="25" cy="26" rx="1.2" ry="3.8" fill="#000" />
                     <ellipse cx="39" cy="26" rx="1.2" ry="3.8" fill="#000" />
                   </g>
-                ) : state === 'compile-success' || state === 'knuth-texbook' || state === 'knuth-check' || state === 'belly-flop' || state === 'qed-celebration' ? (
+                ) : state === 'compile-success' ||
+                  state === 'knuth-texbook' ||
+                  state === 'knuth-check' ||
+                  state === 'belly-flop' ||
+                  state === 'qed-celebration' ? (
                   <g className="texcat-eyes-happy">
                     <path d="M22 28 Q 26 24 29 28" stroke={activePalette.eyeColor} strokeWidth="2.5" strokeLinecap="round" fill="none" />
                     <path d="M35 28 Q 38 24 42 28" stroke={activePalette.eyeColor} strokeWidth="2.5" strokeLinecap="round" fill="none" />
@@ -1840,7 +2189,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   </g>
                 )}
 
-                {/* Scholar Mode / Knuth Glasses */}
                 {(state === 'compiling-scholar' || state === 'knuth-texbook' || state === 'knuth-check') && (
                   <g className="texcat-glasses" aria-hidden="true">
                     <circle cx="25" cy="26" r="5" stroke="#f59e0b" strokeWidth="1.5" fill="rgba(245,158,11,0.15)" />
@@ -1851,28 +2199,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   </g>
                 )}
 
-                {/* Detective Mode: Magnifying Glass */}
-                {state === 'compile-fail' && (
-                  <g className="texcat-magnifier" aria-hidden="true" style={{ transformOrigin: '40px 38px' }}>
-                    <circle cx="44" cy="38" r="6" stroke="#38bdf8" strokeWidth="2" fill="rgba(56,189,248,0.2)" />
-                    <path d="M48 42 L 54 48" stroke="#94a3b8" strokeWidth="2.5" strokeLinecap="round" />
-                  </g>
-                )}
-
-                {/* Warning Mode: Typesetter Tape Measure */}
-                {state === 'compile-warning' && (
-                  <g className="texcat-tape-measure" aria-hidden="true">
-                    <rect x="18" y="46" width="28" height="5" rx="1" fill="#facc15" stroke="#ca8a04" strokeWidth="1" />
-                    <line x1="22" y1="46" x2="22" y2="49" stroke="#713f12" strokeWidth="0.8" />
-                    <line x1="26" y1="46" x2="26" y2="50" stroke="#713f12" strokeWidth="0.8" />
-                    <line x1="30" y1="46" x2="30" y2="49" stroke="#713f12" strokeWidth="0.8" />
-                    <line x1="34" y1="46" x2="34" y2="50" stroke="#713f12" strokeWidth="0.8" />
-                    <line x1="38" y1="46" x2="38" y2="49" stroke="#713f12" strokeWidth="0.8" />
-                    <line x1="42" y1="46" x2="42" y2="50" stroke="#713f12" strokeWidth="0.8" />
-                  </g>
-                )}
-
-                {/* Academic Accessory: Graduate Mortarboard Cap */}
                 {accessory === 'mortarboard' && (
                   <g className="texcat-accessory-mortarboard" aria-hidden="true" style={{ transformOrigin: '32px 14px' }}>
                     <ellipse cx="32" cy="16" rx="9" ry="3" fill="#0f172a" />
@@ -1883,7 +2209,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   </g>
                 )}
 
-                {/* Academic Accessory: Detective Deerstalker Cap */}
                 {accessory === 'detective' && (
                   <g className="texcat-accessory-detective" aria-hidden="true">
                     <path d="M18 16 C 18 8, 46 8, 46 16 Z" fill="#78350f" stroke="#451a03" strokeWidth="1.2" />
@@ -1892,11 +2217,95 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                     <path d="M30 8 L 34 8" stroke="#fbbf24" strokeWidth="1.5" />
                   </g>
                 )}
+
+                {accessory === 'monocle' && (
+                  <g className="texcat-accessory-monocle" aria-hidden="true">
+                    <circle cx="39" cy="26" r="5" stroke="#eab308" strokeWidth="1.5" fill="rgba(254,240,138,0.14)" />
+                    <path d="M44 27 Q 48 33 45 39" stroke="#eab308" strokeWidth="1.1" fill="none" strokeDasharray="2 1.5" />
+                  </g>
+                )}
+
+                {accessory === 'laurel' && (
+                  <g className="texcat-accessory-laurel" aria-hidden="true">
+                    <path d="M18 20 Q 19 11 30 11" stroke="#16a34a" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+                    <path d="M46 20 Q 45 11 34 11" stroke="#16a34a" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+                    <circle cx="32" cy="11" r="1.6" fill="#facc15" />
+                  </g>
+                )}
+
+                {accessory === 'visor' && (
+                  <g className="texcat-accessory-visor" aria-hidden="true">
+                    <path d="M17 18 Q 32 13 47 18 L 49 22 Q 32 18 15 22 Z" fill="rgba(16,185,129,0.72)" stroke="#065f46" strokeWidth="1.1" />
+                    <path d="M18 17 Q 32 13 46 17" stroke="#f8fafc" strokeWidth="1.6" fill="none" />
+                  </g>
+                )}
               </g>
 
-              {/* Front Paws & Activity Layers (Continuous SVG Structure) */}
-              {state === 'typing-paws' ? (
-                // Bongo Cat Drumming Paws & RGB Mechanical Keyboard
+              {/* Front Paws & Activity Layers (Hierarchy-Fixed & Prop-Complete) */}
+              {state === 'compile-warning' ? (
+                <g className="texcat-tape-measure" aria-hidden="true">
+                  <rect x="18" y="45" width="28" height="5" rx="1" fill="#facc15" stroke="#ca8a04" strokeWidth="1" />
+                  <line x1="22" y1="45" x2="22" y2="48" stroke="#713f12" strokeWidth="0.8" />
+                  <line x1="26" y1="45" x2="26" y2="49.5" stroke="#713f12" strokeWidth="0.8" />
+                  <line x1="30" y1="45" x2="30" y2="48" stroke="#713f12" strokeWidth="0.8" />
+                  <line x1="34" y1="45" x2="34" y2="49.5" stroke="#713f12" strokeWidth="0.8" />
+                  <line x1="38" y1="45" x2="38" y2="48" stroke="#713f12" strokeWidth="0.8" />
+                  <line x1="42" y1="45" x2="42" y2="49.5" stroke="#713f12" strokeWidth="0.8" />
+                  <ellipse cx="22" cy="51" rx="4" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.4" />
+                  <ellipse cx="42" cy="51" rx="4" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.4" />
+                </g>
+              ) : state === 'compile-fail' ? (
+                <g className="texcat-magnifier" aria-hidden="true" style={{ transformOrigin: '44px 42px' }}>
+                  <ellipse cx="23" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+                  <circle cx="44" cy="40" r="6" stroke="#38bdf8" strokeWidth="2" fill="rgba(56,189,248,0.22)" />
+                  <path d="M48.5 44.5 L 54.5 50.5" stroke="#94a3b8" strokeWidth="2.5" strokeLinecap="round" />
+                  <ellipse cx="41" cy="47" rx="4" ry="3.2" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.4" />
+                </g>
+              ) : state === 'coffee-sip' ? (
+                <g className="texcat-coffee-sip" aria-hidden="true">
+                  <path d="M29 36 Q 27 33 29 30" stroke="#cbd5e1" strokeWidth="1.1" strokeLinecap="round" fill="none" className="steam-wisp-1" />
+                  <path d="M35 36 Q 37 33 35 30" stroke="#cbd5e1" strokeWidth="1.1" strokeLinecap="round" fill="none" className="steam-wisp-2" />
+                  <rect x="26" y="40" width="12" height="11" rx="2" fill="#f8fafc" stroke="#64748b" strokeWidth="1.2" />
+                  <path d="M38 42 Q 42 45.5 38 49" stroke="#64748b" strokeWidth="1.4" fill="none" />
+                  <text x="32" y="47" fontSize="4.2" fill="#0284c7" fontWeight="bold" textAnchor="middle">TeX</text>
+                  <ellipse cx="24" cy="47" rx="3.8" ry="3.2" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.3" />
+                  <ellipse cx="40" cy="47" rx="3.8" ry="3.2" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.3" />
+                </g>
+              ) : state === 'origami-crane' ? (
+                <g className="texcat-origami-crane" aria-hidden="true">
+                  <polygon points="34,43 44,34 42,44" fill="#bae6fd" stroke="#0284c7" strokeWidth="0.9" />
+                  <polygon points="34,43 42,44 38,48" fill="#7dd3fc" stroke="#0284c7" strokeWidth="0.9" />
+                  <polygon points="42,44 48,39 45,45" fill="#e0f2fe" stroke="#0284c7" strokeWidth="0.9" />
+                  <polygon points="34,43 29,39 33,45" fill="#e0f2fe" stroke="#0284c7" strokeWidth="0.9" />
+                  <ellipse cx="23" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
+                  <ellipse cx="39" cy="49" rx="4" ry="3.2" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.4" />
+                </g>
+              ) : state === 'paper-shred' ? (
+                <g className="texcat-paper-shred" aria-hidden="true">
+                  <rect x="17" y="45" width="7" height="10" rx="0.8" fill="#f8fafc" stroke="#94a3b8" strokeWidth="0.9" transform="rotate(-14 20 50)" />
+                  <rect x="40" y="45" width="7" height="10" rx="0.8" fill="#f8fafc" stroke="#94a3b8" strokeWidth="0.9" transform="rotate(16 43 50)" />
+                  <line x1="19" y1="48" x2="22" y2="48" stroke="#ef4444" strokeWidth="0.9" />
+                  <line x1="41" y1="48" x2="45" y2="48" stroke="#ef4444" strokeWidth="0.9" />
+                  <ellipse cx="24" cy="47" rx="4" ry="3.2" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.4" className="paw-knead-left" />
+                  <ellipse cx="40" cy="47" rx="4" ry="3.2" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.4" className="paw-knead-right" />
+                </g>
+              ) : state === 'hairball-cough' ? (
+                <g className="texcat-hairball" aria-hidden="true">
+                  <ellipse cx="32" cy="53" rx="6.5" ry="3.8" fill="#475569" stroke="#1e293b" strokeWidth="1.1" />
+                  <text x="32" y="54.5" fontSize="4.2" fill="#f8fafc" fontWeight="bold" textAnchor="middle">{'{}'}</text>
+                  <ellipse cx="21" cy="51" rx="4.2" ry="3.4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.4" />
+                  <ellipse cx="43" cy="51" rx="4.2" ry="3.4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.4" />
+                </g>
+              ) : state === 'keyboard-sprawl' ? (
+                <g className="texcat-keyboard-sprawl" aria-hidden="true">
+                  <rect x="11" y="49" width="42" height="7" rx="1.8" fill="#1e293b" stroke="#475569" strokeWidth="1.1" />
+                  {[15, 20, 25, 30, 35, 40, 45].map(x => (
+                    <rect key={x} x={x} y="51" width="3.5" height="2" rx="0.4" fill="#94a3b8" />
+                  ))}
+                  <ellipse cx="19" cy="48" rx="5.5" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.4" />
+                  <ellipse cx="45" cy="48" rx="5.5" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.4" />
+                </g>
+              ) : state === 'typing-paws' ? (
                 <g className="texcat-bongo-rig">
                   <rect x="12" y="48" width="40" height="7" rx="2" fill="#0f172a" stroke="#38bdf8" strokeWidth="1" />
                   <line x1="16" y1="51.5" x2="48" y2="51.5" stroke="#a855f7" strokeWidth="1.5" strokeDasharray="3 2" />
@@ -1908,7 +2317,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   </g>
                 </g>
               ) : state === 'knuth-texbook' ? (
-                // Donald Knuth Easter Egg: Holding The TeXbook
                 <g className="texcat-knuth-book">
                   <rect x="23" y="42" width="18" height="14" rx="1.5" fill="#451a03" stroke="#f59e0b" strokeWidth="1" />
                   <rect x="25" y="44" width="14" height="10" fill="#78350f" />
@@ -1917,7 +2325,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   <ellipse cx="42" cy="49" rx="3" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.2" />
                 </g>
               ) : state === 'knuth-check' ? (
-                // Donald Knuth $2.56 Bug Reward Check from Bank of San Serriffe
                 <g className="texcat-knuth-check-prop">
                   <rect x="16" y="41" width="32" height="15" rx="1.5" fill="#fef9c3" stroke="#ca8a04" strokeWidth="1" />
                   <rect x="18" y="43" width="28" height="11" fill="#fffbeb" />
@@ -1927,7 +2334,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   <ellipse cx="44" cy="49" rx="3" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.2" />
                 </g>
               ) : state === 'box-sit' ? (
-                // \hbox Cardboard Shipping Box
                 <g className="texcat-cardboard-box">
                   <rect x="10" y="38" width="44" height="20" rx="2" fill="#b45309" stroke="#78350f" strokeWidth="1.5" opacity="0.95" />
                   <line x1="32" y1="38" x2="32" y2="58" stroke="#78350f" strokeWidth="1" strokeDasharray="3 2" />
@@ -1936,7 +2342,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   <ellipse cx="42" cy="38" rx="4" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.2" />
                 </g>
               ) : state === 'fish-feast' ? (
-                // Golden Fish Snack Treat
                 <g className="texcat-paw-fish">
                   <path d="M26 44 Q 32 40 38 44 Q 35 48 32 47 Q 29 48 26 44 Z" fill="#f59e0b" stroke="#b45309" strokeWidth="1" />
                   <polygon points="38,44 42,41 42,47" fill="#f59e0b" stroke="#b45309" strokeWidth="1" />
@@ -1945,7 +2350,6 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   <ellipse cx="37" cy="47" rx="3.5" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.2" />
                 </g>
               ) : state === 'knock-mug' ? (
-                // Mini Ceramic TeX Mug Nudged on Ledge
                 <g className="texcat-mug-rig">
                   <rect x="40" y="47" width="9" height="8" rx="1.2" fill="#f8fafc" stroke="#94a3b8" strokeWidth="1" transform="rotate(18 44 50)" />
                   <path d="M49 48 Q 52 50 49 53" stroke="#94a3b8" strokeWidth="1" fill="none" />
@@ -1954,25 +2358,21 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   <ellipse cx="38" cy="47" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 </g>
               ) : state === 'swat-cursor' ? (
-                // Swatting Towards Cursor
                 <g className="texcat-paw-swat">
                   <ellipse cx="20" cy="50" rx="4" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                   <ellipse cx="45" cy="36" rx="4.5" ry="4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 </g>
               ) : state === 'belly-flop' ? (
-                // Belly-Up Flop Paws in Air
                 <g className="texcat-paws-belly">
                   <ellipse cx="22" cy="44" rx="4" ry="4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                   <ellipse cx="42" cy="44" rx="4" ry="4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 </g>
               ) : state === 'ear-scratch' ? (
-                // Ear Scratch with Hind Leg
                 <g className="texcat-paw-scratch">
                   <ellipse cx="19" cy="22" rx="4" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                   <ellipse cx="40" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 </g>
               ) : state === 'compiling-scholar' ? (
-                // Scholar Manuscript
                 <g className="texcat-scholar-props">
                   <rect x="22" y="44" width="20" height="12" rx="1" fill="#f8fafc" stroke="#94a3b8" strokeWidth="1" />
                   <line x1="25" y1="47" x2="39" y2="47" stroke="#0284c7" strokeWidth="1" />
@@ -1982,43 +2382,36 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   <ellipse cx="42" cy="49" rx="3.5" ry="4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.2" />
                 </g>
               ) : state === 'face-wash' ? (
-                // Face Washing Paw Lick
                 <g className="texcat-paw-wash">
                   <ellipse cx="24" cy="29" rx="4" ry="4.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                   <ellipse cx="40" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 </g>
               ) : state === 'butterfly-bat' ? (
-                // Paw Batting Upwards
                 <g className="texcat-paw-bat">
                   <ellipse cx="30" cy="38" rx="4" ry="4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                   <ellipse cx="40" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 </g>
               ) : state === 'yoga-stretch' ? (
-                // Extended Front Paws
                 <g className="texcat-paws-extended">
                   <ellipse cx="18" cy="54" rx="5" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                   <ellipse cx="46" cy="54" rx="5" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                 </g>
               ) : state === 'facepalm-paw' ? (
-                // Facepalm paw over forehead / eyes
                 <g className="texcat-paw-facepalm">
                   <ellipse cx="24" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                   <ellipse cx="33" cy="27" rx="5" ry="4" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" transform="rotate(-20 33 27)" />
                 </g>
               ) : state === 'knead-dough' ? (
-                // Alternating dough kneading paws (making biscuits)
                 <g className="texcat-paws-knead">
                   <ellipse cx="22" cy="50" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" className="paw-knead-left" />
                   <ellipse cx="42" cy="54" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" className="paw-knead-right" />
                 </g>
               ) : state === 'cello-leg' ? (
-                // Hind leg straight up like a cello groom
                 <g className="texcat-paw-cello">
                   <ellipse cx="24" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                   <ellipse cx="45" cy="23" rx="3.5" ry="9" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" transform="rotate(16 45 23)" />
                 </g>
               ) : state === 'qed-celebration' ? (
-                // Holding celebratory golden QED medallion
                 <g className="texcat-paw-qed">
                   <ellipse cx="24" cy="52" rx="4.5" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                   <ellipse cx="40" cy="48" rx="4" ry="3.5" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
@@ -2026,14 +2419,12 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                   <text x="43" y="46.2" fontSize="3" fill="#713f12" fontWeight="bold" textAnchor="middle">QED</text>
                 </g>
               ) : state === 'focus-scholar' ? (
-                // Zen meditating paws
                 <g className="texcat-paws-zen">
                   <ellipse cx="26" cy="52" rx="4.5" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                   <ellipse cx="38" cy="52" rx="4.5" ry="3" fill={activePalette.furFill} stroke={activePalette.furStroke} strokeWidth="1.5" />
                   <circle cx="32" cy="51" r="2" fill="#38bdf8" opacity="0.6" />
                 </g>
               ) : state === 'loaf' ? (
-                // Loaf: Front paws completely tucked underneath
                 <g className="texcat-paws-loaf" />
               ) : state === 'lifted-scruff' ? (
                 <g className="texcat-paws-dangling">
@@ -2053,3 +2444,4 @@ export const DeskPet: React.FC<DeskPetProps> = ({
     </>
   );
 };
+

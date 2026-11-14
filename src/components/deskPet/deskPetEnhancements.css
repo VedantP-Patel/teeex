@@ -1,0 +1,60 @@
+/* src/components/deskPet/deskPetEnhancements.css */
+.texcat-rig {
+    transform: rotate(var(--pet-swing-deg, 0deg)) scaleX(var(--pet-scale-x, 1)) scaleY(var(--pet-scale-y, 1));
+    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+}
+
+.texcat-rig.is-landing-squash {
+    animation: texcat-landing-squash 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes texcat-landing-squash {
+    0% {
+        transform: scaleX(1.18) scaleY(0.84);
+    }
+
+    55% {
+        transform: scaleX(0.94) scaleY(1.06);
+    }
+
+    100% {
+        transform: scaleX(1) scaleY(1);
+    }
+}
+
+@keyframes texcat-steam-rise {
+    0% {
+        opacity: 0;
+        transform: translateY(2px);
+    }
+
+    50% {
+        opacity: 0.85;
+        transform: translateY(-2px);
+    }
+
+    100% {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+}
+
+.steam-wisp-1 {
+    animation: texcat-steam-rise 1.8s ease-in-out infinite;
+}
+
+.steam-wisp-2 {
+    animation: texcat-steam-rise 1.8s ease-in-out 0.7s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .texcat-rig,
+    .steam-wisp-1,
+    .steam-wisp-2 {
+        animation: none !important;
+        transition: none !important;
+        transform: none !important;
+    }
+}
