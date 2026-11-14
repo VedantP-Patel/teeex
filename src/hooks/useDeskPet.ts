@@ -1,3 +1,24 @@
+import { isFelineAudioMuted, setFelineAudioMuted, playFelineCue, type FelineAudioCue } from "../utils/felineSynth";
+import {
+  DEFAULT_FELINE_DRIVES,
+  stepFelineDrives,
+  deriveFelineMood,
+  computeGazeOffset,
+  computeTailPath,
+  type FelineDrives,
+  type FelineMood,
+  type GazeVector,
+  extractWorkspaceLedges,
+  computeScruffPendulumTilt,
+  classifyPettingZone,
+  applyPettingZoneInteraction,
+  type WorkspaceLedge,
+  type PettingZone,
+  stepYarnBallPhysics,
+  batYarnBall,
+  type ActiveToyMode,
+  type YarnBallState,
+} from "../utils/felineEngine";
 ﻿import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { DeskPetAudioEngine } from '../services/deskPetAudio';
 
@@ -236,6 +257,26 @@ export interface UseDeskPetOptions {
 }
 
 export interface UseDeskPetReturn {
+  isAudioMuted: boolean;
+  activeToy: ActiveToyMode;
+  yarnBall: YarnBallState;
+  toggleAudioMute: () => void;
+  triggerFelineSound: (cue: FelineAudioCue) => boolean;
+  setToyMode: (mode: ActiveToyMode) => void;
+  swatToyYarn: () => void;
+  activeLedgeId: string;
+  availableLedges: WorkspaceLedge[];
+  scruffTiltDeg: number;
+  lastPetZone: PettingZone | null;
+  handleZonePet: (localX: number, localY: number, width?: number, height?: number) => PettingZone;
+  jumpToLedge: (ledgeId?: string) => void;
+  updateScruffVelocity: (velocityX: number, dtSec?: number) => void;
+  drives: FelineDrives;
+  mood: FelineMood;
+  gazeOffset: GazeVector;
+  facingDirection: 'left' | 'right';
+  isBlinking: boolean;
+  tailPath: string;
   isEnabled: boolean;
   isExiting: boolean;
   entryVariant: DeskPetEntryVariant;
@@ -560,6 +601,26 @@ export function useDeskPet({
   }, []);
 
   const [state, setState] = useState<DeskPetActionState>('idle');
+  const [drives, setDrives] = useState<FelineDrives>(DEFAULT_FELINE_DRIVES);
+  const [gazeOffset, setGazeOffset] = useState<GazeVector>({ x: 0, y: 0 });
+  const [facingDirection, setFacingDirection] = useState<"left" | "right">("right");
+  const [isBlinking, setIsBlinking] = useState<boolean>(false);
+  const [activeLedgeId, setActiveLedgeId] = useState<string>("viewport-floor");
+  const [availableLedges, setAvailableLedges] = useState<WorkspaceLedge[]>([
+    { id: "viewport-floor", label: "Desk Floor", xMin: 16, xMax: 900, yBottom: 16 },
+  ]);
+  const [scruffTiltDeg, setScruffTiltDeg] = useState<number>(0);
+  const [lastPetZone, setLastPetZone] = useState<PettingZone | null>(null);
+  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(() => isFelineAudioMuted());
+  const [activeToy, setActiveToy] = useState<ActiveToyMode>("none");
+  const [yarnBall, setYarnBall] = useState<YarnBallState>({
+    x: 140,
+    y: 16,
+    vx: 0,
+    vy: 0,
+    angleDeg: 0,
+    radius: 11,
+  });
   const [direction, setDirection] = useState<'left' | 'right'>('right');
   const [pacingOffset, setPacingOffset] = useState<number>(0);
   const [dodgeOffsetX, setDodgeOffsetX] = useState<number>(0);
@@ -1736,7 +1797,200 @@ export function useDeskPet({
     };
   }, [isEnabled, clearStateTimer, resetInactivityTimer]);
 
-  return {
+  useEffect(() => {
+    if (!isEnabled) return;
+    const driveTimer = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      setDrives((prev) =>
+        stepFelineDrives(prev, {
+          dtSec: 2,
+          state,
+          isTypingActive: Boolean(isTypingActive),
+          cursorContext: cursorContext,
+        })
+      );
+    }, 2000);
+
+    const blinkTimer = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      setIsBlinking(true);
+      setTimeout(() => setIsBlinking(false), 130);
+    }, 4600);
+
+    return () => {
+      clearInterval(driveTimer);
+      clearInterval(blinkTimer);
+    };
+  }, [isEnabled, state, Boolean(isTypingActive), cursorContext]);
+
+  useEffect(() => {
+    if (!isEnabled || typeof window === "undefined") return;
+    let rafId: number | null = null;
+    const onPointerMove = (e: PointerEvent) => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        const petCenterX = window.innerWidth - (perchX + 34);
+        const petCenterY = window.innerHeight - (perchY + 34);
+        const nextGaze = computeGazeOffset({
+          pointerX: e.clientX,
+          pointerY: e.clientY,
+          petCenterX,
+          petCenterY,
+        });
+        setGazeOffset(nextGaze);
+        const deltaX = e.clientX - petCenterX;
+        if (Math.abs(deltaX) > 48) {
+          setFacingDirection(deltaX < 0 ? "left" : "right");
+        }
+      });
+    };
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+    };
+  }, [isEnabled, perchX, perchY]);
+
+  const mood: FelineMood = useMemo(() => deriveFelineMood(drives, state), [drives, state]);
+  const tailPath: string = useMemo(() => computeTailPath(mood), [mood]);
+
+    useEffect(() => {
+    if (!isEnabled || typeof window === "undefined" || typeof document === "undefined") return;
+
+    const scanLedges = () => {
+      const candidates: Array<{ id: string; label: string; selector: string }> = [
+        { id: "editor-pane", label: "Editor Ledge", selector: ".cm-editor" },
+        { id: "preview-pane", label: "PDF Ledge", selector: ".pdf-preview-pane, [data-ledge='preview']" },
+        { id: "toolbar-ledge", label: "Toolbar Ledge", selector: "header, .toolbar, [data-ledge='toolbar']" },
+      ];
+      const rects = candidates
+        .map((c) => {
+          const el = document.querySelector(c.selector);
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { id: c.id, label: c.label, top: r.top, left: r.left, right: r.right, bottom: r.bottom };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+
+      setAvailableLedges(extractWorkspaceLedges(window.innerWidth, window.innerHeight, rects));
+    };
+
+    scanLedges();
+    window.addEventListener("resize", scanLedges, { passive: true });
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(scanLedges);
+      observer.observe(document.body);
+    }
+    return () => {
+      window.removeEventListener("resize", scanLedges);
+      observer?.disconnect();
+    };
+  }, [isEnabled]);
+
+  const handleZonePet = useCallback(
+    (localX: number, localY: number, width = 68, height = 68): PettingZone => {
+      const zone = classifyPettingZone(localX, localY, width, height);
+      setLastPetZone(zone);
+      setDrives((prev) => {
+        const outcome = applyPettingZoneInteraction(prev, zone);
+        setState(outcome.reaction as never);
+        return outcome.drives;
+      });
+      return zone;
+    },
+    []
+  );
+
+  const jumpToLedge = useCallback(
+    (ledgeId?: string) => {
+      if (availableLedges.length === 0) return;
+      const target = ledgeId
+        ? availableLedges.find((l) => l.id === ledgeId) ?? availableLedges[0]
+        : availableLedges[(availableLedges.findIndex((l) => l.id === activeLedgeId) + 1) % availableLedges.length];
+      setActiveLedgeId(target.id);
+      setState("pounce-leap" as never);
+      setPerchX(Math.min(target.xMax, Math.max(target.xMin, perchX)));
+      setPerchY(target.yBottom);
+    },
+    [availableLedges, activeLedgeId, perchX]
+  );
+
+  const updateScruffVelocity = useCallback((velocityX: number, dtSec = 0.016) => {
+    setScruffTiltDeg((prev) => computeScruffPendulumTilt(velocityX, prev, dtSec));
+  }, []);
+
+  const toggleAudioMute = useCallback(() => {
+    setIsAudioMuted((prev) => {
+      const next = setFelineAudioMuted(!prev);
+      if (!next) playFelineCue("trill", true);
+      return next;
+    });
+  }, []);
+
+  const triggerFelineSound = useCallback(
+    (cue: FelineAudioCue): boolean => {
+      if (isAudioMuted) return false;
+      return playFelineCue(cue);
+    },
+    [isAudioMuted]
+  );
+
+  const setToyMode = useCallback(
+    (mode: ActiveToyMode) => {
+      setActiveToy((prev) => {
+        const resolved = prev === mode ? "none" : mode;
+        if (resolved === "laser") {
+          setState("laser-chase" as never);
+          if (!isAudioMuted) playFelineCue("chirp");
+        } else if (resolved === "yarn") {
+          setState("yarn-chase" as never);
+          setYarnBall({ x: perchX + 64, y: perchY + 48, vx: 180, vy: 260, angleDeg: 0, radius: 11 });
+          if (!isAudioMuted) playFelineCue("trill");
+        }
+        return resolved;
+      });
+    },
+    [isAudioMuted, perchX, perchY]
+  );
+
+  const swatToyYarn = useCallback(() => {
+    setYarnBall((prev) => batYarnBall(prev, facingDirection));
+    setState("yarn-chase" as never);
+    if (!isAudioMuted) playFelineCue("chirp");
+  }, [facingDirection, isAudioMuted]);
+
+  useEffect(() => {
+    if (!isEnabled || activeToy !== "yarn") return;
+    const timer = setInterval(() => {
+      const maxX = typeof window !== "undefined" ? Math.max(120, window.innerWidth - 40) : 900;
+      setYarnBall((prev) => stepYarnBallPhysics(prev, { minX: 16, maxX, floorY: 16 }, 0.032));
+    }, 32);
+    return () => clearInterval(timer);
+  }, [isEnabled, activeToy]);
+
+return {
+    isAudioMuted,
+    activeToy,
+    yarnBall,
+    toggleAudioMute,
+    triggerFelineSound,
+    setToyMode,
+    swatToyYarn,
+    activeLedgeId,
+    availableLedges,
+    scruffTiltDeg,
+    lastPetZone,
+    handleZonePet,
+    jumpToLedge,
+    updateScruffVelocity,
+    drives,
+    mood,
+    gazeOffset,
+    facingDirection,
+    isBlinking,
+    tailPath,
     isEnabled,
     isExiting,
     entryVariant,

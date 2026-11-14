@@ -1,3 +1,6 @@
+import { DEFAULT_FELINE_DRIVES, type FelineDrives, type FelineMood, type GazeVector, type PettingZone,
+  type ActiveToyMode,
+} from "../utils/felineEngine";
 ﻿import React, { useState, useMemo, useEffect, useRef } from 'react';
 import katex from 'katex';
 import '../styles/deskPetEnhancements.css';
@@ -35,6 +38,22 @@ import {
 } from 'lucide-react';
 
 export interface DeskPetProps {
+  isAudioMuted?: boolean;
+  activeToy?: ActiveToyMode;
+  onToggleAudioMute?: () => void;
+  onSelectToyMode?: (mode: ActiveToyMode) => void;
+  onSwatYarn?: () => void;
+  activeLedgeId?: string;
+  scruffTiltDeg?: number;
+  lastPetZone?: PettingZone | null;
+  onZonePet?: (localX: number, localY: number, width?: number, height?: number) => void;
+  onJumpLedge?: (ledgeId?: string) => void;
+  drives?: FelineDrives;
+  mood?: FelineMood;
+  gazeOffset?: GazeVector;
+  facingDirection?: "left" | "right";
+  isBlinking?: boolean;
+  tailPath?: string;
   isEnabled: boolean;
   isExiting?: boolean;
   entryVariant?: DeskPetEntryVariant;
@@ -191,6 +210,22 @@ const SKIN_PALETTES: Record<DeskPetSkin, SkinPalette> = {
 };
 
 export const DeskPet: React.FC<DeskPetProps> = ({
+  isAudioMuted = false,
+  activeToy = "none",
+  onToggleAudioMute,
+  onSelectToyMode,
+  onSwatYarn,
+  activeLedgeId = "viewport-floor",
+  scruffTiltDeg = 0,
+  lastPetZone = null,
+  onZonePet,
+  onJumpLedge,
+  drives = DEFAULT_FELINE_DRIVES,
+  mood = "content",
+  gazeOffset = { x: 0, y: 0 },
+  facingDirection = "right",
+  isBlinking = false,
+  tailPath,
   isEnabled,
   isExiting = false,
   entryVariant = 'box',
@@ -1379,6 +1414,59 @@ export const DeskPet: React.FC<DeskPetProps> = ({
                     >
                       {skin === s && <Check size={11} color={s === 'calico' || s === 'siamese' ? '#0f172a' : '#ffffff'} />}
                     </button>
+                  ))}
+                  <div className="texcat-toy-bar" aria-label="TeXCat toys and audio">
+                    <button
+                      type="button"
+                      className="texcat-toy-btn"
+                      data-active={String(!isAudioMuted)}
+                      onClick={() => onToggleAudioMute?.()}
+                    >
+                      {isAudioMuted ? "Muted" : "SFX On"}
+                    </button>
+                    <button
+                      type="button"
+                      className="texcat-toy-btn"
+                      data-active={String(activeToy === "laser")}
+                      onClick={() => onSelectToyMode?.("laser")}
+                    >
+                      Laser
+                    </button>
+                    <button
+                      type="button"
+                      className="texcat-toy-btn"
+                      data-active={String(activeToy === "yarn")}
+                      onClick={() => {
+                        if (activeToy === "yarn" && onSwatYarn) onSwatYarn();
+                        else onSelectToyMode?.("yarn");
+                      }}
+                    >
+                      {activeToy === "yarn" ? "Bat Yarn" : "Yarn"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="texcat-drives-grid" aria-label="TeXCat live mood and drives">
+                  <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+                    <span style={{ fontSize: 9.5, color: "var(--text-muted)", fontWeight: 600 }} data-ledge={activeLedgeId} data-tilt={scruffTiltDeg} data-pet-zone={lastPetZone ?? "none"} onClick={() => { if (onZonePet) onZonePet(38, 30, 68, 68); }}>Feline Mood</span>
+                    <button type="button" className="texcat-ledge-pill" onClick={() => onJumpLedge?.()} title="Hop between workspace ledges">Hop Ledge</button>
+                    <span className="texcat-mood-pill" data-mood={mood} data-facing={facingDirection} data-blink={isBlinking ? "1" : "0"} data-gaze={`${gazeOffset.x},${gazeOffset.y}`} data-tail={tailPath ? "1" : "0"}>{mood}</span>
+                  </div>
+                  {[
+                    { label: "Energy", val: drives.energy, color: "#38bdf8" },
+                    { label: "Curiosity", val: drives.curiosity, color: "#a78bfa" },
+                    { label: "Affection", val: drives.affection, color: "#f472b6" },
+                    { label: "Mischief", val: drives.mischief, color: "#fbbf24" },
+                  ].map((d) => (
+                    <div key={d.label} className="texcat-drive-item">
+                      <div className="texcat-drive-label">
+                        <span>{d.label}</span>
+                        <span>{Math.round(d.val * 100)}%</span>
+                      </div>
+                      <div className="texcat-drive-track">
+                        <div className="texcat-drive-fill" style={{ width: `${Math.round(d.val * 100)}%`, backgroundColor: d.color }} />
+                      </div>
+                    </div>
                   ))}
                 </div>
 
