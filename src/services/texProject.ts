@@ -143,6 +143,11 @@ export function toEngineFiles(
         shouldMount = true;
       } else if (base === 'program' && requestedClasses.has('sn-jnl')) {
         shouldMount = true;
+      } else if (
+        (base === 'xpatch' || base === 'mweights' || base === 'xstring') &&
+        (requestedPackages.has('newtx') || requestedPackages.has('newtxtext') || requestedPackages.has('newtxmath') || entryContent.includes('newtx'))
+      ) {
+        shouldMount = true;
       }
     } else if (
       (lowerName.startsWith('xkeyval') || lowerName.startsWith('xkv') || lowerName === 'keyval.tex') &&
@@ -150,8 +155,13 @@ export function toEngineFiles(
     ) {
       shouldMount = true;
     } else if (
-      (lowerName.startsWith('newtx') || lowerName === 'xpatch.sty' || lowerName === 'mweights.sty' || lowerName === 'binhex.tex') &&
+      (lowerName.startsWith('newtx') || lowerName === 'xpatch.sty' || lowerName === 'mweights.sty' || lowerName === 'binhex.tex' || lowerName.startsWith('xstring')) &&
       (requestedPackages.has('newtx') || requestedPackages.has('newtxtext') || requestedPackages.has('newtxmath') || entryContent.includes('newtx'))
+    ) {
+      shouldMount = true;
+    } else if (
+      (lowerName.startsWith('xstring') || lowerName === 'xstring.tex') &&
+      (requestedPackages.has('xstring') || entryContent.includes('xstring'))
     ) {
       shouldMount = true;
     } else if (lowerName === 'microtype-pdftex.def' && requestedPackages.has('microtype')) {

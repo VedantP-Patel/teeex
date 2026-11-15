@@ -198,5 +198,13 @@
   "xkvview.sty": {
     "bytes": 6984,
     "sha256": "275632d353ab740dd788a9afc1ffdffb7f949d483596c87338572e5a2a0966df"
+  },
+  "xstring.sty": {
+    "bytes": 123,
+    "sha256": "6b2fdbe2c3a1f873a6c19fc8da67001e269580be2827040b152cc59216b022c4"
+  },
+  "xstring.tex": {
+    "bytes": 49397,
+    "sha256": "5cfb52e795a80a1e8f06280a8f968046a6fa05d5dae2313933d36b8e6eaf8c35"
   }
 }

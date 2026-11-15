@@ -20,6 +20,8 @@ describe('newtx Package Resolution and Upstream Fallback', () => {
       'xpatch.sty',
       'mweights.sty',
       'binhex.tex',
+      'xstring.sty',
+      'xstring.tex',
     ];
 
     for (const name of required) {

@@ -60,6 +60,8 @@ export const ESSENTIAL_PACKAGES = [
   'keyval.tex',
   'xkvltxp.sty',
   'xkvview.sty',
+  'xstring.sty',
+  'xstring.tex',
 ];
 
 export const UPSTREAM_BASE = 'https://texlive2026.texlyre.org/26';

@@ -68,6 +68,8 @@ const BUNDLED_STATIC_FILES = new Set([
   'xkvutils.tex',
   'xkvview.sty',
   'xpatch.sty',
+  'xstring.sty',
+  'xstring.tex',
 ]);
 
 function resolveTexContentType(path: string): string | null {

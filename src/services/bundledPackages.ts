@@ -80,6 +80,8 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'keyval.tex', format: 26 },
   { name: 'xkvltxp.sty', format: 26 },
   { name: 'xkvview.sty', format: 26 },
+  { name: 'xstring.sty', format: 26 },
+  { name: 'xstring.tex', format: 26 },
 ];
 
 export const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
@@ -498,6 +500,8 @@ function extractRequirements(text: string): Array<{ name: string; format: number
       'xpatch.sty',
       'mweights.sty',
       'binhex.tex',
+      'xstring.sty',
+      'xstring.tex',
       'ot1ntxtlf.fd',
       't1ntxtlf.fd',
       'ntx-Regular-tlf-ot1.tfm',
@@ -539,6 +543,11 @@ function extractRequirements(text: string): Array<{ name: string; format: number
     for (const name of xkeyvalFiles) {
       out.push({ name, format: 26 });
     }
+  }
+
+  if (text.includes('xstring')) {
+    out.push({ name: 'xstring.sty', format: 26 });
+    out.push({ name: 'xstring.tex', format: 26 });
   }
 
   return out;
