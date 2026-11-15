@@ -107,10 +107,10 @@ describe('Stage 3: Package Poison Guard & In-Flight Coalescing', () => {
     });
   });
 
-  describe('160-File Cap Budget Enforcement', () => {
-    it('limits a document with 200 distinct imports to at most 160 prefetched files', async () => {
-      // Generate document with 200 distinct packages
-      const packages = Array.from({ length: 200 }, (_, i) => `pkg${i}`);
+  describe('File Cap Budget Enforcement', () => {
+    it('limits a document exceeding the budget to at most MAX_PRELOADED_FILES prefetched files', async () => {
+      // Generate document with 300 distinct packages (exceeding budget)
+      const packages = Array.from({ length: 300 }, (_, i) => `pkg${i}`);
       const doc = `\\usepackage{${packages.join(',')}}`;
 
       global.fetch = vi.fn().mockImplementation(async (url: string) => {
@@ -122,7 +122,7 @@ describe('Stage 3: Package Poison Guard & In-Flight Coalescing', () => {
 
       const results = await preloadDocumentPackages(doc, 'https://mock.texlive.org');
       expect(results.length).toBeLessThanOrEqual(MAX_PRELOADED_FILES);
-      expect(results.length).toBe(160);
+      expect(results.length).toBe(MAX_PRELOADED_FILES);
     });
   });
 

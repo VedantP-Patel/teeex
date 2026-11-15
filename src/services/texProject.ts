@@ -148,7 +148,17 @@ export function toEngineFiles(
         (requestedPackages.has('newtx') || requestedPackages.has('newtxtext') || requestedPackages.has('newtxmath') || requestedPackages.has('fontaxes') || requestedPackages.has('figureversions') || entryContent.includes('newtx') || entryContent.includes('fontaxes') || entryContent.includes('figureversions'))
       ) {
         shouldMount = true;
+      } else if (
+        (base === 'tikz' || base.startsWith('pgf')) &&
+        (requestedPackages.has('tikz') || requestedPackages.has('pgf') || entryContent.includes('tikz') || entryContent.includes('pgf') || entryContent.includes('tikzpicture'))
+      ) {
+        shouldMount = true;
       }
+    } else if (
+      (lowerName.startsWith('tikz') || lowerName.startsWith('pgf')) &&
+      (requestedPackages.has('tikz') || requestedPackages.has('pgf') || entryContent.includes('tikz') || entryContent.includes('pgf') || entryContent.includes('tikzpicture'))
+    ) {
+      shouldMount = true;
     } else if (
       (lowerName.startsWith('xkeyval') || lowerName.startsWith('xkv') || lowerName === 'keyval.tex') &&
       (requestedPackages.has('xkeyval') || requestedPackages.has('keyval') || entryContent.includes('xkeyval') || entryContent.includes('keyval'))

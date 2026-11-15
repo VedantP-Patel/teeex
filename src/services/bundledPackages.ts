@@ -85,6 +85,43 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'fontaxes.sty', format: 26 },
   { name: 'fontaxes-v1.sty', format: 26 },
   { name: 'figureversions.sty', format: 26 },
+  { name: 'tikz.sty', format: 26 },
+  { name: 'tikz.code.tex', format: 26 },
+  { name: 'pgf.sty', format: 26 },
+  { name: 'pgfrcs.sty', format: 26 },
+  { name: 'pgfrcs.code.tex', format: 26 },
+  { name: 'pgfcore.sty', format: 26 },
+  { name: 'pgfcore.code.tex', format: 26 },
+  { name: 'pgfsys.sty', format: 26 },
+  { name: 'pgfsys.code.tex', format: 26 },
+  { name: 'pgfsys-pdftex.def', format: 26 },
+  { name: 'pgffor.sty', format: 26 },
+  { name: 'pgffor.code.tex', format: 26 },
+  { name: 'pgfkeys.sty', format: 26 },
+  { name: 'pgfkeys.code.tex', format: 26 },
+  { name: 'pgfmath.sty', format: 26 },
+  { name: 'pgfmath.code.tex', format: 26 },
+  { name: 'pgfutil-common.tex', format: 26 },
+  { name: 'pgfutil-latex.def', format: 26 },
+  { name: 'pgfcomp-version-0-65.sty', format: 26 },
+  { name: 'pgfcomp-version-1-18.sty', format: 26 },
+  { name: 'pgfcorepoints.code.tex', format: 26 },
+  { name: 'pgfcorepathconstruct.code.tex', format: 26 },
+  { name: 'pgfcorepathusage.code.tex', format: 26 },
+  { name: 'pgfcorescopes.code.tex', format: 26 },
+  { name: 'pgfcoregraphicstate.code.tex', format: 26 },
+  { name: 'pgfcoretransformations.code.tex', format: 26 },
+  { name: 'pgfcorequick.code.tex', format: 26 },
+  { name: 'pgfcoreobjects.code.tex', format: 26 },
+  { name: 'pgfcorepathprocessing.code.tex', format: 26 },
+  { name: 'pgfcorearrows.code.tex', format: 26 },
+  { name: 'pgfcoreshade.code.tex', format: 26 },
+  { name: 'pgfcoreimage.code.tex', format: 26 },
+  { name: 'pgfcoreexternal.code.tex', format: 26 },
+  { name: 'pgfcorelayers.code.tex', format: 26 },
+  { name: 'pgfcoretransparency.code.tex', format: 26 },
+  { name: 'pgfcorepatterns.code.tex', format: 26 },
+  { name: 'pgfcorerdf.code.tex', format: 26 },
 ];
 
 export const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
@@ -187,8 +224,8 @@ export async function readResponseLimited(
  * pass even starts. A file missed by the prefetch is not an error — kpathsea
  * still resolves it at compile time, just more slowly.
  */
-const MAX_DEPENDENCY_DEPTH = 4;
-export const MAX_PRELOADED_FILES = 160;
+const MAX_DEPENDENCY_DEPTH = 8;
+export const MAX_PRELOADED_FILES = 240;
 
 /**
  * Long enough that a cold CDN edge is not mistaken for a missing file.
@@ -560,6 +597,51 @@ function extractRequirements(text: string): Array<{ name: string; format: number
     out.push({ name: 'fontaxes.sty', format: 26 });
     out.push({ name: 'fontaxes-v1.sty', format: 26 });
     out.push({ name: 'figureversions.sty', format: 26 });
+  }
+
+  if (text.includes('tikz') || text.includes('pgf') || text.includes('tikzpicture')) {
+    const tikzFiles = [
+      'tikz.sty',
+      'tikz.code.tex',
+      'pgf.sty',
+      'pgfrcs.sty',
+      'pgfrcs.code.tex',
+      'pgfcore.sty',
+      'pgfcore.code.tex',
+      'pgfsys.sty',
+      'pgfsys.code.tex',
+      'pgfsys-pdftex.def',
+      'pgffor.sty',
+      'pgffor.code.tex',
+      'pgfkeys.sty',
+      'pgfkeys.code.tex',
+      'pgfmath.sty',
+      'pgfmath.code.tex',
+      'pgfutil-common.tex',
+      'pgfutil-latex.def',
+      'pgfcomp-version-0-65.sty',
+      'pgfcomp-version-1-18.sty',
+      'pgfcorepoints.code.tex',
+      'pgfcorepathconstruct.code.tex',
+      'pgfcorepathusage.code.tex',
+      'pgfcorescopes.code.tex',
+      'pgfcoregraphicstate.code.tex',
+      'pgfcoretransformations.code.tex',
+      'pgfcorequick.code.tex',
+      'pgfcoreobjects.code.tex',
+      'pgfcorepathprocessing.code.tex',
+      'pgfcorearrows.code.tex',
+      'pgfcoreshade.code.tex',
+      'pgfcoreimage.code.tex',
+      'pgfcoreexternal.code.tex',
+      'pgfcorelayers.code.tex',
+      'pgfcoretransparency.code.tex',
+      'pgfcorepatterns.code.tex',
+      'pgfcorerdf.code.tex',
+    ];
+    for (const name of tikzFiles) {
+      out.push({ name, format: 26 });
+    }
   }
 
   return out;
