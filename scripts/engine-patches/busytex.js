@@ -6961,6 +6961,13 @@ changes have the same license
         FS.writeFile(savepath, contents);
         KPSE_REMOTE.hits[format + '/' + name] = savepath;
         delete KPSE_REMOTE.misses[format + '/' + name];
+        if (format === 26 && /\.(tex|sty|cls|def|fd|clo)$/i.test(name)) {
+          var baseName = name.replace(/\.(tex|sty|cls|def|fd|clo)$/i, '');
+          if (name.toLowerCase().endsWith('.tex') || !(format + '/' + baseName in KPSE_REMOTE.hits)) {
+            KPSE_REMOTE.hits[format + '/' + baseName] = savepath;
+            delete KPSE_REMOTE.misses[format + '/' + baseName];
+          }
+        }
         return savepath;
       },
       registerMisses: function (keys) {
@@ -6976,6 +6983,24 @@ changes have the same license
         if (key in KPSE_REMOTE.hits) return KPSE_REMOTE.hits[key];
         var savepath = KPSE_REMOTE.pathFor(name, format);
         try { FS.stat(savepath); KPSE_REMOTE.hits[key] = savepath; return savepath; } catch (e) { }
+        if (format === 26 && name.indexOf('.') === -1) {
+          var candidates = ['.tex', '.sty', '.def', '.cls'];
+          for (var c = 0; c < candidates.length; c++) {
+            var candName = name + candidates[c];
+            var candKey = format + '/' + candName;
+            if (candKey in KPSE_REMOTE.hits) {
+              KPSE_REMOTE.hits[key] = KPSE_REMOTE.hits[candKey];
+              return KPSE_REMOTE.hits[key];
+            }
+            var candPath = KPSE_REMOTE.pathFor(candName, format);
+            try {
+              FS.stat(candPath);
+              KPSE_REMOTE.hits[candKey] = candPath;
+              KPSE_REMOTE.hits[key] = candPath;
+              return candPath;
+            } catch (e2) { }
+          }
+        }
         return null;
       },
       isMiss: function (name, format) {
@@ -7011,77 +7036,99 @@ changes have the same license
           return null;
         }
 
-        // 1. Fast-path: check same-origin /packages/<name> for bundled assets (<10ms)
-        try {
-          var localXhr = new XMLHttpRequest();
-          localXhr.open('GET', '/packages/' + encodeURIComponent(name), false);
-          localXhr.timeout = 1000;
-          localXhr.responseType = 'arraybuffer';
-          localXhr.send();
-          var localType = localXhr.getResponseHeader('content-type') || '';
-          var localData = null;
-          if (localXhr.status === 200 && !localType.includes('text/html')) {
-            if (localXhr.response instanceof ArrayBuffer && localXhr.response.byteLength > 0) {
-              localData = new Uint8Array(localXhr.response);
-            } else if (typeof localXhr.responseText === 'string' && localXhr.responseText.length > 0) {
-              localData = new TextEncoder().encode(localXhr.responseText);
-            } else if (typeof localXhr.response === 'string' && localXhr.response.length > 0) {
-              localData = new TextEncoder().encode(localXhr.response);
-            }
-          }
-          if (localData && localData.byteLength > 0) {
-            return KPSE_REMOTE.register(name, format, localData);
-          }
-        } catch (_localErr) {}
+        var namesToTry = [name];
+        if (format === 26 && name.indexOf('.') === -1) {
+          namesToTry = [name + '.tex', name + '.sty', name];
+        }
 
-        // 2. Fetch from remote endpoint with an 8s circuit breaker (never block indefinitely)
         var endpointsToTry = [endpoint];
         if (endpoint.indexOf('texlive2026.texlyre.org') === -1) {
           endpointsToTry.push('https://texlive2026.texlyre.org');
         }
 
-        for (var i = 0; i < endpointsToTry.length; i++) {
-          var ep = endpointsToTry[i];
-          var url = ep + (ep.endsWith('/') ? '' : '/') + format + '/' + encodeURIComponent(name);
-          var xhr = new XMLHttpRequest();
-          xhr.open('GET', url, false);
-          xhr.timeout = 8000;
-          xhr.responseType = 'arraybuffer';
-          try { xhr.send(); } catch (e) {
-            continue;
-          }
-          var remoteType = xhr.getResponseHeader('content-type') || '';
-          var remoteData = null;
-          if (xhr.status === 200 && !remoteType.includes('text/html')) {
-            if (xhr.response instanceof ArrayBuffer && xhr.response.byteLength > 0) {
-              remoteData = new Uint8Array(xhr.response);
-            } else if (typeof xhr.responseText === 'string' && xhr.responseText.length > 0) {
-              remoteData = new TextEncoder().encode(xhr.responseText);
-            } else if (typeof xhr.response === 'string' && xhr.response.length > 0) {
-              remoteData = new TextEncoder().encode(xhr.response);
+        for (var nIdx = 0; nIdx < namesToTry.length; nIdx++) {
+          var targetName = namesToTry[nIdx];
+
+          // 1. Fast-path: check same-origin /packages/<targetName> for bundled assets (<10ms)
+          try {
+            var localXhr = new XMLHttpRequest();
+            localXhr.open('GET', '/packages/' + encodeURIComponent(targetName), false);
+            localXhr.timeout = 1000;
+            localXhr.responseType = 'arraybuffer';
+            localXhr.send();
+            var localType = localXhr.getResponseHeader('content-type') || '';
+            var localData = null;
+            if (localXhr.status === 200 && !localType.includes('text/html')) {
+              if (localXhr.response instanceof ArrayBuffer && localXhr.response.byteLength > 0) {
+                localData = new Uint8Array(localXhr.response);
+              } else if (typeof localXhr.responseText === 'string' && localXhr.responseText.length > 0) {
+                localData = new TextEncoder().encode(localXhr.responseText);
+              } else if (typeof localXhr.response === 'string' && localXhr.response.length > 0) {
+                localData = new TextEncoder().encode(localXhr.response);
+              }
             }
-          }
-          if (remoteData && remoteData.byteLength > 0) {
-            var bytes = remoteData;
-            if (typeof indexedDB !== 'undefined') {
-              try {
-                var dbReq = indexedDB.open('teeex_packages_db', 1);
-                dbReq.onupgradeneeded = function (ev) {
-                  var db = ev.target.result;
-                  if (!db.objectStoreNames.contains('packages')) db.createObjectStore('packages', { keyPath: 'key' });
-                  if (!db.objectStoreNames.contains('misses')) db.createObjectStore('misses', { keyPath: 'key' });
-                };
-                dbReq.onsuccess = function (ev) {
-                  var db = ev.target.result;
-                  try {
-                    var tx = db.transaction(['packages', 'misses'], 'readwrite');
-                    tx.objectStore('packages').put({ key: format + '/' + name, name: name, format: format, content: bytes });
-                    tx.objectStore('misses').delete(format + '/' + name);
-                  } catch (e2) {}
-                };
-              } catch (e1) {}
+            if (localData && localData.byteLength > 0) {
+              var regLocal = KPSE_REMOTE.register(targetName, format, localData);
+              if (targetName !== name) {
+                KPSE_REMOTE.hits[format + '/' + name] = regLocal;
+                delete KPSE_REMOTE.misses[format + '/' + name];
+              }
+              return regLocal;
             }
-            return KPSE_REMOTE.register(name, format, bytes);
+          } catch (_localErr) {}
+
+          // 2. Fetch from remote endpoint with an 8s circuit breaker (never block indefinitely)
+          for (var i = 0; i < endpointsToTry.length; i++) {
+            var ep = endpointsToTry[i];
+            var url = ep + (ep.endsWith('/') ? '' : '/') + format + '/' + encodeURIComponent(targetName);
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', url, false);
+            xhr.timeout = 8000;
+            xhr.responseType = 'arraybuffer';
+            try { xhr.send(); } catch (e) {
+              continue;
+            }
+            var remoteType = xhr.getResponseHeader('content-type') || '';
+            var remoteData = null;
+            if (xhr.status === 200 && !remoteType.includes('text/html')) {
+              if (xhr.response instanceof ArrayBuffer && xhr.response.byteLength > 0) {
+                remoteData = new Uint8Array(xhr.response);
+              } else if (typeof xhr.responseText === 'string' && xhr.responseText.length > 0) {
+                remoteData = new TextEncoder().encode(xhr.responseText);
+              } else if (typeof xhr.response === 'string' && xhr.response.length > 0) {
+                remoteData = new TextEncoder().encode(xhr.response);
+              }
+            }
+            if (remoteData && remoteData.byteLength > 0) {
+              var bytes = remoteData;
+              if (typeof indexedDB !== 'undefined') {
+                try {
+                  var dbReq = indexedDB.open('teeex_packages_db', 1);
+                  dbReq.onupgradeneeded = function (ev) {
+                    var db = ev.target.result;
+                    if (!db.objectStoreNames.contains('packages')) db.createObjectStore('packages', { keyPath: 'key' });
+                    if (!db.objectStoreNames.contains('misses')) db.createObjectStore('misses', { keyPath: 'key' });
+                  };
+                  dbReq.onsuccess = function (ev) {
+                    var db = ev.target.result;
+                    try {
+                      var tx = db.transaction(['packages', 'misses'], 'readwrite');
+                      tx.objectStore('packages').put({ key: format + '/' + targetName, name: targetName, format: format, content: bytes });
+                      tx.objectStore('misses').delete(format + '/' + targetName);
+                      if (targetName !== name) {
+                        tx.objectStore('misses').delete(format + '/' + name);
+                      }
+                    } catch (e2) {}
+                  };
+                } catch (e1) {}
+              }
+              var regRemote = KPSE_REMOTE.register(targetName, format, bytes);
+              if (targetName !== name) {
+                KPSE_REMOTE.hits[format + '/' + name] = regRemote;
+                delete KPSE_REMOTE.misses[format + '/' + name];
+              }
+              return regRemote;
+            }
           }
         }
 
@@ -7161,6 +7208,14 @@ changes have the same license
         return stringToNewUTF8(hit);
       }
       if (KPSE_REMOTE.isMiss(name, format)) {
+        if (format === 26 && name.indexOf('.') === -1) {
+          var candHit = KPSE_REMOTE.lookup(name + '.tex', format) || KPSE_REMOTE.lookup(name + '.sty', format);
+          if (candHit) {
+            delete KPSE_REMOTE.misses[format + '/' + name];
+            KPSE_REMOTE.hits[format + '/' + name] = candHit;
+            return stringToNewUTF8(candHit);
+          }
+        }
         console.warn("[FONT-DEBUG] cached miss", { name: name, format: format });
         return 0;
       }

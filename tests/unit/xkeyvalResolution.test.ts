@@ -4,7 +4,9 @@ import {
   BUNDLED_PACKAGE_NAMES,
   preloadDocumentPackages,
   deleteMissFromIndexedDb,
+  getBundledPackages,
 } from '../../src/services/bundledPackages';
+import { toEngineFiles } from '../../src/services/texProject';
 
 describe('xkeyval Suite Package Resolution and Integration', () => {
   beforeEach(() => {
@@ -140,5 +142,47 @@ describe('xkeyval Suite Package Resolution and Integration', () => {
         '26/keyval.tex',
       ])
     ).resolves.not.toThrow();
+  });
+
+  it('mounts companion files and extensionless aliases in toEngineFiles when xkeyval is declared', async () => {
+    // Warm package memory cache
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string | URL | Request) => {
+      const urlStr = url.toString();
+      if (urlStr.includes('/packages/xkeyval.sty')) {
+        return new Response('\\ProvidesPackage{xkeyval}[2025/11/04]', { status: 200 });
+      }
+      if (urlStr.includes('/packages/xkeyval.tex')) {
+        return new Response('\\let\\XKeyValLoaded\\endinput\n', { status: 200 });
+      }
+      if (urlStr.includes('/packages/xkvutils.tex')) {
+        return new Response('\\let\\XKeyValUtilsLoaded\\endinput\n', { status: 200 });
+      }
+      return new Response('% ok', { status: 200 });
+    });
+
+    try {
+      await getBundledPackages();
+
+      const files = [
+        {
+          id: '1',
+          name: 'main.tex',
+          content: '\\documentclass{article}\n\\usepackage{xkeyval}\n\\begin{document}Hi\\end{document}',
+          version: 1,
+        },
+      ];
+
+      const engineFiles = toEngineFiles(files, 'main.tex');
+      const paths = new Set(engineFiles.map((f) => f.path));
+
+      expect(paths.has('xkeyval.sty'), 'Should have xkeyval.sty').toBe(true);
+      expect(paths.has('xkeyval.tex'), 'Should have xkeyval.tex').toBe(true);
+      expect(paths.has('xkeyval'), 'Should have extensionless xkeyval alias').toBe(true);
+      expect(paths.has('xkvutils.tex'), 'Should have xkvutils.tex').toBe(true);
+      expect(paths.has('xkvutils'), 'Should have extensionless xkvutils alias').toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

@@ -144,6 +144,16 @@ export function toEngineFiles(
       } else if (base === 'program' && requestedClasses.has('sn-jnl')) {
         shouldMount = true;
       }
+    } else if (
+      (lowerName.startsWith('xkeyval') || lowerName.startsWith('xkv') || lowerName === 'keyval.tex') &&
+      (requestedPackages.has('xkeyval') || requestedPackages.has('keyval') || entryContent.includes('xkeyval') || entryContent.includes('keyval'))
+    ) {
+      shouldMount = true;
+    } else if (
+      (lowerName.startsWith('newtx') || lowerName === 'xpatch.sty' || lowerName === 'mweights.sty' || lowerName === 'binhex.tex') &&
+      (requestedPackages.has('newtx') || requestedPackages.has('newtxtext') || requestedPackages.has('newtxmath') || entryContent.includes('newtx'))
+    ) {
+      shouldMount = true;
     } else if (lowerName === 'microtype-pdftex.def' && requestedPackages.has('microtype')) {
       shouldMount = true;
     } else if (lowerName === 'lipsum.ltd' && requestedPackages.has('lipsum')) {
@@ -172,6 +182,13 @@ export function toEngineFiles(
       if (cached) {
         seen.add(pkg.name);
         out.push({ path: pkg.name, content: cached });
+        if (pkg.name.endsWith('.tex') || pkg.name.endsWith('.sty')) {
+          const extensionless = pkg.name.slice(0, pkg.name.lastIndexOf('.'));
+          if (!seen.has(extensionless)) {
+            seen.add(extensionless);
+            out.push({ path: extensionless, content: cached });
+          }
+        }
       }
     }
   }
