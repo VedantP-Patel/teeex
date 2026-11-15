@@ -82,6 +82,9 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'xkvview.sty', format: 26 },
   { name: 'xstring.sty', format: 26 },
   { name: 'xstring.tex', format: 26 },
+  { name: 'fontaxes.sty', format: 26 },
+  { name: 'fontaxes-v1.sty', format: 26 },
+  { name: 'figureversions.sty', format: 26 },
 ];
 
 export const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
@@ -502,6 +505,9 @@ function extractRequirements(text: string): Array<{ name: string; format: number
       'binhex.tex',
       'xstring.sty',
       'xstring.tex',
+      'fontaxes.sty',
+      'fontaxes-v1.sty',
+      'figureversions.sty',
       'ot1ntxtlf.fd',
       't1ntxtlf.fd',
       'ntx-Regular-tlf-ot1.tfm',
@@ -548,6 +554,12 @@ function extractRequirements(text: string): Array<{ name: string; format: number
   if (text.includes('xstring')) {
     out.push({ name: 'xstring.sty', format: 26 });
     out.push({ name: 'xstring.tex', format: 26 });
+  }
+
+  if (text.includes('fontaxes') || text.includes('figureversions')) {
+    out.push({ name: 'fontaxes.sty', format: 26 });
+    out.push({ name: 'fontaxes-v1.sty', format: 26 });
+    out.push({ name: 'figureversions.sty', format: 26 });
   }
 
   return out;

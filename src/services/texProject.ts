@@ -144,8 +144,8 @@ export function toEngineFiles(
       } else if (base === 'program' && requestedClasses.has('sn-jnl')) {
         shouldMount = true;
       } else if (
-        (base === 'xpatch' || base === 'mweights' || base === 'xstring') &&
-        (requestedPackages.has('newtx') || requestedPackages.has('newtxtext') || requestedPackages.has('newtxmath') || entryContent.includes('newtx'))
+        (base === 'xpatch' || base === 'mweights' || base === 'xstring' || base === 'fontaxes' || base === 'fontaxes-v1' || base === 'figureversions') &&
+        (requestedPackages.has('newtx') || requestedPackages.has('newtxtext') || requestedPackages.has('newtxmath') || requestedPackages.has('fontaxes') || requestedPackages.has('figureversions') || entryContent.includes('newtx') || entryContent.includes('fontaxes') || entryContent.includes('figureversions'))
       ) {
         shouldMount = true;
       }
@@ -155,8 +155,13 @@ export function toEngineFiles(
     ) {
       shouldMount = true;
     } else if (
-      (lowerName.startsWith('newtx') || lowerName === 'xpatch.sty' || lowerName === 'mweights.sty' || lowerName === 'binhex.tex' || lowerName.startsWith('xstring')) &&
+      (lowerName.startsWith('newtx') || lowerName === 'xpatch.sty' || lowerName === 'mweights.sty' || lowerName === 'binhex.tex' || lowerName.startsWith('xstring') || lowerName.startsWith('fontaxes') || lowerName.startsWith('figureversions')) &&
       (requestedPackages.has('newtx') || requestedPackages.has('newtxtext') || requestedPackages.has('newtxmath') || entryContent.includes('newtx'))
+    ) {
+      shouldMount = true;
+    } else if (
+      (lowerName.startsWith('fontaxes') || lowerName.startsWith('figureversions')) &&
+      (requestedPackages.has('fontaxes') || requestedPackages.has('figureversions') || entryContent.includes('fontaxes') || entryContent.includes('figureversions'))
     ) {
       shouldMount = true;
     } else if (

@@ -70,6 +70,9 @@ const BUNDLED_STATIC_FILES = new Set([
   'xpatch.sty',
   'xstring.sty',
   'xstring.tex',
+  'fontaxes.sty',
+  'fontaxes-v1.sty',
+  'figureversions.sty',
 ]);
 
 function resolveTexContentType(path: string): string | null {

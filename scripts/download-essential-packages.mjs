@@ -62,6 +62,9 @@ export const ESSENTIAL_PACKAGES = [
   'xkvview.sty',
   'xstring.sty',
   'xstring.tex',
+  'fontaxes.sty',
+  'fontaxes-v1.sty',
+  'figureversions.sty',
 ];
 
 export const UPSTREAM_BASE = 'https://texlive2026.texlyre.org/26';

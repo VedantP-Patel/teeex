@@ -22,6 +22,9 @@ describe('newtx Package Resolution and Upstream Fallback', () => {
       'binhex.tex',
       'xstring.sty',
       'xstring.tex',
+      'fontaxes.sty',
+      'fontaxes-v1.sty',
+      'figureversions.sty',
     ];
 
     for (const name of required) {

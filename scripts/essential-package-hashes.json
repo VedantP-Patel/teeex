@@ -206,5 +206,17 @@
   "xstring.tex": {
     "bytes": 49397,
     "sha256": "5cfb52e795a80a1e8f06280a8f968046a6fa05d5dae2313933d36b8e6eaf8c35"
+  },
+  "fontaxes.sty": {
+    "bytes": 3035,
+    "sha256": "e7e932af3be7aa76ff9774ed2d9aba523f7a851fc25ddde24e21df88c203253b"
+  },
+  "fontaxes-v1.sty": {
+    "bytes": 14310,
+    "sha256": "66c883309c07614b72e6d39bc8c33004d7c6f777af3bb6ac91aa880325083d2d"
+  },
+  "figureversions.sty": {
+    "bytes": 18666,
+    "sha256": "6a346fafcb6deb02e3f93a10516c8ce919716d208f4687e4176982cfb3b21861"
   }
 }
