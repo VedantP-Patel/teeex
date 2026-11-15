@@ -181,6 +181,24 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'tocloft.sty', format: 26 },
   { name: 'lmodern.sty', format: 26 },
   { name: 'flushend.sty', format: 26 },
+  { name: 'pgflibraryplothandlers.code.tex', format: 26 },
+  { name: 'tikzlibrarytopaths.code.tex', format: 26 },
+  { name: 'tikzlibrarytrees.code.tex', format: 26 },
+  { name: 'tikzlibraryscopes.code.tex', format: 26 },
+  { name: 'tikzlibraryshadows.code.tex', format: 26 },
+  { name: 'tikzlibrarychains.code.tex', format: 26 },
+  { name: 'tikzlibrarythrough.code.tex', format: 26 },
+  { name: 'tikzlibrarydecorations.shapes.code.tex', format: 26 },
+  { name: 'pgflibraryfpu.code.tex', format: 26 },
+  { name: 'tikzlibraryfpu.code.tex', format: 26 },
+  { name: 'tikzlibraryshapes.misc.code.tex', format: 26 },
+  { name: 'tikzlibraryshapes.symbols.code.tex', format: 26 },
+  { name: 'tikzlibraryshapes.arrows.code.tex', format: 26 },
+  { name: 'tikzlibraryshapes.callouts.code.tex', format: 26 },
+  { name: 'tikzlibraryshapes.multipart.code.tex', format: 26 },
+  { name: 'pgflibraryshapes.arrows.code.tex', format: 26 },
+  { name: 'pgflibraryshapes.callouts.code.tex', format: 26 },
+  { name: 'pgflibraryshapes.multipart.code.tex', format: 26 },
 ];
 
 export const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
@@ -753,6 +771,8 @@ function extractRequirements(text: string): Array<{ name: string; format: number
       'pgfmoduledecorations.code.tex',
       'pgflibraryarrows.meta.code.tex',
       'tikzlibraryarrows.meta.code.tex',
+      'pgflibraryplothandlers.code.tex',
+      'tikzlibrarytopaths.code.tex',
     ];
     for (const name of tikzFiles) {
       out.push({ name, format: 26 });
