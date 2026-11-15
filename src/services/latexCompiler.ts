@@ -328,9 +328,20 @@ export class TexEngineService {
         }
         const misses = await getCachedMisses();
         if (misses.length > 0) {
+          const isBundledOrAlias = (fname: string): boolean => {
+            if (BUNDLED_PACKAGE_NAMES.has(fname)) return true;
+            if (fname.indexOf('.') === -1) {
+              const candidates = ['.tex', '.sty', '.cls', '.def', '.clo', '.fd'];
+              for (const ext of candidates) {
+                if (BUNDLED_PACKAGE_NAMES.has(fname + ext)) return true;
+              }
+            }
+            return false;
+          };
+
           const filteredMisses = misses.filter((m) => {
             const fname = m.slice(m.indexOf('/') + 1);
-            return !BUNDLED_PACKAGE_NAMES.has(fname);
+            return !isBundledOrAlias(fname);
           });
           if (filteredMisses.length > 0) {
             await runner.writeTexliveRemoteMisses(filteredMisses);
@@ -338,7 +349,7 @@ export class TexEngineService {
           }
           const staleMisses = misses.filter((m) => {
             const fname = m.slice(m.indexOf('/') + 1);
-            return BUNDLED_PACKAGE_NAMES.has(fname);
+            return isBundledOrAlias(fname);
           });
           if (staleMisses.length > 0) {
             void deleteMissFromIndexedDb(staleMisses);
@@ -443,6 +454,12 @@ export class TexEngineService {
           const key = `${pkg.format}/${pkg.name}`;
           missesSet.delete(key);
           purgedKeys.push(key);
+          if (pkg.name.indexOf('.') !== -1) {
+            const base = pkg.name.slice(0, pkg.name.lastIndexOf('.'));
+            const baseKey = `${pkg.format}/${base}`;
+            missesSet.delete(baseKey);
+            purgedKeys.push(baseKey);
+          }
         }
       }
       this.mountedPackagesByEngine.set(engine, mountedSet);

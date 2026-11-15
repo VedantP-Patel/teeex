@@ -7215,6 +7215,12 @@ changes have the same license
             KPSE_REMOTE.hits[format + '/' + name] = candHit;
             return stringToNewUTF8(candHit);
           }
+          var candFetched = KPSE_REMOTE.fetch(name, format);
+          if (candFetched) {
+            delete KPSE_REMOTE.misses[format + '/' + name];
+            KPSE_REMOTE.hits[format + '/' + name] = candFetched;
+            return stringToNewUTF8(candFetched);
+          }
         }
         console.warn("[FONT-DEBUG] cached miss", { name: name, format: format });
         return 0;

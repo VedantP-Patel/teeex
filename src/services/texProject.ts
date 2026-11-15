@@ -144,7 +144,7 @@ export function toEngineFiles(
       } else if (base === 'program' && requestedClasses.has('sn-jnl')) {
         shouldMount = true;
       } else if (
-        (base === 'xpatch' || base === 'mweights' || base === 'xstring' || base === 'fontaxes' || base === 'fontaxes-v1' || base === 'figureversions') &&
+        (base === 'xpatch' || base === 'mweights' || base === 'xstring' || base === 'fontaxes' || base === 'fontaxes-v1' || base === 'figureversions' || base === 'xkeyval' || base === 'xkvltxp' || base === 'xkvview') &&
         (requestedPackages.has('newtx') || requestedPackages.has('newtxtext') || requestedPackages.has('newtxmath') || requestedPackages.has('fontaxes') || requestedPackages.has('figureversions') || entryContent.includes('newtx') || entryContent.includes('fontaxes') || entryContent.includes('figureversions'))
       ) {
         shouldMount = true;
@@ -161,11 +161,11 @@ export function toEngineFiles(
       shouldMount = true;
     } else if (
       (lowerName.startsWith('xkeyval') || lowerName.startsWith('xkv') || lowerName === 'keyval.tex') &&
-      (requestedPackages.has('xkeyval') || requestedPackages.has('keyval') || entryContent.includes('xkeyval') || entryContent.includes('keyval'))
+      (requestedPackages.has('xkeyval') || requestedPackages.has('keyval') || requestedPackages.has('newtx') || requestedPackages.has('newtxtext') || requestedPackages.has('newtxmath') || entryContent.includes('xkeyval') || entryContent.includes('keyval') || entryContent.includes('newtx'))
     ) {
       shouldMount = true;
     } else if (
-      (lowerName.startsWith('newtx') || lowerName === 'xpatch.sty' || lowerName === 'mweights.sty' || lowerName === 'binhex.tex' || lowerName.startsWith('xstring') || lowerName.startsWith('fontaxes') || lowerName.startsWith('figureversions')) &&
+      (lowerName.startsWith('newtx') || lowerName === 'xpatch.sty' || lowerName === 'mweights.sty' || lowerName === 'binhex.tex' || lowerName.startsWith('xstring') || lowerName.startsWith('fontaxes') || lowerName.startsWith('figureversions') || lowerName.startsWith('xkeyval') || lowerName.startsWith('xkv') || lowerName === 'keyval.tex') &&
       (requestedPackages.has('newtx') || requestedPackages.has('newtxtext') || requestedPackages.has('newtxmath') || entryContent.includes('newtx'))
     ) {
       shouldMount = true;
