@@ -73,6 +73,13 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'xpatch.sty', format: 26 },
   { name: 'mweights.sty', format: 26 },
   { name: 'binhex.tex', format: 26 },
+  { name: 'xkeyval.sty', format: 26 },
+  { name: 'xkeyval.tex', format: 26 },
+  { name: 'xkvutils.tex', format: 26 },
+  { name: 'xkvtxhdr.tex', format: 26 },
+  { name: 'keyval.tex', format: 26 },
+  { name: 'xkvltxp.sty', format: 26 },
+  { name: 'xkvview.sty', format: 26 },
 ];
 
 export const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
@@ -455,6 +462,13 @@ function extractRequirements(text: string): Array<{ name: string; format: number
     add(m[1], '.tex');
   }
 
+  // Plain TeX unbraced \input declarations (e.g. `\input xkeyval \fi` or `\input xkvutils`)
+  for (const m of text.matchAll(
+    /\\input\s+([a-zA-Z0-9_\-\.]+)(?:\s|\\|$)/g,
+  )) {
+    add(m[1], '.tex');
+  }
+
   for (const m of text.matchAll(/\\bibliographystyle\s*\{([^}]+)\}/g)) {
     const style = m[1]?.trim();
     if (style && !style.includes('\\')) {
@@ -510,6 +524,21 @@ function extractRequirements(text: string): Array<{ name: string; format: number
   if (text.includes('sn-jnl') || text.includes('sn-basic')) {
     out.push({ name: 'sn-jnl.cls', format: 26 });
     out.push({ name: 'sn-basic.bst', format: 26 });
+  }
+
+  if (text.includes('xkeyval') || text.includes('keyval')) {
+    const xkeyvalFiles = [
+      'xkeyval.sty',
+      'xkeyval.tex',
+      'xkvutils.tex',
+      'xkvtxhdr.tex',
+      'keyval.tex',
+      'xkvltxp.sty',
+      'xkvview.sty',
+    ];
+    for (const name of xkeyvalFiles) {
+      out.push({ name, format: 26 });
+    }
   }
 
   return out;
@@ -662,11 +691,14 @@ export async function preloadDocumentPackages(
   const skip = (name: string): boolean =>
     seen.has(name) ||
     TEXLIVE_BASIC_PACKAGES.has(name.toLowerCase()) ||
-    failedFetchCache.has(name);
+    (!BUNDLED_PACKAGE_NAMES.has(name) && failedFetchCache.has(name));
 
   let frontier = extractRequirements(texContent).filter((t) => {
     if (skip(t.name)) return false;
     seen.add(t.name);
+    if (BUNDLED_PACKAGE_NAMES.has(t.name)) {
+      failedFetchCache.delete(t.name);
+    }
     return true;
   });
 

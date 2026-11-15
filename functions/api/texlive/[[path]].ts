@@ -22,6 +22,7 @@ const BUNDLED_STATIC_FILES = new Set([
   'fancyhdr.sty',
   'float.sty',
   'hypcap.sty',
+  'keyval.tex',
   'listings.sty',
   'longtable.sty',
   'microtype-pdftex.def',
@@ -60,6 +61,12 @@ const BUNDLED_STATIC_FILES = new Set([
   'titlesec.sty',
   'wrapfig.sty',
   'xcolor.sty',
+  'xkeyval.sty',
+  'xkeyval.tex',
+  'xkvltxp.sty',
+  'xkvtxhdr.tex',
+  'xkvutils.tex',
+  'xkvview.sty',
   'xpatch.sty',
 ]);
 
@@ -155,73 +162,85 @@ export const onRequest: PagesFunction = async (context) => {
   }
 
   // 2. Fetch from upstream TeX Live server with HTML poison guard + Edge Cache persistence
-  const upstreamBase =
+  const rawEnvEndpoint =
     ((context.env as Record<string, unknown>)?.VITE_TEXLIVE_REMOTE_ENDPOINT as string) ||
-    ((context.env as Record<string, unknown>)?.TEXLIVE_REMOTE_ENDPOINT as string) ||
-    UPSTREAM_TEXLIVE_BASE;
-  const upstreamUrl = `${upstreamBase.replace(/\/+$/, '')}/${subpath}`;
+    ((context.env as Record<string, unknown>)?.TEXLIVE_REMOTE_ENDPOINT as string);
 
-  try {
-    const upstreamRes = await fetch(upstreamUrl, {
-      signal: AbortSignal.timeout(8000),
-      headers: {
-        'User-Agent': 'Teeex-Edge-Proxy/2.0',
-        'Accept': '*/*',
-      },
-      cf: {
-        cacheTtl: 31536000,
-        cacheEverything: true,
-      },
-    });
-
-    const upstreamCt = upstreamRes.headers.get('content-type') || '';
-    if (upstreamRes.ok && upstreamRes.body && !upstreamCt.includes('text/html')) {
-      const headers = new Headers(upstreamRes.headers);
-      headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-      headers.set('Access-Control-Allow-Origin', '*');
-      headers.set('Access-Control-Expose-Headers', 'fileid, Content-Length');
-      headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
-      const forcedCt = resolveTexContentType(subpath);
-      if (forcedCt) headers.set('Content-Type', forcedCt);
-
-      const response = new Response(upstreamRes.body, {
-        status: upstreamRes.status,
-        headers,
-      });
-      if (edgeCache) {
-        context.waitUntil(edgeCache.put(cacheKey, response.clone()));
-      }
-      return context.request.method === 'HEAD'
-        ? new Response(null, { status: upstreamRes.status, headers })
-        : response;
+  const isValidUpstream = (ep?: string): boolean => {
+    if (!ep || typeof ep !== 'string') return false;
+    const trimmed = ep.trim().toLowerCase();
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return false;
+    if (
+      trimmed.includes('/api/texlive') ||
+      trimmed.includes('teeex.pages.dev') ||
+      trimmed.includes('127.0.0.1') ||
+      trimmed.includes('localhost')
+    ) {
+      return false;
     }
+    return true;
+  };
 
-    if (upstreamRes.status === 404) {
-      const notFoundRes = new Response('Not Found', {
-        status: 404,
+  const primaryBase = isValidUpstream(rawEnvEndpoint)
+    ? rawEnvEndpoint!.trim().replace(/\/+$/, '')
+    : UPSTREAM_TEXLIVE_BASE;
+
+  const candidateBases =
+    primaryBase === UPSTREAM_TEXLIVE_BASE
+      ? [UPSTREAM_TEXLIVE_BASE]
+      : [primaryBase, UPSTREAM_TEXLIVE_BASE];
+
+  for (const base of candidateBases) {
+    const upstreamUrl = `${base}/${subpath}`;
+    try {
+      const upstreamRes = await fetch(upstreamUrl, {
+        signal: AbortSignal.timeout(8000),
         headers: {
-          'Cache-Control': 'public, max-age=86400',
-          'Access-Control-Allow-Origin': '*',
+          'User-Agent': 'Teeex-Edge-Proxy/2.0',
+          'Accept': '*/*',
+        },
+        cf: {
+          cacheTtl: 31536000,
+          cacheEverything: true,
         },
       });
-      if (edgeCache) {
-        context.waitUntil(edgeCache.put(cacheKey, notFoundRes.clone()));
-      }
-      return notFoundRes;
-    }
 
-    return new Response(`Upstream error: ${upstreamRes.statusText}`, {
-      status: upstreamRes.status,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-      },
-    });
-  } catch (err) {
-    return new Response(`Proxy error: ${err instanceof Error ? err.message : String(err)}`, {
-      status: 502,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-      },
-    });
+      const upstreamCt = upstreamRes.headers.get('content-type') || '';
+      if (upstreamRes.ok && upstreamRes.body && !upstreamCt.includes('text/html')) {
+        const headers = new Headers(upstreamRes.headers);
+        headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+        headers.set('Access-Control-Allow-Origin', '*');
+        headers.set('Access-Control-Expose-Headers', 'fileid, Content-Length');
+        headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+        const forcedCt = resolveTexContentType(subpath);
+        if (forcedCt) headers.set('Content-Type', forcedCt);
+
+        const response = new Response(upstreamRes.body, {
+          status: upstreamRes.status,
+          headers,
+        });
+        if (edgeCache) {
+          context.waitUntil(edgeCache.put(cacheKey, response.clone()));
+        }
+        return context.request.method === 'HEAD'
+          ? new Response(null, { status: upstreamRes.status, headers })
+          : response;
+      }
+    } catch {
+      // Try next upstream candidate
+    }
   }
+
+  // Cap 404 cache TTL to 60 seconds with no-cache to avoid 24-hour edge poisoning
+  const notFoundRes = new Response('Not Found', {
+    status: 404,
+    headers: {
+      'Cache-Control': 'public, max-age=60, no-cache',
+      'Access-Control-Allow-Origin': '*',
+    },
+  });
+  if (edgeCache) {
+    context.waitUntil(edgeCache.put(cacheKey, notFoundRes.clone()));
+  }
+  return notFoundRes;
 };

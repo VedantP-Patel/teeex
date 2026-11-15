@@ -239,6 +239,31 @@ describe('Stage 2: Package Provisioning & Cryptographic Integrity', () => {
       expect(result.valid).toBe(false);
       expect(result.reason).toContain('Missing expected TeX source markers');
     });
+    it('validates all provisioned xkeyval suite packages against manifest', async () => {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const packagesDir = path.resolve(__dirname, '../../public/packages');
+      const manifestPath = path.resolve(__dirname, '../../scripts/essential-package-hashes.json');
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+      const xkeyvalFiles = [
+        'xkeyval.sty',
+        'xkeyval.tex',
+        'xkvutils.tex',
+        'xkvtxhdr.tex',
+        'keyval.tex',
+        'xkvltxp.sty',
+        'xkvview.sty',
+      ];
+
+      for (const name of xkeyvalFiles) {
+        const filePath = path.join(packagesDir, name);
+        expect(fs.existsSync(filePath), `File ${name} should exist in public/packages`).toBe(true);
+        const buf = fs.readFileSync(filePath);
+        const res = validatePackageAgainstManifest(name, buf, manifest);
+        expect(res.valid, `Package ${name} validation: ${res.reason}`).toBe(true);
+      }
+    });
   });
 
   describe('BibTeX Style (.bst) Markers', () => {

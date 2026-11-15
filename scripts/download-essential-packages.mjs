@@ -53,6 +53,13 @@ export const ESSENTIAL_PACKAGES = [
   'xpatch.sty',
   'mweights.sty',
   'binhex.tex',
+  'xkeyval.sty',
+  'xkeyval.tex',
+  'xkvutils.tex',
+  'xkvtxhdr.tex',
+  'keyval.tex',
+  'xkvltxp.sty',
+  'xkvview.sty',
 ];
 
 export const UPSTREAM_BASE = 'https://texlive2026.texlyre.org/26';

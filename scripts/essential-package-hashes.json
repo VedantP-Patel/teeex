@@ -71,6 +71,10 @@
     "bytes": 3818,
     "sha256": "637d8d07c034e9a7c7407c1320ee4a3b9c6fb956578cc4925bb417d6517088bb"
   },
+  "keyval.tex": {
+    "bytes": 2793,
+    "sha256": "8e19ce03ea9b83fe1a69089f08e16835b1f2ed6baf19f635aaf7cc4d27155f5d"
+  },
   "lipsum.ltd": {
     "bytes": 95525,
     "sha256": "27c2623a2799a8b3c87ebc8b4c5e01e46286907eff3d5ffce66ad563949c7a98"
@@ -170,5 +174,29 @@
   "xpatch.sty": {
     "bytes": 8314,
     "sha256": "1ef00dcd1657efdcec02398201ca7769054815eda93b1ee40e413d7894b4f17e"
+  },
+  "xkeyval.sty": {
+    "bytes": 5006,
+    "sha256": "efd9fb88373975a6d1c669eb343c12abb5e51a0d2eb6ca18670b944a78635999"
+  },
+  "xkeyval.tex": {
+    "bytes": 19299,
+    "sha256": "adec9c8e36d791b131d9eefd00726d58f531a5a4b8c0ef8f87ffa497d4b16cb8"
+  },
+  "xkvltxp.sty": {
+    "bytes": 3536,
+    "sha256": "96bbd5ddfc9f9d808b55a1b4c90a892882e298c2e0587178515ea78cc3272b82"
+  },
+  "xkvtxhdr.tex": {
+    "bytes": 2924,
+    "sha256": "209aadb5e1ab10e1806f80bd68f16b70ebf1ac8cf7b2188c13b42155937ad6aa"
+  },
+  "xkvutils.tex": {
+    "bytes": 7787,
+    "sha256": "a49b792fa91181b8965091bca36e4e25d54f3e95d5ff7aac7c2f6a425ed7df0e"
+  },
+  "xkvview.sty": {
+    "bytes": 6984,
+    "sha256": "275632d353ab740dd788a9afc1ffdffb7f949d483596c87338572e5a2a0966df"
   }
 }
