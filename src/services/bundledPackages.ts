@@ -67,6 +67,12 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'breakurl.sty', format: 26 },
   { name: 'sn-jnl.cls', format: 26 },
   { name: 'sn-basic.bst', format: 26 },
+  { name: 'newtxtext.sty', format: 26 },
+  { name: 'newtxmath.sty', format: 26 },
+  { name: 'newtx.sty', format: 26 },
+  { name: 'xpatch.sty', format: 26 },
+  { name: 'mweights.sty', format: 26 },
+  { name: 'binhex.tex', format: 26 },
 ];
 
 export const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
@@ -246,6 +252,23 @@ async function getAllFromIndexedDb(): Promise<LoadedPackage[]> {
       req.onerror = () => resolve([]);
     } catch {
       resolve([]);
+    }
+  });
+}
+
+export async function deleteMissFromIndexedDb(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  const db = await openPackagesDb();
+  if (!db) return;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_MISSES, 'readwrite');
+      const store = tx.objectStore(STORE_MISSES);
+      for (const k of keys) store.delete(k);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
     }
   });
 }
@@ -453,6 +476,28 @@ function extractRequirements(text: string): Array<{ name: string; format: number
     }
   }
 
+  if (text.includes('newtx')) {
+    const newtxFiles = [
+      'newtxtext.sty',
+      'newtxmath.sty',
+      'newtx.sty',
+      'xpatch.sty',
+      'mweights.sty',
+      'binhex.tex',
+      'ot1ntxtlf.fd',
+      't1ntxtlf.fd',
+      'ntx-Regular-tlf-ot1.tfm',
+      'ntx-Regular-tlf-t1.tfm',
+      'ntx-Bold-tlf-ot1.tfm',
+      'ntx-Bold-tlf-t1.tfm',
+      'ntx-Italic-tlf-ot1.tfm',
+      'ntx-Italic-tlf-t1.tfm',
+    ];
+    for (const name of newtxFiles) {
+      out.push({ name, format: name.endsWith('.tfm') ? 51 : 26 });
+    }
+  }
+
   if (text.includes('amssymb') || text.includes('amsfonts')) {
     const amsMetrics = [
       'msam10.tfm', 'msbm10.tfm', 'msam7.tfm', 'msbm7.tfm', 'msam5.tfm', 'msbm5.tfm',
@@ -470,6 +515,8 @@ function extractRequirements(text: string): Array<{ name: string; format: number
   return out;
 }
 
+const DEFAULT_UPSTREAM_ENDPOINT = 'https://texlive2026.texlyre.org';
+
 /**
  * Fetches a single package with in-flight deduplication.
  * Reuses the pending fetch promise if another caller is concurrently requesting the same package.
@@ -485,39 +532,56 @@ async function fetchSinglePackage(
   }
 
   const fetchPromise = (async (): Promise<LoadedPackage | null> => {
-    try {
-      const isBundled = BUNDLED_PACKAGE_NAMES.has(target.name);
-      const url = isBundled
-        ? `/packages/${encodeURIComponent(target.name)}`
-        : `${endpoint}/${target.format}/${encodeURIComponent(target.name)}`;
+    const isBundled = BUNDLED_PACKAGE_NAMES.has(target.name);
+    const isLocalProxy =
+      endpoint.includes('/api/texlive') ||
+      endpoint.includes('localhost') ||
+      endpoint.includes('127.0.0.1') ||
+      endpoint.startsWith('/');
+    const endpointsToTry = isBundled
+      ? ['/packages']
+      : isLocalProxy && endpoint !== DEFAULT_UPSTREAM_ENDPOINT
+        ? [endpoint, DEFAULT_UPSTREAM_ENDPOINT]
+        : [endpoint];
 
-      const res = await fetch(url, { signal: AbortSignal.timeout(PACKAGE_FETCH_TIMEOUT_MS) });
+    let lastStatus: number | null = null;
 
-      if (res.ok) {
-        const buf = await readResponseLimited(res, MAX_PACKAGE_SIZE);
-        const ct = res.headers?.get?.('content-type');
-        if (buf.length > 0 && !isHtmlResponse(buf, ct)) {
-          const loaded: LoadedPackage = {
-            name: target.name,
-            format: target.format,
-            content: buf,
-            contents: buf,
-          };
-          packageMemoryCache.set(target.name, buf);
-          return loaded;
+    for (const ep of endpointsToTry) {
+      try {
+        const url =
+          ep === '/packages'
+            ? `/packages/${encodeURIComponent(target.name)}`
+            : `${ep}/${target.format}/${encodeURIComponent(target.name)}`;
+
+        const res = await fetch(url, { signal: AbortSignal.timeout(PACKAGE_FETCH_TIMEOUT_MS) });
+        lastStatus = res.status;
+
+        if (res.ok) {
+          const buf = await readResponseLimited(res, MAX_PACKAGE_SIZE);
+          const ct = res.headers?.get?.('content-type');
+          if (buf.length > 0 && !isHtmlResponse(buf, ct)) {
+            const loaded: LoadedPackage = {
+              name: target.name,
+              format: target.format,
+              content: buf,
+              contents: buf,
+            };
+            packageMemoryCache.set(target.name, buf);
+            failedFetchCache.delete(target.name);
+            return loaded;
+          }
         }
+      } catch {
+        // Fall through to next endpoint (e.g. upstream fallback)
       }
-
-      // Only a definitive 404 is remembered as missing.
-      // Transient 5xx errors or network drops remain retryable.
-      if (res.status === 404) {
-        failedFetchCache.add(target.name);
-      }
-      return null;
-    } catch {
-      // Network error, timeout, or streaming size limit: remain retryable!
-      return null;
     }
+
+    // Only a definitive 404 is remembered as missing.
+    // Transient 5xx errors or network drops remain retryable!
+    if (lastStatus === 404) {
+      failedFetchCache.add(target.name);
+    }
+    return null;
   })();
 
   inFlightFetches.set(key, fetchPromise);

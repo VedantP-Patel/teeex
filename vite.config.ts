@@ -152,6 +152,17 @@ export default defineConfig({
     headers: {
       'Content-Security-Policy': getCsp(),
     },
+    proxy: {
+      '/api/texlive': {
+        target:
+          process.env.VITE_TEXLIVE_REMOTE_ENDPOINT &&
+          process.env.VITE_TEXLIVE_REMOTE_ENDPOINT !== 'off'
+            ? process.env.VITE_TEXLIVE_REMOTE_ENDPOINT
+            : 'https://texlive2026.texlyre.org',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/texlive/, ''),
+      },
+    },
   },
   define: {
     // Map Vercel's native Supabase integration variables, which are not

@@ -37,7 +37,8 @@ self._newlyFetchedRemoteMisses = [];
         this._teeexMethod = method;
         this._teeexShortCircuit = null;
 
-        if (this._teeexUrl.includes('/api/texlive/') || this._teeexUrl.includes('texlive2026.texlyre.org')) {
+        const isTexlive = this._teeexUrl.includes('/api/texlive/') || this._teeexUrl.includes('texlive2026.texlyre.org');
+        if (isTexlive) {
             if (IMAGE_OR_AUX_EXT.test(this._teeexUrl)) {
                 this._teeexShortCircuit = { status: 404, buffer: new ArrayBuffer(0), text: '', headers: {} };
                 return;
@@ -49,7 +50,8 @@ self._newlyFetchedRemoteMisses = [];
             }
         }
 
-        return origOpen.call(this, method, url, async !== false, user, password);
+        const effectiveAsync = isTexlive ? false : (async !== false);
+        return origOpen.call(this, method, url, effectiveAsync, user, password);
     };
 
     XMLHttpRequest.prototype.getResponseHeader = function (name) {
@@ -71,10 +73,6 @@ self._newlyFetchedRemoteMisses = [];
             return;
         }
 
-        if (this._teeexUrl && (this._teeexUrl.includes('/api/texlive/') || this._teeexUrl.includes('texlive2026.texlyre.org'))) {
-            origOpen.call(this, this._teeexMethod || 'GET', this._teeexUrl, false);
-        }
-
         origSend.call(this, body);
 
         if (this._teeexUrl && (this._teeexUrl.includes('/api/texlive/') || this._teeexUrl.includes('texlive2026.texlyre.org'))) {
@@ -86,6 +84,9 @@ self._newlyFetchedRemoteMisses = [];
                         buf = this.response.slice(0);
                     } else if (typeof this.responseText === 'string') {
                         txt = this.responseText;
+                        buf = new TextEncoder().encode(txt).buffer;
+                    } else if (typeof this.response === 'string') {
+                        txt = this.response;
                         buf = new TextEncoder().encode(txt).buffer;
                     }
                 } catch { }

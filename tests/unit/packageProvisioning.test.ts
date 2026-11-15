@@ -200,6 +200,16 @@ describe('Stage 2: Package Provisioning & Cryptographic Integrity', () => {
       expect(result.reason).toBe('Valid TeX style/class');
     });
 
+    it('accepts .tex input files with standard TeX definition markers (binhex.tex)', () => {
+      const texInput = Buffer.from(
+        '% Binary and hexadecimal conversion routines\n\\def\\hex#1{\\begingroup...\\endgroup}\n'
+      );
+      const result = validatePackagePayload('binhex.tex', texInput);
+
+      expect(result.valid).toBe(true);
+      expect(result.reason).toBe('Valid TeX style/class');
+    });
+
     it('accepts legacy style files with direct macro definitions (\\def, \\catcode, \\makeatletter)', () => {
       const legacyStyle = Buffer.from(
         '% Legacy style definitions\n\\catcode`\\@=11\n\\def\\legacytable#1{\\begingroup#1\\endgroup}\n\\let\\oldlegacy=\\legacytable\n\\catcode`\\@=12\n'

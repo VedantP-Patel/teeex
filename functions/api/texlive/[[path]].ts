@@ -10,6 +10,7 @@ const BUNDLED_STATIC_FILES = new Set([
   'algorithmic.sty',
   'algpseudocode.sty',
   'array.sty',
+  'binhex.tex',
   'bm.sty',
   'booktabs.sty',
   'caption.sty',
@@ -33,6 +34,10 @@ const BUNDLED_STATIC_FILES = new Set([
   'msbm7.tfm',
   'multicol.sty',
   'multirow.sty',
+  'mweights.sty',
+  'newtx.sty',
+  'newtxmath.sty',
+  'newtxtext.sty',
   'omlptm.fd',
   'omsptm.fd',
   'ot1ptm.fd',
@@ -55,6 +60,7 @@ const BUNDLED_STATIC_FILES = new Set([
   'titlesec.sty',
   'wrapfig.sty',
   'xcolor.sty',
+  'xpatch.sty',
 ]);
 
 function resolveTexContentType(path: string): string | null {

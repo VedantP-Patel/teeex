@@ -14,11 +14,12 @@ interface GoldenSpec {
 
 const GOLDEN_DIGESTS: Record<string, GoldenSpec> = {
   'busytex_worker.js': {
-    bytes: [8258, 8870, 8887],
+    bytes: [8258, 8870, 8887, 8949],
     sha256: [
       '944f150cfa9b8282d06aa91b05fd9e82cc536c84f809f152d6beb4c358738e15',
       '318e70e92b54089ebbe526c64f64e074e067557f4f1718013252d4ca45fa4e82',
       'f9f6d19ceecd8a1de5e1464f474dfa91f72d871ea0bd64608e264b5a727bd57b',
+      'ae4436055401998634f5aede7a31b51290c608953246272f361822d33447cdd2',
     ],
   },
   'busytex_pipeline.js': {
@@ -40,8 +41,11 @@ const GOLDEN_DIGESTS: Record<string, GoldenSpec> = {
     ],
   },
   'busytex.js': {
-    bytes: 289679,
-    sha256: 'a84b07d8186cf422d5ed86d04558f54c09e1c8d08bcc55317ce2d89da979bcb7',
+    bytes: [289679, 290941],
+    sha256: [
+      'a84b07d8186cf422d5ed86d04558f54c09e1c8d08bcc55317ce2d89da979bcb7',
+      '7c943ab4409e957006189e6e09b8ba5891a40f7c887361bb0ada41dc9d543226',
+    ],
   },
   'busytex.wasm': {
     bytes: 32507525,

@@ -47,6 +47,12 @@ export const ESSENTIAL_PACKAGES = [
   'ACM-Reference-Format.bst',
   'program.sty',
   'breakurl.sty',
+  'newtxtext.sty',
+  'newtxmath.sty',
+  'newtx.sty',
+  'xpatch.sty',
+  'mweights.sty',
+  'binhex.tex',
 ];
 
 export const UPSTREAM_BASE = 'https://texlive2026.texlyre.org/26';
@@ -206,8 +212,8 @@ export function validatePackagePayload(name, buffer) {
     return { valid: true, reason: 'Valid BibTeX style' };
   }
 
-  // Validate TeX styles/classes (.sty, .cls, .def)
-  if (lowerName.endsWith('.sty') || lowerName.endsWith('.cls') || lowerName.endsWith('.def')) {
+  // Validate TeX styles/classes/inputs (.sty, .cls, .def, .tex)
+  if (lowerName.endsWith('.sty') || lowerName.endsWith('.cls') || lowerName.endsWith('.def') || lowerName.endsWith('.tex')) {
     const hasTexMarker = TEX_STYLE_MARKERS.some(marker => text.includes(marker));
     if (!hasTexMarker) {
       return {

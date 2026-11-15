@@ -169,6 +169,27 @@ describe('Stage 3: Package Poison Guard & In-Flight Coalescing', () => {
       expect(lipsumLtd?.format).toBe(26);
     });
 
+    it('newtx suite packages are registered in BUNDLED_PACKAGES and provisioned', () => {
+      const newtxPackages = [
+        'newtxtext.sty',
+        'newtxmath.sty',
+        'newtx.sty',
+        'xpatch.sty',
+        'mweights.sty',
+        'binhex.tex',
+      ];
+
+      for (const name of newtxPackages) {
+        const pkg = BUNDLED_PACKAGES.find((p) => p.name === name);
+        expect(pkg, `${name} must be registered in BUNDLED_PACKAGES`).toBeDefined();
+        expect(pkg?.format).toBe(26);
+
+        const filePath = join(PACKAGES_DIR, name);
+        expect(existsSync(filePath), `${name} must exist in public/packages/`).toBe(true);
+        expect(statSync(filePath).size).toBeGreaterThan(1000);
+      }
+    });
+
     it('lipsum files are provisioned into public/packages/ with valid size', () => {
       const styPath = join(PACKAGES_DIR, 'lipsum.sty');
       const ltdPath = join(PACKAGES_DIR, 'lipsum.ltd');

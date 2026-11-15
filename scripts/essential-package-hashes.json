@@ -19,6 +19,10 @@
     "bytes": 15651,
     "sha256": "537013de60c6606caecfc2eee9b81cd95f093ebb0f99b43277775073f00d9160"
   },
+  "binhex.tex": {
+    "bytes": 2553,
+    "sha256": "69bbed0fb67874d2c60a4c277b6c350e7b5774c6dbc6686b77fbb40f895f3395"
+  },
   "bm.sty": {
     "bytes": 13389,
     "sha256": "3de6ecf290620b0aedd870efc17410cd3b92f35b8988cf0316d81babfa625c04"
@@ -99,6 +103,22 @@
     "bytes": 6696,
     "sha256": "1ad428e46dc0b736132d2c6e87eccbf0947091ca7581733165cfee765cd0992c"
   },
+  "mweights.sty": {
+    "bytes": 4953,
+    "sha256": "174cf004438bb6872d670d4971206ccda329a8c7e8939720fae80de545d90cf3"
+  },
+  "newtx.sty": {
+    "bytes": 33381,
+    "sha256": "d098ddd48a4a13e5d69fb8270fcde23d51ef9be25d42e3e6ff7b2da81ce930e2"
+  },
+  "newtxmath.sty": {
+    "bytes": 141084,
+    "sha256": "5b866569cfc7171a7a36858067e33cdba6242c2fc18ad9a45bc9fcb86b2fc156"
+  },
+  "newtxtext.sty": {
+    "bytes": 30156,
+    "sha256": "52923d549675280284348ea38526a1b578a0da5612a64d604289ceb00f06ca5f"
+  },
   "program.sty": {
     "bytes": 35392,
     "sha256": "fea4371498edfd5845127393b2ec2a3b8cf7f8fbf7cda66777174c6052ec300b"
@@ -146,5 +166,9 @@
   "xcolor.sty": {
     "bytes": 55384,
     "sha256": "478888f8e8f00345fd645b6cdd6fa7db1e9efdd6f585b25c89bb3665d9029295"
+  },
+  "xpatch.sty": {
+    "bytes": 8314,
+    "sha256": "1ef00dcd1657efdcec02398201ca7769054815eda93b1ee40e413d7894b4f17e"
   }
 }

@@ -17,6 +17,8 @@ import {
   getBundledPackages,
   getCachedMisses,
   preloadDocumentPackages,
+  deleteMissFromIndexedDb,
+  BUNDLED_PACKAGE_NAMES,
 } from './bundledPackages';
 import { saveCompiledPdfSnapshot } from './pdfSnapshotCache';
 import {
@@ -326,8 +328,21 @@ export class TexEngineService {
         }
         const misses = await getCachedMisses();
         if (misses.length > 0) {
-          await runner.writeTexliveRemoteMisses(misses);
-          for (const m of misses) missesSet.add(m);
+          const filteredMisses = misses.filter((m) => {
+            const fname = m.slice(m.indexOf('/') + 1);
+            return !BUNDLED_PACKAGE_NAMES.has(fname);
+          });
+          if (filteredMisses.length > 0) {
+            await runner.writeTexliveRemoteMisses(filteredMisses);
+            for (const m of filteredMisses) missesSet.add(m);
+          }
+          const staleMisses = misses.filter((m) => {
+            const fname = m.slice(m.indexOf('/') + 1);
+            return BUNDLED_PACKAGE_NAMES.has(fname);
+          });
+          if (staleMisses.length > 0) {
+            void deleteMissFromIndexedDb(staleMisses);
+          }
         }
       } catch {
         // Non-fatal
@@ -415,14 +430,26 @@ export class TexEngineService {
     const endpoint = remoteEndpoint();
     const preloaded = await preloadDocumentPackages(preambleText, endpoint);
     const mountedSet = this.mountedPackagesByEngine.get(engine) ?? new Set<string>();
+    const missesSet = this.registeredMissesByEngine.get(engine) ?? new Set<string>();
     const unmounted = preloaded.filter((pkg) => !mountedSet.has(pkg.name));
 
     if (unmounted.length > 0) {
       await runner.writeTexliveRemoteFiles(unmounted);
+      const purgedKeys: string[] = [];
       for (const pkg of unmounted) {
-        if (pkg.name) mountedSet.add(pkg.name);
+        if (pkg.name) {
+          mountedSet.add(pkg.name);
+          this.unresolvablePackages.delete(pkg.name);
+          const key = `${pkg.format}/${pkg.name}`;
+          missesSet.delete(key);
+          purgedKeys.push(key);
+        }
       }
       this.mountedPackagesByEngine.set(engine, mountedSet);
+      this.registeredMissesByEngine.set(engine, missesSet);
+      if (purgedKeys.length > 0) {
+        void deleteMissFromIndexedDb(purgedKeys);
+      }
     }
     return unmounted.length;
   }

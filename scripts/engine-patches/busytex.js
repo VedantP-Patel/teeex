@@ -7019,53 +7019,70 @@ changes have the same license
           localXhr.responseType = 'arraybuffer';
           localXhr.send();
           var localType = localXhr.getResponseHeader('content-type') || '';
-          if (
-            localXhr.status === 200 &&
-            !localType.includes('text/html') &&
-            localXhr.response &&
-            localXhr.response.byteLength > 0
-          ) {
-            var localBytes = new Uint8Array(localXhr.response);
-            return KPSE_REMOTE.register(name, format, localBytes);
+          var localData = null;
+          if (localXhr.status === 200 && !localType.includes('text/html')) {
+            if (localXhr.response instanceof ArrayBuffer && localXhr.response.byteLength > 0) {
+              localData = new Uint8Array(localXhr.response);
+            } else if (typeof localXhr.responseText === 'string' && localXhr.responseText.length > 0) {
+              localData = new TextEncoder().encode(localXhr.responseText);
+            } else if (typeof localXhr.response === 'string' && localXhr.response.length > 0) {
+              localData = new TextEncoder().encode(localXhr.response);
+            }
+          }
+          if (localData && localData.byteLength > 0) {
+            return KPSE_REMOTE.register(name, format, localData);
           }
         } catch (_localErr) {}
 
         // 2. Fetch from remote endpoint with an 8s circuit breaker (never block indefinitely)
-        var url = endpoint + (endpoint.endsWith('/') ? '' : '/') + format + '/' + encodeURIComponent(name);
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', url, false);
-        xhr.timeout = 8000;
-        xhr.responseType = 'arraybuffer';
-        try { xhr.send(); } catch (e) {
-          KPSE_REMOTE.misses[format + '/' + name] = 1;
-          return null;
+        var endpointsToTry = [endpoint];
+        if (endpoint.indexOf('texlive2026.texlyre.org') === -1) {
+          endpointsToTry.push('https://texlive2026.texlyre.org');
         }
-        var remoteType = xhr.getResponseHeader('content-type') || '';
-        if (
-          xhr.status === 200 &&
-          !remoteType.includes('text/html') &&
-          xhr.response &&
-          xhr.response.byteLength > 0
-        ) {
-          var bytes = new Uint8Array(xhr.response);
-          if (typeof indexedDB !== 'undefined') {
-            try {
-              var dbReq = indexedDB.open('teeex_packages_db', 1);
-              dbReq.onupgradeneeded = function (ev) {
-                var db = ev.target.result;
-                if (!db.objectStoreNames.contains('packages')) db.createObjectStore('packages', { keyPath: 'key' });
-                if (!db.objectStoreNames.contains('misses')) db.createObjectStore('misses', { keyPath: 'key' });
-              };
-              dbReq.onsuccess = function (ev) {
-                var db = ev.target.result;
-                try {
-                  var tx = db.transaction('packages', 'readwrite');
-                  tx.objectStore('packages').put({ key: format + '/' + name, name: name, format: format, content: bytes });
-                } catch (e2) {}
-              };
-            } catch (e1) {}
+
+        for (var i = 0; i < endpointsToTry.length; i++) {
+          var ep = endpointsToTry[i];
+          var url = ep + (ep.endsWith('/') ? '' : '/') + format + '/' + encodeURIComponent(name);
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET', url, false);
+          xhr.timeout = 8000;
+          xhr.responseType = 'arraybuffer';
+          try { xhr.send(); } catch (e) {
+            continue;
           }
-          return KPSE_REMOTE.register(name, format, bytes);
+          var remoteType = xhr.getResponseHeader('content-type') || '';
+          var remoteData = null;
+          if (xhr.status === 200 && !remoteType.includes('text/html')) {
+            if (xhr.response instanceof ArrayBuffer && xhr.response.byteLength > 0) {
+              remoteData = new Uint8Array(xhr.response);
+            } else if (typeof xhr.responseText === 'string' && xhr.responseText.length > 0) {
+              remoteData = new TextEncoder().encode(xhr.responseText);
+            } else if (typeof xhr.response === 'string' && xhr.response.length > 0) {
+              remoteData = new TextEncoder().encode(xhr.response);
+            }
+          }
+          if (remoteData && remoteData.byteLength > 0) {
+            var bytes = remoteData;
+            if (typeof indexedDB !== 'undefined') {
+              try {
+                var dbReq = indexedDB.open('teeex_packages_db', 1);
+                dbReq.onupgradeneeded = function (ev) {
+                  var db = ev.target.result;
+                  if (!db.objectStoreNames.contains('packages')) db.createObjectStore('packages', { keyPath: 'key' });
+                  if (!db.objectStoreNames.contains('misses')) db.createObjectStore('misses', { keyPath: 'key' });
+                };
+                dbReq.onsuccess = function (ev) {
+                  var db = ev.target.result;
+                  try {
+                    var tx = db.transaction(['packages', 'misses'], 'readwrite');
+                    tx.objectStore('packages').put({ key: format + '/' + name, name: name, format: format, content: bytes });
+                    tx.objectStore('misses').delete(format + '/' + name);
+                  } catch (e2) {}
+                };
+              } catch (e1) {}
+            }
+            return KPSE_REMOTE.register(name, format, bytes);
+          }
         }
 
         // 3. Record all non-200 responses (404, 500, timeout) in misses so they never hang again
