@@ -122,6 +122,49 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'pgfcoretransparency.code.tex', format: 26 },
   { name: 'pgfcorepatterns.code.tex', format: 26 },
   { name: 'pgfcorerdf.code.tex', format: 26 },
+  { name: 'pgfkeyslibraryfiltered.code.tex', format: 26 },
+  { name: 'pgfsys-common-pdf.def', format: 26 },
+  { name: 'pgf.cfg', format: 26 },
+  { name: 'pgfsyssoftpath.code.tex', format: 26 },
+  { name: 'pgfsysprotocol.code.tex', format: 26 },
+  { name: 'pgfmathutil.code.tex', format: 26 },
+  { name: 'pgfmathparser.code.tex', format: 26 },
+  { name: 'pgfmathfunctions.code.tex', format: 26 },
+  { name: 'pgfmathfunctions.basic.code.tex', format: 26 },
+  { name: 'pgfmathfunctions.trigonometric.code.tex', format: 26 },
+  { name: 'pgfmathfunctions.random.code.tex', format: 26 },
+  { name: 'pgfmathfunctions.comparison.code.tex', format: 26 },
+  { name: 'pgfmathfunctions.base.code.tex', format: 26 },
+  { name: 'pgfmathfunctions.round.code.tex', format: 26 },
+  { name: 'pgfmathfunctions.misc.code.tex', format: 26 },
+  { name: 'pgfmathfunctions.integerarithmetics.code.tex', format: 26 },
+  { name: 'pgfmathcalc.code.tex', format: 26 },
+  { name: 'pgfmathfloat.code.tex', format: 26 },
+  { name: 'pgfint.code.tex', format: 26 },
+  { name: 'pgf.revision.tex', format: 26 },
+  { name: 'tikzlibraryarrows.code.tex', format: 26 },
+  { name: 'tikzlibrarycalc.code.tex', format: 26 },
+  { name: 'tikzlibrarypositioning.code.tex', format: 26 },
+  { name: 'tikzlibraryshapes.code.tex', format: 26 },
+  { name: 'tikzlibraryshapes.geometric.code.tex', format: 26 },
+  { name: 'tikzlibraryfit.code.tex', format: 26 },
+  { name: 'tikzlibrarybackgrounds.code.tex', format: 26 },
+  { name: 'tikzlibrarymatrix.code.tex', format: 26 },
+  { name: 'tikzlibrarypatterns.code.tex', format: 26 },
+  { name: 'tikzlibrarydecorations.code.tex', format: 26 },
+  { name: 'tikzlibrarydecorations.pathmorphing.code.tex', format: 26 },
+  { name: 'tikzlibrarydecorations.markings.code.tex', format: 26 },
+  { name: 'tikzlibraryintersections.code.tex', format: 26 },
+  { name: 'pgflibraryshapes.code.tex', format: 26 },
+  { name: 'pgflibraryarrows.code.tex', format: 26 },
+  { name: 'pgflibraryplotmarks.code.tex', format: 26 },
+  { name: 'pgflibraryshapes.geometric.code.tex', format: 26 },
+  { name: 'pgflibrarypatterns.code.tex', format: 26 },
+  { name: 'pgflibrarydecorations.pathmorphing.code.tex', format: 26 },
+  { name: 'pgflibrarydecorations.markings.code.tex', format: 26 },
+  { name: 'pgflibraryintersections.code.tex', format: 26 },
+  { name: 'pgflibraryshapes.misc.code.tex', format: 26 },
+  { name: 'pgflibraryshapes.symbols.code.tex', format: 26 },
 ];
 
 export const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
@@ -511,6 +554,25 @@ function extractRequirements(text: string): Array<{ name: string; format: number
     add(m[1], '.tex');
   }
 
+  // Direct TikZ and PGF library declarations in preamble
+  for (const m of text.matchAll(/\\usetikzlibrary\s*\{([^}]+)\}/g)) {
+    for (const piece of m[1].split(',')) {
+      const name = piece.trim();
+      if (name && !/[\\{}$#%\s]/.test(name)) {
+        out.push({ name: `tikzlibrary${name}.code.tex`, format: 26 });
+      }
+    }
+  }
+
+  for (const m of text.matchAll(/\\usepgflibrary\s*\{([^}]+)\}/g)) {
+    for (const piece of m[1].split(',')) {
+      const name = piece.trim();
+      if (name && !/[\\{}$#%\s]/.test(name)) {
+        out.push({ name: `pgflibrary${name}.code.tex`, format: 26 });
+      }
+    }
+  }
+
   for (const m of text.matchAll(/\\bibliographystyle\s*\{([^}]+)\}/g)) {
     const style = m[1]?.trim();
     if (style && !style.includes('\\')) {
@@ -638,6 +700,26 @@ function extractRequirements(text: string): Array<{ name: string; format: number
       'pgfcoretransparency.code.tex',
       'pgfcorepatterns.code.tex',
       'pgfcorerdf.code.tex',
+      'pgfkeyslibraryfiltered.code.tex',
+      'pgfsys-common-pdf.def',
+      'pgf.cfg',
+      'pgfsyssoftpath.code.tex',
+      'pgfsysprotocol.code.tex',
+      'pgfmathutil.code.tex',
+      'pgfmathparser.code.tex',
+      'pgfmathfunctions.code.tex',
+      'pgfmathfunctions.basic.code.tex',
+      'pgfmathfunctions.trigonometric.code.tex',
+      'pgfmathfunctions.random.code.tex',
+      'pgfmathfunctions.comparison.code.tex',
+      'pgfmathfunctions.base.code.tex',
+      'pgfmathfunctions.round.code.tex',
+      'pgfmathfunctions.misc.code.tex',
+      'pgfmathfunctions.integerarithmetics.code.tex',
+      'pgfmathcalc.code.tex',
+      'pgfmathfloat.code.tex',
+      'pgfint.code.tex',
+      'pgf.revision.tex',
     ];
     for (const name of tikzFiles) {
       out.push({ name, format: 26 });

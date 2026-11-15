@@ -110,6 +110,49 @@ const BUNDLED_STATIC_FILES = new Set([
   'pgfcoretransparency.code.tex',
   'pgfcorepatterns.code.tex',
   'pgfcorerdf.code.tex',
+  'pgfkeyslibraryfiltered.code.tex',
+  'pgfsys-common-pdf.def',
+  'pgf.cfg',
+  'pgfsyssoftpath.code.tex',
+  'pgfsysprotocol.code.tex',
+  'pgfmathutil.code.tex',
+  'pgfmathparser.code.tex',
+  'pgfmathfunctions.code.tex',
+  'pgfmathfunctions.basic.code.tex',
+  'pgfmathfunctions.trigonometric.code.tex',
+  'pgfmathfunctions.random.code.tex',
+  'pgfmathfunctions.comparison.code.tex',
+  'pgfmathfunctions.base.code.tex',
+  'pgfmathfunctions.round.code.tex',
+  'pgfmathfunctions.misc.code.tex',
+  'pgfmathfunctions.integerarithmetics.code.tex',
+  'pgfmathcalc.code.tex',
+  'pgfmathfloat.code.tex',
+  'pgfint.code.tex',
+  'pgf.revision.tex',
+  'tikzlibraryarrows.code.tex',
+  'tikzlibrarycalc.code.tex',
+  'tikzlibrarypositioning.code.tex',
+  'tikzlibraryshapes.code.tex',
+  'tikzlibraryshapes.geometric.code.tex',
+  'tikzlibraryfit.code.tex',
+  'tikzlibrarybackgrounds.code.tex',
+  'tikzlibrarymatrix.code.tex',
+  'tikzlibrarypatterns.code.tex',
+  'tikzlibrarydecorations.code.tex',
+  'tikzlibrarydecorations.pathmorphing.code.tex',
+  'tikzlibrarydecorations.markings.code.tex',
+  'tikzlibraryintersections.code.tex',
+  'pgflibraryshapes.code.tex',
+  'pgflibraryarrows.code.tex',
+  'pgflibraryplotmarks.code.tex',
+  'pgflibraryshapes.geometric.code.tex',
+  'pgflibrarypatterns.code.tex',
+  'pgflibrarydecorations.pathmorphing.code.tex',
+  'pgflibrarydecorations.markings.code.tex',
+  'pgflibraryintersections.code.tex',
+  'pgflibraryshapes.misc.code.tex',
+  'pgflibraryshapes.symbols.code.tex',
 ]);
 
 function resolveTexContentType(path: string): string | null {
@@ -119,7 +162,8 @@ function resolveTexContentType(path: string): string | null {
     path.endsWith('.tex') ||
     path.endsWith('.def') ||
     path.endsWith('.fd') ||
-    path.endsWith('.bst')
+    path.endsWith('.bst') ||
+    path.endsWith('.cfg')
   ) {
     return 'text/plain; charset=utf-8';
   }
