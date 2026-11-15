@@ -165,6 +165,22 @@ export const BUNDLED_PACKAGES: BundledPackageDef[] = [
   { name: 'pgflibraryintersections.code.tex', format: 26 },
   { name: 'pgflibraryshapes.misc.code.tex', format: 26 },
   { name: 'pgflibraryshapes.symbols.code.tex', format: 26 },
+  { name: 'pgfmoduleshapes.code.tex', format: 26 },
+  { name: 'pgfmoduleplot.code.tex', format: 26 },
+  { name: 'pgfmodulematrix.code.tex', format: 26 },
+  { name: 'pgfmoduledecorations.code.tex', format: 26 },
+  { name: 'pgfmodulenonlineartransformations.code.tex', format: 26 },
+  { name: 'pgfmoduleparser.code.tex', format: 26 },
+  { name: 'pgfmoduleoo.code.tex', format: 26 },
+  { name: 'pgfmoduleanimations.code.tex', format: 26 },
+  { name: 'pgfsysanimations.code.tex', format: 26 },
+  { name: 'pgflibraryarrows.meta.code.tex', format: 26 },
+  { name: 'tikzlibraryarrows.meta.code.tex', format: 26 },
+  { name: 'cuted.sty', format: 26 },
+  { name: 'capt-of.sty', format: 26 },
+  { name: 'tocloft.sty', format: 26 },
+  { name: 'lmodern.sty', format: 26 },
+  { name: 'flushend.sty', format: 26 },
 ];
 
 export const BUNDLED_PACKAGE_NAMES = new Set(BUNDLED_PACKAGES.map((p) => p.name));
@@ -560,6 +576,7 @@ function extractRequirements(text: string): Array<{ name: string; format: number
       const name = piece.trim();
       if (name && !/[\\{}$#%\s]/.test(name)) {
         out.push({ name: `tikzlibrary${name}.code.tex`, format: 26 });
+        out.push({ name: `pgflibrary${name}.code.tex`, format: 26 });
       }
     }
   }
@@ -569,6 +586,16 @@ function extractRequirements(text: string): Array<{ name: string; format: number
       const name = piece.trim();
       if (name && !/[\\{}$#%\s]/.test(name)) {
         out.push({ name: `pgflibrary${name}.code.tex`, format: 26 });
+      }
+    }
+  }
+
+  // Direct PGF module declarations in preamble or packages (e.g. \usepgfmodule{shapes,plot})
+  for (const m of text.matchAll(/\\usepgfmodule\s*\{([^}]+)\}/g)) {
+    for (const piece of m[1].split(',')) {
+      const name = piece.trim();
+      if (name && !/[\\{}$#%\s]/.test(name)) {
+        out.push({ name: `pgfmodule${name}.code.tex`, format: 26 });
       }
     }
   }
@@ -720,6 +747,12 @@ function extractRequirements(text: string): Array<{ name: string; format: number
       'pgfmathfloat.code.tex',
       'pgfint.code.tex',
       'pgf.revision.tex',
+      'pgfmoduleshapes.code.tex',
+      'pgfmoduleplot.code.tex',
+      'pgfmodulematrix.code.tex',
+      'pgfmoduledecorations.code.tex',
+      'pgflibraryarrows.meta.code.tex',
+      'tikzlibraryarrows.meta.code.tex',
     ];
     for (const name of tikzFiles) {
       out.push({ name, format: 26 });
@@ -875,7 +908,7 @@ export async function preloadDocumentPackages(
 
   const skip = (name: string): boolean =>
     seen.has(name) ||
-    TEXLIVE_BASIC_PACKAGES.has(name.toLowerCase()) ||
+    (!BUNDLED_PACKAGE_NAMES.has(name) && TEXLIVE_BASIC_PACKAGES.has(name.toLowerCase())) ||
     (!BUNDLED_PACKAGE_NAMES.has(name) && failedFetchCache.has(name));
 
   let frontier = extractRequirements(texContent).filter((t) => {

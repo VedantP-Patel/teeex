@@ -153,6 +153,22 @@ const BUNDLED_STATIC_FILES = new Set([
   'pgflibraryintersections.code.tex',
   'pgflibraryshapes.misc.code.tex',
   'pgflibraryshapes.symbols.code.tex',
+  'pgfmoduleshapes.code.tex',
+  'pgfmoduleplot.code.tex',
+  'pgfmodulematrix.code.tex',
+  'pgfmoduledecorations.code.tex',
+  'pgfmodulenonlineartransformations.code.tex',
+  'pgfmoduleparser.code.tex',
+  'pgfmoduleoo.code.tex',
+  'pgfmoduleanimations.code.tex',
+  'pgfsysanimations.code.tex',
+  'pgflibraryarrows.meta.code.tex',
+  'tikzlibraryarrows.meta.code.tex',
+  'cuted.sty',
+  'capt-of.sty',
+  'tocloft.sty',
+  'lmodern.sty',
+  'flushend.sty',
 ]);
 
 function resolveTexContentType(path: string): string | null {

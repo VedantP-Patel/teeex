@@ -150,13 +150,13 @@ export function toEngineFiles(
         shouldMount = true;
       } else if (
         (base === 'tikz' || base.startsWith('pgf')) &&
-        (requestedPackages.has('tikz') || requestedPackages.has('pgf') || entryContent.includes('tikz') || entryContent.includes('pgf') || entryContent.includes('tikzpicture'))
+        (requestedPackages.has('tikz') || requestedPackages.has('pgf') || entryContent.includes('tikz') || entryContent.includes('pgf') || entryContent.includes('tikzpicture') || entryContent.includes('usepgfmodule') || entryContent.includes('usetikzlibrary'))
       ) {
         shouldMount = true;
       }
     } else if (
       (lowerName.startsWith('tikz') || lowerName.startsWith('pgf')) &&
-      (requestedPackages.has('tikz') || requestedPackages.has('pgf') || entryContent.includes('tikz') || entryContent.includes('pgf') || entryContent.includes('tikzpicture'))
+      (requestedPackages.has('tikz') || requestedPackages.has('pgf') || entryContent.includes('tikz') || entryContent.includes('pgf') || entryContent.includes('tikzpicture') || entryContent.includes('usepgfmodule') || entryContent.includes('usetikzlibrary'))
     ) {
       shouldMount = true;
     } else if (
