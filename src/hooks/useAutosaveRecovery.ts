@@ -137,8 +137,12 @@ export function useAutosaveRecovery({
     if (draft) {
       const rawTime = activeProject?.updatedAt ? new Date(activeProject.updatedAt).getTime() : 0;
       const projUpdatedAt = Number.isFinite(rawTime) ? rawTime : 0;
-      // If emergency draft is newer by at least 1.5 seconds, present recovery banner
-      if (draft.timestamp > projUpdatedAt + 1500) {
+      const contentDiffers = activeProject && draft.files?.some(df => {
+        const pf = activeProject.files?.find(f => f.id === df.id);
+        return !pf || pf.content !== df.content;
+      });
+      // If emergency draft is newer or content is distinct from loaded project, present recovery banner
+      if (draft.timestamp > projUpdatedAt + 1500 || contentDiffers) {
         setHasRecoverableCrash(true);
         setRecoveredDraftInfo(draft);
       } else {
@@ -149,17 +153,19 @@ export function useAutosaveRecovery({
       setHasRecoverableCrash(false);
       setRecoveredDraftInfo(null);
     }
-  }, [activeProjectId, activeProject?.updatedAt]);
+  }, [activeProjectId, activeProject?.updatedAt, activeProject]);
 
-  const saveNow = useCallback(async () => {
+  const saveNow = useCallback(async (customFiles?: ProjectFile[]) => {
     const current = stateRef.current;
     if (!current.projectId) return;
+
+    const filesToSave = customFiles || current.files;
 
     try {
       // 1. IndexedDB persistence
       await saveProjectOffline({
         ...activeProject,
-        files: current.files,
+        files: filesToSave,
         folders: current.folders,
         title: current.projectTitle,
         updatedAt: new Date().toISOString(),
@@ -167,7 +173,7 @@ export function useAutosaveRecovery({
 
       // 2. In-memory project service update
       updateProject(current.projectId, {
-        files: current.files,
+        files: filesToSave,
         folders: current.folders,
         title: current.projectTitle,
       });

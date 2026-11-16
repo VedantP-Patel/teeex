@@ -29,6 +29,7 @@ export function useProjectManager({
     triggerCompile,
     markDirty: lifecycle.markDirty,
     providerRef,
+    flushCurrentProjectSave: lifecycle.flushCurrentProjectSave,
   });
 
   return {

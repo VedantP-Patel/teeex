@@ -30,6 +30,7 @@ interface UseFileOperationsOptions {
   triggerCompile: () => void;
   markDirty: (files: ProjectFile[]) => void;
   providerRef?: React.MutableRefObject<any>;
+  flushCurrentProjectSave?: (overrideFiles?: ProjectFile[]) => void;
 }
 
 export function useFileOperations({
@@ -39,6 +40,7 @@ export function useFileOperations({
   triggerCompile,
   markDirty,
   providerRef,
+  flushCurrentProjectSave,
 }: UseFileOperationsOptions) {
   const files = useProjectStore(s => s.files);
   const folders = useProjectStore(s => s.folders);
@@ -279,16 +281,25 @@ export function useFileOperations({
     } else if (fix.title.toLowerCase().includes('ampersand') && lines[startIdx] !== undefined) {
       lines[startIdx] = lines[startIdx].replace(/(^|[^\\])(?:\\\\)*(&)/g, (match) => match.slice(0, -1) + '\\&');
     } else if (fix.title.toLowerCase().includes('captionof') && lines[startIdx] !== undefined) {
+      const targetType = /table/i.test(fix.title) || /\\captionof\{table\}/i.test(fix.replacement) ? 'table' : 'figure';
       lines[startIdx] = lines[startIdx].replace(/(?:^|[^\w\\])\\caption(?![a-zA-Z*])\b/, (match) => {
-        return match.replace('\\caption', '\\captionof{figure}');
+        return match.replace('\\caption', `\\captionof{${targetType}}`);
       });
     } else {
       lines.splice(startIdx, deleteCount, fix.replacement);
     }
 
-    handleCodeChange(lines.join('\n'), undefined, true);
+    const newCode = lines.join('\n');
+    handleCodeChange(newCode, undefined, true);
+
+    if (flushCurrentProjectSave) {
+      const sAfter = projectStore.getState();
+      const updatedFiles = sAfter.files.map(f => (f.id === currentFile.id ? { ...f, content: newCode } : f));
+      flushCurrentProjectSave(updatedFiles);
+    }
+
     setTimeout(() => triggerCompile(), 50);
-  }, [handleCodeChange, triggerCompile]);
+  }, [handleCodeChange, triggerCompile, flushCurrentProjectSave]);
 
   const handleInsertCode = useCallback((latexSnippet: string) => {
     const s = projectStore.getState();

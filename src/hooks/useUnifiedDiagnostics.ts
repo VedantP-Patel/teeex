@@ -151,8 +151,9 @@ export function useUnifiedDiagnostics({
       } else if (fix.title.toLowerCase().includes('ampersand') && lines[startIdx] !== undefined) {
         lines[startIdx] = lines[startIdx].replace(/(^|[^\\])(?:\\\\)*(&)/g, (match) => match.slice(0, -1) + '\\&');
       } else if (fix.title.toLowerCase().includes('captionof') && lines[startIdx] !== undefined) {
+        const targetType = /table/i.test(fix.title) || /\\captionof\{table\}/i.test(fix.replacement) ? 'table' : 'figure';
         lines[startIdx] = lines[startIdx].replace(/(?:^|[^\w\\])\\caption(?![a-zA-Z*])\b/, (match) => {
-          return match.replace('\\caption', '\\captionof{figure}');
+          return match.replace('\\caption', `\\captionof{${targetType}}`);
         });
       } else {
         // Standard line range replacement

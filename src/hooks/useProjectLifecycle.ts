@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useCallback, useRef } from 'react';
-import type { UserProfile, Template, ProjectRole, ProjectMember } from '../types/latex';
+import type { UserProfile, Template, ProjectRole, ProjectMember, ProjectFile } from '../types/latex';
 import {
   projectStore,
   useProjectStore,
@@ -22,7 +22,7 @@ import {
 } from '../services/projectsService';
 import { saveProjectOffline } from '../services/offlineStorageService';
 import { STARTER_TEMPLATES } from '../services/templates';
-import { useAutosaveRecovery } from './useAutosaveRecovery';
+import { useAutosaveRecovery, clearEmergencyDraft } from './useAutosaveRecovery';
 
 interface UseProjectLifecycleOptions {
   currentUser: UserProfile | null;
@@ -67,16 +67,35 @@ export function useProjectLifecycle({
       projectTitle: active?.title || 'Untitled Project',
     });
 
-    if (active?.files.some(f => (f as any)._persistedInIdb)) {
-      hydrateProjectFromOffline(initialActiveId).then(offlineProj => {
-        if (offlineProj && Array.isArray(offlineProj.files) && offlineProj.files.length > 0) {
+    hydrateProjectFromOffline(initialActiveId).then(offlineProj => {
+      if (offlineProj && Array.isArray(offlineProj.files) && offlineProj.files.length > 0) {
+        const hasPersistedFlag = active?.files.some(f => (f as any)._persistedInIdb);
+        const hasDifferingContent = offlineProj.files.some(of => {
+          const currentF = active?.files.find(f => f.id === of.id);
+          return !currentF || currentF.content !== of.content;
+        });
+
+        if (hasPersistedFlag || hasDifferingContent) {
           setProjectState({
             files: offlineProj.files,
             folders: offlineProj.folders || ['sections', 'figures'],
           });
+
+          if (providerRef?.current) {
+            const p = providerRef.current;
+            p.getDoc().transact(() => {
+              offlineProj.files.forEach(f => {
+                const yText = p.getText(f.id);
+                if (yText.toString() !== f.content) {
+                  yText.delete(0, yText.length);
+                  yText.insert(0, f.content);
+                }
+              });
+            }, 'local-editor');
+          }
         }
-      }).catch(() => {});
-    }
+      }
+    }).catch(() => {});
   }, [currentUser]);
 
   const activeProject = useMemo(() => {
@@ -84,23 +103,26 @@ export function useProjectLifecycle({
   }, [projects, activeProjectId]);
 
   // Synchronous flush of current project state
-  const flushCurrentProjectSave = useCallback(() => {
+  const flushCurrentProjectSave = useCallback((overrideFiles?: ProjectFile[]) => {
     const s = projectStore.getState();
     const pid = s.activeProjectId;
     if (!pid) return;
 
+    const filesToSave = overrideFiles || s.files;
+
     const updatedProjects = updateProject(pid, {
-      files: s.files,
+      files: filesToSave,
       folders: s.folders,
       title: s.projectTitle,
     });
     setProjects(updatedProjects);
+    clearEmergencyDraft(pid);
 
     const currProj = s.projects.find(p => p.id === pid) || updatedProjects.find(p => p.id === pid);
     if (currProj) {
       saveProjectOffline({
         ...currProj,
-        files: s.files,
+        files: filesToSave,
         folders: s.folders,
         title: s.projectTitle,
         updatedAt: new Date().toISOString(),
