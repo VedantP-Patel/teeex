@@ -285,8 +285,12 @@ export function useFileOperations({
       lines[startIdx] = lines[startIdx].replace(/(?:^|[^\w\\])\\caption(?![a-zA-Z*])\b/, (match) => {
         return match.replace('\\caption', `\\captionof{${targetType}}`);
       });
+    } else if (fix.replacement === '') {
+      lines.splice(startIdx, deleteCount);
+    } else if (startIdx === 0 && deleteCount >= lines.length) {
+      lines.splice(0, lines.length, ...fix.replacement.trimEnd().split('\n'));
     } else {
-      lines.splice(startIdx, deleteCount, fix.replacement);
+      lines.splice(startIdx, deleteCount, ...fix.replacement.split('\n'));
     }
 
     const newCode = lines.join('\n');

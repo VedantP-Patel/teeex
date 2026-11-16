@@ -238,4 +238,135 @@ describe('Quick-Fix Persistence & Anti-Revert Suite', () => {
     expect(reloaded).toBeDefined();
     expect(reloaded!.files[0].content).toBe('\\captionof{table}{Original}');
   });
+
+  it('cleanly deletes marker line when applying empty string quick-fix', () => {
+    let hookResult: UnifiedDiagnosticsResult | null = null;
+    const TestComponent = () => {
+      hookResult = useUnifiedDiagnostics({
+        parserDiagnostics: [
+          {
+            id: 'corrupted-idb-marker-2',
+            line: 2,
+            column: 1,
+            severity: 'warning',
+            message: "Found leftover storage cache marker '% [Content persisted in IndexedDB storage]'.",
+            rule: 'syntax/corrupted-idb-marker',
+            suggestedFix: {
+              title: 'Remove storage cache marker',
+              description: "Removes leftover '% [Content persisted in IndexedDB storage]' line.",
+              replacement: '',
+              startLine: 2,
+              endLine: 2,
+            },
+          },
+        ],
+        activeFileName: 'main.tex',
+      });
+      return null;
+    };
+
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    act(() => {
+      root.render(<TestComponent />);
+    });
+
+    const files: ProjectFile[] = [
+      {
+        id: 'main.tex',
+        name: 'main.tex',
+        content: [
+          '% Line 1 Header',
+          '% [Content persisted in IndexedDB storage]',
+          '\\documentclass{article}',
+          '\\begin{document}',
+          'Hello',
+          '\\end{document}',
+        ].join('\n'),
+        type: 'tex',
+        isEntry: true,
+      },
+    ];
+
+    let updatedContent = '';
+    const updateFileContent = (_id: string, newContent: string) => {
+      updatedContent = newContent;
+    };
+
+    let ok = false;
+    act(() => {
+      ok = hookResult!.applyQuickFix('corrupted-idb-marker-2', files, updateFileContent);
+    });
+
+    expect(ok).toBe(true);
+    expect(updatedContent).not.toContain('% [Content persisted in IndexedDB storage]');
+    expect(updatedContent.split('\n')).toHaveLength(5);
+    expect(updatedContent.split('\n')[1]).toBe('\\documentclass{article}');
+  });
+
+  it('cleanly removes duplicate document sections after \\end{document}', () => {
+    let hookResult: UnifiedDiagnosticsResult | null = null;
+    const TestComponent = () => {
+      hookResult = useUnifiedDiagnostics({
+        parserDiagnostics: [
+          {
+            id: 'trailing-content-5',
+            line: 5,
+            column: 1,
+            severity: 'warning',
+            message: "Content found after '\\end{document}' (closed on line 4).",
+            rule: 'syntax/content-after-end-document',
+            suggestedFix: {
+              title: 'Remove trailing content after \\end{document}',
+              description: "Deletes redundant lines after '\\end{document}' on line 4.",
+              replacement: '\\documentclass{article}\n\\begin{document}\nHello\n\\end{document}\n',
+              startLine: 1,
+              endLine: 8,
+            },
+          },
+        ],
+        activeFileName: 'main.tex',
+      });
+      return null;
+    };
+
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    act(() => {
+      root.render(<TestComponent />);
+    });
+
+    const files: ProjectFile[] = [
+      {
+        id: 'main.tex',
+        name: 'main.tex',
+        content: [
+          '\\documentclass{article}',
+          '\\begin{document}',
+          'Hello',
+          '\\end{document}',
+          '\\begin{document}',
+          'Duplicate content',
+          '\\end{document}',
+          '% Trailing comment',
+        ].join('\n'),
+        type: 'tex',
+        isEntry: true,
+      },
+    ];
+
+    let updatedContent = '';
+    const updateFileContent = (_id: string, newContent: string) => {
+      updatedContent = newContent;
+    };
+
+    let ok = false;
+    act(() => {
+      ok = hookResult!.applyQuickFix('trailing-content-5', files, updateFileContent);
+    });
+
+    expect(ok).toBe(true);
+    expect(updatedContent).not.toContain('Duplicate content');
+    expect(updatedContent).toBe('\\documentclass{article}\n\\begin{document}\nHello\n\\end{document}');
+  });
 });

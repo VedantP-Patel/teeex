@@ -155,9 +155,13 @@ export function useUnifiedDiagnostics({
         lines[startIdx] = lines[startIdx].replace(/(?:^|[^\w\\])\\caption(?![a-zA-Z*])\b/, (match) => {
           return match.replace('\\caption', `\\captionof{${targetType}}`);
         });
+      } else if (fix.replacement === '') {
+        lines.splice(startIdx, endIdx - startIdx + 1);
+      } else if (startIdx === 0 && endIdx >= lines.length - 1) {
+        lines.splice(0, lines.length, ...fix.replacement.trimEnd().split('\n'));
       } else {
         // Standard line range replacement
-        lines.splice(startIdx, endIdx - startIdx + 1, fix.replacement);
+        lines.splice(startIdx, endIdx - startIdx + 1, ...fix.replacement.split('\n'));
       }
 
       updateFileContent(targetFile.id, lines.join('\n'));

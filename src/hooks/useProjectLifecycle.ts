@@ -229,6 +229,20 @@ export function useProjectLifecycle({
             files: offlineProj.files,
             folders: offlineProj.folders || ['sections', 'figures'],
           });
+
+          if (providerRef?.current) {
+            const p = providerRef.current;
+            p.getDoc().transact(() => {
+              offlineProj.files.forEach(f => {
+                const yText = p.getText(f.id);
+                if (yText.toString() !== f.content) {
+                  yText.delete(0, yText.length);
+                  yText.insert(0, f.content);
+                }
+              });
+            }, 'local-editor');
+          }
+
           setTimeout(() => triggerCompile(), 60);
         }
       }).catch(() => {});

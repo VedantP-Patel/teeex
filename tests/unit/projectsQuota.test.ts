@@ -90,6 +90,55 @@ describe('Projects Storage & Quota Resilience', () => {
     expect(parsed[0].id).toBe('proj-large-doc');
     expect(parsed[0].files[0]._persistedInIdb).toBe(true);
     expect(parsed[0].files[0].content.length).toBeLessThan(10000);
+    // Crucial: no artificial comments injected into code
+    expect(parsed[0].files[0].content).not.toContain('% [Content persisted in IndexedDB storage]');
+  });
+
+  it('strips heavy image assets from localStorage while preserving them in IndexedDB', () => {
+    const projectWithImages: Project = {
+      id: 'proj-with-images',
+      title: 'Drone Report with 7 Photos',
+      ownerId: 'usr-local',
+      ownerEmail: 'you@teeex.local',
+      role: 'owner',
+      createdAt: new Date().toISOString(),
+      updatedAt: 'Just now',
+      files: [
+        {
+          id: 'main.tex',
+          name: 'main.tex',
+          content: '\\documentclass{article}\n\\begin{document}\nDrone report\n\\end{document}',
+          type: 'tex',
+        },
+        {
+          id: 'drone.jpg',
+          name: 'drone.jpg',
+          content: 'data:image/jpeg;base64,' + 'A'.repeat(500000), // 500KB fake image
+          dataUrl: 'data:image/jpeg;base64,' + 'A'.repeat(500000),
+          type: 'image',
+        },
+      ],
+      folders: ['figures'],
+      tags: [],
+      members: [],
+      isArchived: false,
+    };
+
+    saveProjects([projectWithImages]);
+
+    const storedRaw = localStorage.getItem('teeex_saved_projects');
+    expect(storedRaw).toBeTruthy();
+    const storedProjects = JSON.parse(storedRaw!);
+    const storedImg = storedProjects[0].files.find((f: any) => f.id === 'drone.jpg');
+
+    expect(storedImg).toBeDefined();
+    expect(storedImg.content).toBe('');
+    expect(storedImg.dataUrl).toBeUndefined();
+    expect(storedImg._persistedInIdb).toBe(true);
+
+    // Text file is preserved completely
+    const storedTex = storedProjects[0].files.find((f: any) => f.id === 'main.tex');
+    expect(storedTex.content).toContain('Drone report');
   });
 
   it('re-keys template projects when encountering Supabase RLS collisions', async () => {

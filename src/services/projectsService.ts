@@ -297,38 +297,65 @@ export function saveProjects(projects: Project[]): void {
     saveProjectOffline(p).catch(() => {});
   }
 
-  // Helper to trim large files for localStorage while full contents remain safely in IndexedDB
+  // Helper to strip heavy binary figure assets from the localStorage payload.
+  // The authoritative binary images remain safely preserved in IndexedDB offline storage.
+  const stripBinaryForLocalStorage = (items: Project[]): Project[] => {
+    return items.map(p => ({
+      ...p,
+      files: p.files.map(f => {
+        const isBinary =
+          f.type === 'image' ||
+          Boolean(f.dataUrl) ||
+          (typeof f.content === 'string' && f.content.startsWith('data:')) ||
+          Boolean((f as unknown as { isBinary?: boolean }).isBinary);
+
+        if (isBinary) {
+          return {
+            ...f,
+            content: '',
+            dataUrl: undefined,
+            _persistedInIdb: true,
+          };
+        }
+        return f;
+      }),
+    }));
+  };
+
+  // Helper to trim large text files for localStorage while full contents remain safely in IndexedDB
   const makeQuotaSafe = (items: Project[], maxContentLen: number) => {
     return items.map(p => ({
       ...p,
       files: p.files.map(f => {
-        if (f.content.length <= maxContentLen) return f;
+        if (!f.content || f.content.length <= maxContentLen) return f;
         return {
           ...f,
-          content: f.content.slice(0, 500) + '\n% [Content persisted in IndexedDB storage]',
+          content: '',
           _persistedInIdb: true,
         };
       }),
     }));
   };
 
+  const forLocalStorage = stripBinaryForLocalStorage(sanitized);
+
   // 2. Persist to localStorage with progressive quota fallback
   try {
-    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(sanitized));
+    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(forLocalStorage));
   } catch (_err) {
     pruneLocalStorageQuota();
     try {
       // Pass 1: Trim non-active project files >2000 chars and active files >50,000 chars (~1000 lines)
       const activeId = localStorage.getItem(ACTIVE_PROJECT_ID_KEY);
-      const pass1 = sanitized.map(p => {
+      const pass1 = forLocalStorage.map(p => {
         const threshold = p.id === activeId ? 50000 : 2000;
         return {
           ...p,
           files: p.files.map(f => {
-            if (f.content.length <= threshold) return f;
+            if (!f.content || f.content.length <= threshold) return f;
             return {
               ...f,
-              content: f.content.slice(0, 500) + '\n% [Content persisted in IndexedDB storage]',
+              content: '',
               _persistedInIdb: true,
             };
           }),
@@ -338,12 +365,12 @@ export function saveProjects(projects: Project[]): void {
     } catch {
       try {
         // Pass 2: Aggressively trim all files >1000 chars across all projects
-        const pass2 = makeQuotaSafe(sanitized, 1000);
+        const pass2 = makeQuotaSafe(forLocalStorage, 1000);
         localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(pass2));
       } catch {
         // Pass 3: Metadata only in localStorage (headers, tags, member info)
         try {
-          const pass3 = sanitized.map(p => ({
+          const pass3 = forLocalStorage.map(p => ({
             ...p,
             files: p.files.map(f => ({ ...f, content: '', _persistedInIdb: true })),
           }));
