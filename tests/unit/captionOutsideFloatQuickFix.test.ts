@@ -34,6 +34,55 @@ describe('Caption Outside Float Quick-Fix & Diagnostics', () => {
     expect(diag!.suggestedFix!.endLine).toBe(519);
   });
 
+  it('detects \\caption outside float for tables in compiler logs and generates \\captionof{table}{...} suggestedFix', () => {
+    const log = [
+      '! Package caption Error: \\caption outside float.',
+      'See the caption package documentation for explanation.',
+      'Type H <return> for immediate help.',
+      '...',
+      'l.649 \\caption',
+      '              {List of Drone Components with Descriptions and Quantities.}',
+      '! ==> Fatal error occurred, no output PDF file produced!',
+    ].join('\n');
+
+    const result = parseTexLog(log);
+    const diag = result.diagnostics.find((d) => d.code === 'syntax');
+
+    expect(diag).toBeDefined();
+    expect(diag!.line).toBe(649);
+    expect(diag!.hint).toContain('\\captionof{table}{...}');
+    expect(diag!.suggestedFix).toBeDefined();
+    expect(diag!.suggestedFix!.title).toBe('Change to \\captionof{table}{...}');
+    expect(diag!.suggestedFix!.replacement).toBe('\\captionof{table}{List of Drone Components with Descriptions and Quantities.}');
+  });
+
+  it('AST parser detects table context and flags \\caption outside float with \\captionof{table}{...} quick-fix', () => {
+    const doc = [
+      '\\documentclass{article}',
+      '\\usepackage{caption,tabularx}',
+      '\\begin{document}',
+      '\\begin{strip}',
+      '  \\caption{List of Drone Components}',
+      '  \\begin{tabularx}{\\textwidth}{|c|X|}',
+      '    1 & Pixhawk \\\\',
+      '  \\end{tabularx}',
+      '\\end{strip}',
+      '\\end{document}',
+    ].join('\n');
+
+    const diags = diagnoseLatex(doc);
+    const captionDiag = diags.find(
+      (d) => d.rule === 'syntax/caption-outside-float' && d.line === 5
+    );
+
+    expect(captionDiag).toBeDefined();
+    expect(captionDiag!.severity).toBe('error');
+    expect(captionDiag!.message).toContain('\\captionof{table}{...}');
+    expect(captionDiag!.suggestedFix).toBeDefined();
+    expect(captionDiag!.suggestedFix!.title).toBe('Change to \\captionof{table}{...}');
+    expect(captionDiag!.suggestedFix!.replacement).toBe('  \\captionof{table}{List of Drone Components}');
+  });
+
   it('AST parser flags \\caption outside float with error and quick-fix', () => {
     const doc = [
       '\\documentclass{article}',

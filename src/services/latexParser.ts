@@ -726,19 +726,30 @@ export function diagnoseLatex(code: string): Diagnostic[] {
     if (!inFloatEnv && captionMatch && captionMatch.index !== undefined) {
       const fullMatch = captionMatch[0];
       const colIdx = captionMatch.index + fullMatch.indexOf('\\caption');
+
+      const inTabular = envStack.some((e) =>
+        /^(tabular|tabular\*|tabularx|tabulary|longtable|array)$/.test(e.name)
+      );
+      const nearbyLines = lines.slice(Math.max(0, i - 2), Math.min(lines.length, i + 6)).join('\n');
+      const isTable = inTabular ||
+        /\\begin\{(?:tabular|tabular\*|tabularx|tabulary|longtable|array)\}/.test(nearbyLines) ||
+        /\\label\{tab:/i.test(nearbyLines) ||
+        /(?:table|tabular|components|parameters|overview|specs)/i.test(effectiveLine);
+      const floatType = isTable ? 'table' : 'figure';
+
       diagnostics.push({
         id: `caption-outside-float-${lineNum}`,
         line: lineNum,
         column: colIdx + 1,
         severity: 'error',
-        message: `\\caption outside float. Use '\\captionof{figure}{...}' or wrap in a '\\begin{figure}' environment.`,
+        message: `\\caption outside float. Use '\\captionof{${floatType}}{...}' or wrap in a '\\begin{${floatType}}' environment.`,
         rule: 'syntax/caption-outside-float',
         rawLog: `! Package caption Error: \\caption outside float on line ${lineNum}.`,
         suggestedFix: {
-          title: `Change to \\captionof{figure}{...}`,
-          description: `Replaces '\\caption' with '\\captionof{figure}'.`,
+          title: `Change to \\captionof{${floatType}}{...}`,
+          description: `Replaces '\\caption' with '\\captionof{${floatType}}'.`,
           replacement: rawLine.replace(/(^|[^\w\\])\\caption(?![a-zA-Z*])\b/, (match) => {
-            return match.replace('\\caption', '\\captionof{figure}');
+            return match.replace('\\caption', `\\captionof{${floatType}}`);
           }),
           startLine: lineNum,
           endLine: lineNum,

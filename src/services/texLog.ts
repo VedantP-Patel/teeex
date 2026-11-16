@@ -409,13 +409,15 @@ function classifyError(
   }
 
   if (/\\caption outside float/i.test(message)) {
+    const isTable = /table|tabular|list of (?:drone )?components|tab:/i.test(context || '');
+    const floatType = isTable ? 'table' : 'figure';
     return {
       code: 'syntax',
-      hint: "\\caption can only be used inside a floating environment (figure or table). Outside of floats, use \\captionof{figure}{...} instead.",
+      hint: `\\caption can only be used inside a floating environment (figure or table). Outside of floats, use \\captionof{${floatType}}{...} instead.`,
       suggestedFix: sourceLine ? {
-        title: 'Change to \\captionof{figure}{...}',
-        description: `Replaces \\caption with \\captionof{figure} on line ${sourceLine}.`,
-        replacement: context ? context.replace(/\\caption\b/, '\\captionof{figure}') : '\\captionof{figure}',
+        title: `Change to \\captionof{${floatType}}{...}`,
+        description: `Replaces \\caption with \\captionof{${floatType}} on line ${sourceLine}.`,
+        replacement: context ? context.replace(/\\caption\b/, `\\captionof{${floatType}}`) : `\\captionof{${floatType}}`,
         startLine: sourceLine,
         endLine: sourceLine,
       } : undefined,
