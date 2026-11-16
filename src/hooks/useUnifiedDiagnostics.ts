@@ -150,6 +150,10 @@ export function useUnifiedDiagnostics({
         }
       } else if (fix.title.toLowerCase().includes('ampersand') && lines[startIdx] !== undefined) {
         lines[startIdx] = lines[startIdx].replace(/(^|[^\\])(?:\\\\)*(&)/g, (match) => match.slice(0, -1) + '\\&');
+      } else if (fix.title.toLowerCase().includes('captionof') && lines[startIdx] !== undefined) {
+        lines[startIdx] = lines[startIdx].replace(/(?:^|[^\w\\])\\caption(?![a-zA-Z*])\b/, (match) => {
+          return match.replace('\\caption', '\\captionof{figure}');
+        });
       } else {
         // Standard line range replacement
         lines.splice(startIdx, endIdx - startIdx + 1, fix.replacement);

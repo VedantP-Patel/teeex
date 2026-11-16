@@ -408,6 +408,20 @@ function classifyError(
     };
   }
 
+  if (/\\caption outside float/i.test(message)) {
+    return {
+      code: 'syntax',
+      hint: "\\caption can only be used inside a floating environment (figure or table). Outside of floats, use \\captionof{figure}{...} instead.",
+      suggestedFix: sourceLine ? {
+        title: 'Change to \\captionof{figure}{...}',
+        description: `Replaces \\caption with \\captionof{figure} on line ${sourceLine}.`,
+        replacement: context ? context.replace(/\\caption\b/, '\\captionof{figure}') : '\\captionof{figure}',
+        startLine: sourceLine,
+        endLine: sourceLine,
+      } : undefined,
+    };
+  }
+
   if (
     /Missing [$}{]|Extra [}$]|Misplaced|Too many \}|Paragraph ended before|Missing \\(?:begin|end)|runaway argument/i.test(
       message,

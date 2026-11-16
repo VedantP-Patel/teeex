@@ -664,6 +664,34 @@ export function diagnoseLatex(code: string): Diagnostic[] {
       });
     }
 
+    const inFloatEnv = envStack.some((e) =>
+      /^(figure|figure\*|table|table\*|wrapfigure|wraptable|SCfigure|sidewaysfigure|sidewaystable|floatingfigure|floatingtable|marginfigure|margintable|plate)$/.test(e.name)
+    );
+    const captionMatch = effectiveLine.match(/(?:^|[^\w\\])\\caption(?![a-zA-Z*])\s*\{/);
+
+    if (!inFloatEnv && captionMatch && captionMatch.index !== undefined) {
+      const fullMatch = captionMatch[0];
+      const colIdx = captionMatch.index + fullMatch.indexOf('\\caption');
+      diagnostics.push({
+        id: `caption-outside-float-${lineNum}`,
+        line: lineNum,
+        column: colIdx + 1,
+        severity: 'error',
+        message: `\\caption outside float. Use '\\captionof{figure}{...}' or wrap in a '\\begin{figure}' environment.`,
+        rule: 'syntax/caption-outside-float',
+        rawLog: `! Package caption Error: \\caption outside float on line ${lineNum}.`,
+        suggestedFix: {
+          title: `Change to \\captionof{figure}{...}`,
+          description: `Replaces '\\caption' with '\\captionof{figure}'.`,
+          replacement: rawLine.replace(/(^|[^\w\\])\\caption(?![a-zA-Z*])\b/, (match) => {
+            return match.replace('\\caption', '\\captionof{figure}');
+          }),
+          startLine: lineNum,
+          endLine: lineNum,
+        },
+      });
+    }
+
     if (effectiveLine.includes('\\includegraphics') && !validPreamblePackages.has('graphicx')) {
       diagnostics.push({
         id: `missing-graphicx-${lineNum}`,

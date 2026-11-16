@@ -278,6 +278,10 @@ export function useFileOperations({
       }
     } else if (fix.title.toLowerCase().includes('ampersand') && lines[startIdx] !== undefined) {
       lines[startIdx] = lines[startIdx].replace(/(^|[^\\])(?:\\\\)*(&)/g, (match) => match.slice(0, -1) + '\\&');
+    } else if (fix.title.toLowerCase().includes('captionof') && lines[startIdx] !== undefined) {
+      lines[startIdx] = lines[startIdx].replace(/(?:^|[^\w\\])\\caption(?![a-zA-Z*])\b/, (match) => {
+        return match.replace('\\caption', '\\captionof{figure}');
+      });
     } else {
       lines.splice(startIdx, deleteCount, fix.replacement);
     }
