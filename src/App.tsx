@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { UploadCloud, Loader2, AlertCircle } from 'lucide-react';
 import { AuthPortal } from './components/AuthPortal';
 import { Navbar } from './components/Navbar';
