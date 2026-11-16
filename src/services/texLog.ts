@@ -422,6 +422,15 @@ function classifyError(
     };
   }
 
+  if (/Not in outer par mode/i.test(message)) {
+    const floatMatch = context.match(/\\begin\{(figure\*?|table\*?)\}/);
+    const floatName = floatMatch ? `\\begin{${floatMatch[1]}}` : 'Floating environments';
+    return {
+      code: 'syntax',
+      hint: `${floatName} cannot be nested inside another float, minipage, center, or multicols. Check lines directly preceding line ${sourceLine || ''} for an unclosed \\begin{figure}, \\begin{figure*}, or \\begin{center}.`,
+    };
+  }
+
   if (
     /Missing [$}{]|Extra [}$]|Misplaced|Too many \}|Paragraph ended before|Missing \\(?:begin|end)|runaway argument/i.test(
       message,

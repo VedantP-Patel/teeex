@@ -543,6 +543,30 @@ export function diagnoseLatex(code: string): Diagnostic[] {
     for (const match of beginMatches) {
       let envName = match[1];
       if (envName === 'tablular') envName = 'tabular';
+
+      if (/^(figure|figure\*|table|table\*)$/.test(envName) && envStack.length > 0) {
+        const lastEnv = envStack[envStack.length - 1];
+        if (/^(figure|figure\*|table|table\*|center|minipage|multicols|tabular|tabular\*|tabularx|tabulary|array)$/.test(lastEnv.name)) {
+          const isFloat = /^(figure|figure\*|table|table\*)$/.test(lastEnv.name);
+          diagnostics.push({
+            id: `not-in-outer-par-mode-${lineNum}`,
+            line: lineNum,
+            column: (match.index || 0) + 1,
+            severity: 'error',
+            message: `Float '\\begin{${envName}}' cannot be nested inside '\\begin{${lastEnv.name}}' (opened on line ${lastEnv.line}). Floats must be in outer paragraph mode.`,
+            rule: 'syntax/not-in-outer-par-mode',
+            rawLog: `! LaTeX Error: Not in outer par mode on line ${lineNum}.`,
+            suggestedFix: isFloat ? {
+              title: `Close \\end{${lastEnv.name}} before \\begin{${envName}}`,
+              description: `Inserts '\\end{${lastEnv.name}}' before opening new float.`,
+              replacement: `\\end{${lastEnv.name}}\n` + rawLine,
+              startLine: lineNum,
+              endLine: lineNum,
+            } : undefined,
+          });
+        }
+      }
+
       envStack.push({ name: envName, line: lineNum });
     }
 
