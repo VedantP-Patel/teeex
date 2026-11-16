@@ -25,6 +25,53 @@ describe('Outer Par Mode (Nested Float) Quick-Fix & Diagnostics', () => {
     expect(diag!.hint).toContain('cannot be nested inside another float');
   });
 
+  it('AST parser flags nested float when float is inside strip environment', () => {
+    const doc = [
+      '\\documentclass{article}',
+      '\\begin{document}',
+      '\\begin{strip}',
+      '  \\begin{table*}[t]',
+      '    \\caption{Nested Table}',
+      '  \\end{table*}',
+      '\\end{strip}',
+      '\\end{document}',
+    ].join('\n');
+
+    const diags = diagnoseLatex(doc);
+    const floatDiag = diags.find(
+      (d) => d.rule === 'syntax/not-in-outer-par-mode' && d.line === 4
+    );
+
+    expect(floatDiag).toBeDefined();
+    expect(floatDiag!.message).toContain("Float '\\begin{table*}' cannot be nested inside '\\begin{strip}'");
+    expect(floatDiag!.suggestedFix).toBeDefined();
+    expect(floatDiag!.suggestedFix!.title).toBe('Close \\end{strip} before \\begin{table*}');
+  });
+
+  it('AST parser flags float placed inside itemize environment', () => {
+    const doc = [
+      '\\documentclass{article}',
+      '\\begin{document}',
+      '\\begin{itemize}',
+      '  \\item Drone specs',
+      '  \\begin{table}[htbp]',
+      '    \\caption{Table inside list}',
+      '  \\end{table}',
+      '\\end{itemize}',
+      '\\end{document}',
+    ].join('\n');
+
+    const diags = diagnoseLatex(doc);
+    const floatDiag = diags.find(
+      (d) => d.rule === 'syntax/not-in-outer-par-mode' && d.line === 5
+    );
+
+    expect(floatDiag).toBeDefined();
+    expect(floatDiag!.message).toContain("Float '\\begin{table}' cannot be nested inside '\\begin{itemize}'");
+    expect(floatDiag!.suggestedFix).toBeDefined();
+    expect(floatDiag!.suggestedFix!.title).toBe('Close \\end{itemize} before \\begin{table}');
+  });
+
   it('AST parser flags nested float when previous float was not closed', () => {
     const doc = [
       '\\documentclass{article}',

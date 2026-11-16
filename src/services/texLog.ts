@@ -427,7 +427,7 @@ function classifyError(
     const floatName = floatMatch ? `\\begin{${floatMatch[1]}}` : 'Floating environments';
     return {
       code: 'syntax',
-      hint: `${floatName} cannot be nested inside another float, minipage, center, or multicols. Check lines directly preceding line ${sourceLine || ''} for an unclosed \\begin{figure}, \\begin{figure*}, or \\begin{center}.`,
+      hint: `${floatName} cannot be nested inside another float, minipage, center, strip, list, or multicols. Check lines directly preceding line ${sourceLine || ''} for an unclosed \\begin{figure}, \\begin{figure*}, \\begin{strip}, or \\begin{center}. If using cuted, replace \\begin{${floatMatch ? floatMatch[1] : 'table*'}} with \\begin{strip} and \\captionof.`,
     };
   }
 
