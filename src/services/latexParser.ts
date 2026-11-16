@@ -486,6 +486,9 @@ export function diagnoseLatex(code: string): Diagnostic[] {
 
   const envStack: Array<{ name: string; line: number }> = [];
   const validPreamblePackages = new Set<string>();
+  let documentClosed = false;
+  let documentClosedLine = 0;
+  let trailingContentReported = false;
 
   for (let i = 0; i < lines.length; i++) {
     const pkgMatch = lines[i].match(/\\usepackage(?:\[.*?\])?\{([^}]+)\}/);
@@ -502,6 +505,28 @@ export function diagnoseLatex(code: string): Diagnostic[] {
     const commentIdx = shieldedLine.indexOf('%');
     const hasUnescapedPercent = commentIdx >= 0 && (commentIdx === 0 || shieldedLine[commentIdx - 1] !== '\\');
     const effectiveLine = hasUnescapedPercent ? shieldedLine.substring(0, commentIdx) : shieldedLine;
+
+    if (documentClosed) {
+      if (!trailingContentReported && effectiveLine.trim().length > 0) {
+        trailingContentReported = true;
+        diagnostics.push({
+          id: `trailing-content-${lineNum}`,
+          line: lineNum,
+          column: 1,
+          severity: 'warning',
+          message: `Content found after '\\end{document}' (closed on line ${documentClosedLine}). LaTeX ignores all content after '\\end{document}'. Remove duplicate or trailing text to clean up your project.`,
+          rule: 'syntax/content-after-end-document',
+          suggestedFix: {
+            title: `Remove trailing content after \\end{document}`,
+            description: `Deletes redundant lines after '\\end{document}' on line ${documentClosedLine}.`,
+            replacement: rawLines.slice(0, documentClosedLine).join('\n') + '\n',
+            startLine: 1,
+            endLine: rawLines.length,
+          }
+        });
+      }
+      continue;
+    }
 
     if (effectiveLine.includes('tablular')) {
       diagnostics.push({
@@ -597,6 +622,10 @@ export function diagnoseLatex(code: string): Diagnostic[] {
         const last = envStack[envStack.length - 1];
         if (last.name === closingName) {
           envStack.pop();
+          if (closingName === 'document') {
+            documentClosed = true;
+            documentClosedLine = lineNum;
+          }
         } else {
           diagnostics.push({
             id: `mismatched-env-${lineNum}-${closingName}`,
