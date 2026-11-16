@@ -276,6 +276,8 @@ export function useFileOperations({
       } else {
         lines.unshift(fix.replacement);
       }
+    } else if (fix.title.toLowerCase().includes('ampersand') && lines[startIdx] !== undefined) {
+      lines[startIdx] = lines[startIdx].replace(/(^|[^\\])(?:\\\\)*(&)/g, (match) => match.slice(0, -1) + '\\&');
     } else {
       lines.splice(startIdx, deleteCount, fix.replacement);
     }

@@ -148,6 +148,8 @@ export function useUnifiedDiagnostics({
         } else {
           lines.unshift(fix.replacement);
         }
+      } else if (fix.title.toLowerCase().includes('ampersand') && lines[startIdx] !== undefined) {
+        lines[startIdx] = lines[startIdx].replace(/(^|[^\\])(?:\\\\)*(&)/g, (match) => match.slice(0, -1) + '\\&');
       } else {
         // Standard line range replacement
         lines.splice(startIdx, endIdx - startIdx + 1, fix.replacement);

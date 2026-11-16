@@ -637,6 +637,33 @@ export function diagnoseLatex(code: string): Diagnostic[] {
       });
     }
 
+    const inAlignmentEnv = envStack.some((e) =>
+      /^(tabular|tabular\*|tabularx|tabulary|longtable|array|align|align\*|alignat|alignat\*|flalign|flalign\*|split|cases|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|IEEEeqnarray|tikzcd|aligned|alignedat)$/.test(e.name)
+    );
+    const isHeadingOrTitle = /\\(?:section|subsection|subsubsection|paragraph|subparagraph|caption|title|author|chapter)\b/.test(effectiveLine);
+    const unescapedAmpMatch = effectiveLine.match(/(?:^|[^\\])(?:\\\\)*(&)/);
+
+    if ((!inAlignmentEnv || isHeadingOrTitle) && unescapedAmpMatch && unescapedAmpMatch.index !== undefined) {
+      const fullMatch = unescapedAmpMatch[0];
+      const colIdx = unescapedAmpMatch.index + fullMatch.lastIndexOf('&');
+      diagnostics.push({
+        id: `misplaced-alignment-tab-${lineNum}`,
+        line: lineNum,
+        column: colIdx + 1,
+        severity: 'error',
+        message: `Misplaced alignment tab character '&'. In text and section headings, use '\\&' to display an ampersand.`,
+        rule: 'syntax/misplaced-alignment-tab',
+        rawLog: `! Misplaced alignment tab character & on line ${lineNum}.`,
+        suggestedFix: {
+          title: `Escape ampersand (\\&)`,
+          description: `Replaces unescaped '&' with '\\&'.`,
+          replacement: rawLine.replace(/(^|[^\\])(?:\\\\)*(&)/g, (match) => match.slice(0, -1) + '\\&'),
+          startLine: lineNum,
+          endLine: lineNum,
+        },
+      });
+    }
+
     if (effectiveLine.includes('\\includegraphics') && !validPreamblePackages.has('graphicx')) {
       diagnostics.push({
         id: `missing-graphicx-${lineNum}`,

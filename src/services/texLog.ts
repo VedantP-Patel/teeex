@@ -394,6 +394,20 @@ function classifyError(
     };
   }
 
+  if (/Misplaced alignment tab character &/i.test(message)) {
+    return {
+      code: 'syntax',
+      hint: "The '&' character is reserved for table alignment in LaTeX. Use '\\&' to display an ampersand in text or section headings.",
+      suggestedFix: sourceLine ? {
+        title: 'Escape ampersand (\\&)',
+        description: `Replaces unescaped '&' with '\\&' on line ${sourceLine}.`,
+        replacement: context ? context.replace(/(^|[^\\])(?:\\\\)*(&)/g, (m) => m.slice(0, -1) + '\\&') : '\\&',
+        startLine: sourceLine,
+        endLine: sourceLine,
+      } : undefined,
+    };
+  }
+
   if (
     /Missing [$}{]|Extra [}$]|Misplaced|Too many \}|Paragraph ended before|Missing \\(?:begin|end)|runaway argument/i.test(
       message,
@@ -444,8 +458,8 @@ export function parseTexLog(
         if (excerpt) {
           sourceLine = Number.parseInt(excerpt[1], 10);
           context = excerpt[2];
-          // The continuation line holds the text after the error point.
-          if (j + 1 < lines.length && !lines[j + 1].startsWith('!')) {
+          // The continuation line holds the text after the error point (indented by TeX with leading spaces).
+          if (j + 1 < lines.length && /^\s+/.test(lines[j + 1]) && !lines[j + 1].startsWith('!')) {
             context += lines[j + 1].trimStart();
             rawParts.push(lines[j + 1]);
           }
