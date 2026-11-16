@@ -47,24 +47,4 @@ describe('Trailing Content After \\end{document}', () => {
     const trailingDiag = diags.find(d => d.rule === 'syntax/content-after-end-document');
     expect(trailingDiag).toBeUndefined();
   });
-
-  it('detects and provides quick-fix for corrupted IDB storage marker', () => {
-    const doc = [
-      '% Template header',
-      '% [Content persisted in IndexedDB storage]',
-      '\\documentclass{article}',
-      '\\begin{document}',
-      'Content',
-      '\\end{document}',
-    ].join('\n');
-
-    const diags = diagnoseLatex(doc);
-    const markerDiag = diags.find(d => d.rule === 'syntax/corrupted-idb-marker');
-
-    expect(markerDiag).toBeDefined();
-    expect(markerDiag!.line).toBe(2);
-    expect(markerDiag!.suggestedFix).toBeDefined();
-    expect(markerDiag!.suggestedFix!.title).toBe('Remove storage cache marker');
-    expect(markerDiag!.suggestedFix!.replacement).toBe('');
-  });
 });

@@ -259,7 +259,7 @@ export function App() {
 
     const engineDiags: Diagnostic[] = outcome.diagnostics.map(item => ({
       id: item.id,
-      line: item.line ?? 1,
+      line: item.line ?? 0,
       column: 1,
       severity: item.severity,
       message: item.hint ? `${item.message} — ${item.hint}` : item.message,

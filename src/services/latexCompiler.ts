@@ -833,7 +833,12 @@ export class TexEngineService {
         synctex: result.synctex && result.synctex.byteLength > 0 ? result.synctex : null,
         log,
         diagnostics: parsed.diagnostics.filter((d) => {
-          if (d.severity === 'error') return true;
+          if (d.severity === 'error') {
+            if (d.code === 'fatal' && parsed.diagnostics.some(other => other.severity === 'error' && other.code !== 'fatal')) {
+              return false;
+            }
+            return true;
+          }
           if (d.code === 'other') {
             const raw = d.raw || '';
             const msg = d.message || '';

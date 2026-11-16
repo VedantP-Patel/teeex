@@ -57,6 +57,21 @@ export function useUnifiedDiagnostics({
       const sig = `${c.file || activeFileName}:${c.line || 0}:${c.code || c.message}`;
       seenSignatures.add(sig);
 
+      // If compiler diagnostic has no suggestedFix, check if parser found one on the same line
+      let suggestedFix = c.suggestedFix;
+      if (!suggestedFix && c.line) {
+        const matchingParser = parserDiagnostics.find(p => p.line === c.line && p.suggestedFix);
+        if (matchingParser?.suggestedFix) {
+          suggestedFix = {
+            title: matchingParser.suggestedFix.title,
+            description: matchingParser.suggestedFix.description || '',
+            replacement: matchingParser.suggestedFix.replacement,
+            startLine: matchingParser.suggestedFix.startLine ?? matchingParser.line,
+            endLine: matchingParser.suggestedFix.endLine ?? matchingParser.line,
+          };
+        }
+      }
+
       list.push({
         id: c.id,
         source: 'compiler',
@@ -68,7 +83,7 @@ export function useUnifiedDiagnostics({
         endLine: c.endLine,
         context: c.context,
         hint: c.hint,
-        suggestedFix: c.suggestedFix,
+        suggestedFix,
       });
     }
 
@@ -139,6 +154,9 @@ export function useUnifiedDiagnostics({
       const startIdx = Math.max(0, fix.startLine - 1);
       const endIdx = Math.min(lines.length - 1, fix.endLine - 1);
 
+      const captionofMatch = fix.replacement.match(/\\captionof\{([a-zA-Z*]+)\}/);
+      const isEscapingAmpersand = /\\&/.test(fix.replacement) && /(^|[^\\])(?:\\\\)*(&)/.test(lines[startIdx] || '');
+
       // If replacement starts with a preamble package insert (e.g. \usepackage{...})
       if (fix.startLine === 1 && fix.endLine === 1 && fix.replacement.startsWith('\\usepackage')) {
         // Find documentclass line
@@ -148,12 +166,12 @@ export function useUnifiedDiagnostics({
         } else {
           lines.unshift(fix.replacement);
         }
-      } else if (fix.title.toLowerCase().includes('ampersand') && lines[startIdx] !== undefined) {
+      } else if (isEscapingAmpersand && lines[startIdx] !== undefined) {
         lines[startIdx] = lines[startIdx].replace(/(^|[^\\])(?:\\\\)*(&)/g, (match) => match.slice(0, -1) + '\\&');
-      } else if (fix.title.toLowerCase().includes('captionof') && lines[startIdx] !== undefined) {
-        const targetType = /table/i.test(fix.title) || /\\captionof\{table\}/i.test(fix.replacement) ? 'table' : 'figure';
+      } else if (captionofMatch && lines[startIdx] !== undefined) {
+        const floatType = captionofMatch[1];
         lines[startIdx] = lines[startIdx].replace(/(?:^|[^\w\\])\\caption(?![a-zA-Z*])\b/, (match) => {
-          return match.replace('\\caption', `\\captionof{${targetType}}`);
+          return match.replace('\\caption', `\\captionof{${floatType}}`);
         });
       } else if (fix.replacement === '') {
         lines.splice(startIdx, endIdx - startIdx + 1);

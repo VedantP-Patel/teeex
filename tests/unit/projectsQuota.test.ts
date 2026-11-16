@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { saveProjects, pushProjectToCloud } from '../../src/services/projectsService';
+import { saveProjects, pushProjectToCloud, sanitizeCorruptedFileContent } from '../../src/services/projectsService';
 import type { Project } from '../../src/types/latex';
 
 // Mock offline storage
@@ -159,5 +159,23 @@ describe('Projects Storage & Quota Resilience', () => {
 
     const res = await pushProjectToCloud(starterProject);
     expect(res.success).toBe(true);
+  });
+
+  it('heals duplicated header prefix and strips leftover IDB cache marker on load', () => {
+    const rawCorrupted = [
+      '% Line 1: Header comment',
+      '% Line 2: Author info',
+      '% [Content persisted in IndexedDB storage] % ------------',
+      '% Line 1: Header comment',
+      '% Line 2: Author info',
+      '\\documentclass{article}',
+      '\\begin{document}',
+      'Body content',
+      '\\end{document}',
+    ].join('\n');
+
+    const sanitized = sanitizeCorruptedFileContent(rawCorrupted);
+    expect(sanitized).not.toContain('% [Content persisted in IndexedDB storage]');
+    expect(sanitized.startsWith('% Line 1: Header comment\n% Line 2: Author info\n\\documentclass{article}')).toBe(true);
   });
 });

@@ -22,6 +22,7 @@ describe('Quick-Fix Persistence & Anti-Revert Suite', () => {
             severity: 'error',
             code: 'syntax',
             message: 'Package caption Error: \\caption outside float.',
+            raw: '! Package caption Error: \\caption outside float.',
             line: 5,
             suggestedFix: {
               title: 'Change to \\captionof{table}{...}',
@@ -89,6 +90,7 @@ describe('Quick-Fix Persistence & Anti-Revert Suite', () => {
             severity: 'error',
             code: 'syntax',
             message: 'Package caption Error: \\caption outside float.',
+            raw: '! Package caption Error: \\caption outside float.',
             line: 4,
             suggestedFix: {
               title: 'Change to \\captionof{figure}{...}',
@@ -144,6 +146,9 @@ describe('Quick-Fix Persistence & Anti-Revert Suite', () => {
     const activeProject: Project = {
       id: 'proj-revert-test',
       title: 'Drone Report',
+      ownerId: 'usr-test',
+      ownerEmail: 'test@teeex.local',
+      role: 'owner',
       createdAt: new Date().toISOString(),
       updatedAt: new Date(Date.now() - 1000).toISOString(),
       files: [
@@ -156,6 +161,9 @@ describe('Quick-Fix Persistence & Anti-Revert Suite', () => {
         },
       ],
       folders: ['figures'],
+      tags: [],
+      members: [],
+      isArchived: false,
     };
 
     const draftFiles: ProjectFile[] = [
@@ -176,7 +184,7 @@ describe('Quick-Fix Persistence & Anti-Revert Suite', () => {
       hookResult = useAutosaveRecovery({
         activeProject,
         files: activeProject.files,
-        folders: activeProject.folders,
+        folders: activeProject.folders || [],
         projectTitle: activeProject.title,
       });
       return null;
@@ -208,10 +216,16 @@ describe('Quick-Fix Persistence & Anti-Revert Suite', () => {
     const initialProject: Project = {
       id: projectId,
       title: 'Persist Test',
+      ownerId: 'usr-test',
+      ownerEmail: 'test@teeex.local',
+      role: 'owner',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       files: initialFiles,
       folders: [],
+      tags: [],
+      members: [],
+      isArchived: false,
     };
 
     saveProjects([initialProject]);
@@ -245,15 +259,15 @@ describe('Quick-Fix Persistence & Anti-Revert Suite', () => {
       hookResult = useUnifiedDiagnostics({
         parserDiagnostics: [
           {
-            id: 'corrupted-idb-marker-2',
+            id: 'remove-comment-line-2',
             line: 2,
             column: 1,
             severity: 'warning',
-            message: "Found leftover storage cache marker '% [Content persisted in IndexedDB storage]'.",
-            rule: 'syntax/corrupted-idb-marker',
+            message: 'Unwanted comment line to remove.',
+            rule: 'syntax/cleanup',
             suggestedFix: {
-              title: 'Remove storage cache marker',
-              description: "Removes leftover '% [Content persisted in IndexedDB storage]' line.",
+              title: 'Remove comment line',
+              description: 'Removes line 2.',
               replacement: '',
               startLine: 2,
               endLine: 2,
@@ -277,7 +291,7 @@ describe('Quick-Fix Persistence & Anti-Revert Suite', () => {
         name: 'main.tex',
         content: [
           '% Line 1 Header',
-          '% [Content persisted in IndexedDB storage]',
+          '% Line to delete',
           '\\documentclass{article}',
           '\\begin{document}',
           'Hello',
@@ -295,11 +309,11 @@ describe('Quick-Fix Persistence & Anti-Revert Suite', () => {
 
     let ok = false;
     act(() => {
-      ok = hookResult!.applyQuickFix('corrupted-idb-marker-2', files, updateFileContent);
+      ok = hookResult!.applyQuickFix('remove-comment-line-2', files, updateFileContent);
     });
 
     expect(ok).toBe(true);
-    expect(updatedContent).not.toContain('% [Content persisted in IndexedDB storage]');
+    expect(updatedContent).not.toContain('% Line to delete');
     expect(updatedContent.split('\n')).toHaveLength(5);
     expect(updatedContent.split('\n')[1]).toBe('\\documentclass{article}');
   });

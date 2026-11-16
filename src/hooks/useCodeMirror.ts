@@ -246,21 +246,23 @@ export function useCodeMirror({
     if (!view) return;
 
     const docLines = view.state.doc.lines;
-    const cmDiagnostics: CMDiagnostic[] = diagnostics.map((d) => {
-      const lineNum = Math.max(1, Math.min(d.line, docLines));
-      const lineInfo = view.state.doc.line(lineNum);
-      const col = Math.max(0, Math.min((d.column || 1) - 1, lineInfo.length));
-      const from = lineInfo.from + col;
-      const to = Math.min(from + 1, lineInfo.to);
+    const cmDiagnostics: CMDiagnostic[] = diagnostics
+      .filter((d) => typeof d.line === 'number' && d.line >= 1)
+      .map((d) => {
+        const lineNum = Math.min(d.line, docLines);
+        const lineInfo = view.state.doc.line(lineNum);
+        const col = Math.max(0, Math.min((d.column || 1) - 1, lineInfo.length));
+        const from = lineInfo.from + col;
+        const to = Math.min(from + 1, lineInfo.to);
 
-      return {
-        from,
-        to: to > from ? to : lineInfo.to,
-        severity: d.severity === 'error' ? 'error' : d.severity === 'warning' ? 'warning' : 'info',
-        message: d.message,
-        source: d.rule || 'LaTeX',
-      };
-    });
+        return {
+          from,
+          to: to > from ? to : lineInfo.to,
+          severity: d.severity === 'error' ? 'error' : d.severity === 'warning' ? 'warning' : 'info',
+          message: d.message,
+          source: d.rule || 'LaTeX',
+        };
+      });
 
     view.dispatch(setDiagnostics(view.state, cmDiagnostics));
   }, [diagnostics]);

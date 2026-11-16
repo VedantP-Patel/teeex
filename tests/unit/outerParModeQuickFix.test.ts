@@ -23,6 +23,8 @@ describe('Outer Par Mode (Nested Float) Quick-Fix & Diagnostics', () => {
     expect(diag!.message).toContain('Not in outer par mode');
     expect(diag!.hint).toContain('\\begin{table*}');
     expect(diag!.hint).toContain('cannot be nested inside another float');
+    expect(diag!.suggestedFix).toBeDefined();
+    expect(diag!.suggestedFix!.title).toContain('Convert \\begin{table*} to non-floating environment');
   });
 
   it('AST parser flags nested float when float is inside strip environment', () => {

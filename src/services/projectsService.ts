@@ -150,6 +150,34 @@ const INITIAL_PROJECTS: Project[] = [
   },
 ];
 
+/**
+ * Automatically detects and cleans legacy storage quota truncation artifacts
+ * where a file was sliced and prepended with a cache marker like:
+ * `% [Content persisted in IndexedDB storage]`
+ */
+export function sanitizeCorruptedFileContent(content: string): string {
+  if (typeof content !== 'string' || !content) return '';
+  const marker = '% [Content persisted in IndexedDB storage]';
+  if (!content.includes(marker)) return content;
+
+  // Pattern 1: Truncated prefix + marker line + full content
+  const markerIdx = content.indexOf(marker);
+  const lineEndIdx = content.indexOf('\n', markerIdx);
+  const endOfMarker = lineEndIdx === -1 ? content.length : lineEndIdx + 1;
+
+  const prefix = content.slice(0, markerIdx).trim();
+  const rest = content.slice(endOfMarker);
+
+  if (prefix && rest.trimStart().startsWith(prefix.slice(0, Math.min(prefix.length, 50)))) {
+    // The prefix was a duplicated chunk prepended before the marker line!
+    // Strip the duplicate prefix and the marker line:
+    return sanitizeCorruptedFileContent(rest);
+  }
+
+  // Pattern 2: Leftover marker line without duplicate prefix
+  return content.replace(/^[ \t]*%.*?\[Content persisted in IndexedDB storage\].*?\r?\n?/gm, '');
+}
+
 function normalizeProject(p: any): Project {
   return {
     id: p?.id || newProjectId(),
@@ -159,7 +187,12 @@ function normalizeProject(p: any): Project {
     role: p?.role || 'owner',
     createdAt: p?.createdAt || new Date().toISOString(),
     updatedAt: p?.updatedAt || 'Just now',
-    files: Array.isArray(p?.files) && p.files.length > 0 ? p.files : STARTER_TEMPLATES[0].files,
+    files: Array.isArray(p?.files) && p.files.length > 0
+      ? p.files.map((f: any) => ({
+          ...f,
+          content: sanitizeCorruptedFileContent(typeof f?.content === 'string' ? f.content : ''),
+        }))
+      : STARTER_TEMPLATES[0].files,
     folders: Array.isArray(p?.folders) ? p.folders : ['sections', 'figures'],
     tags: Array.isArray(p?.tags) ? p.tags : ['#research'],
     members: Array.isArray(p?.members) ? p.members : [],
@@ -384,7 +417,17 @@ export function saveProjects(projects: Project[]): void {
 }
 
 export async function hydrateProjectFromOffline(projectId: string): Promise<Project | null> {
-  return await loadProjectOffline(projectId);
+  const p = await loadProjectOffline(projectId);
+  if (!p) return null;
+  return {
+    ...p,
+    files: Array.isArray(p.files)
+      ? p.files.map(f => ({
+          ...f,
+          content: sanitizeCorruptedFileContent(typeof f?.content === 'string' ? f.content : ''),
+        }))
+      : [],
+  };
 }
 
 export function getActiveProjectId(projects: Project[]): string {

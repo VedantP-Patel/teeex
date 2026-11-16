@@ -271,6 +271,9 @@ export function useFileOperations({
     const startIdx = Math.max(0, fix.startLine - 1);
     const deleteCount = Math.max(1, (fix.endLine ?? fix.startLine) - fix.startLine + 1);
 
+    const captionofMatch = fix.replacement.match(/\\captionof\{([a-zA-Z*]+)\}/);
+    const isEscapingAmpersand = /\\&/.test(fix.replacement) && /(^|[^\\])(?:\\\\)*(&)/.test(lines[startIdx] || '');
+
     if (fix.startLine === 1 && (fix.endLine === 1 || !fix.endLine) && fix.replacement.startsWith('\\usepackage')) {
       const docClassIdx = lines.findIndex(l => /\\documentclass/.test(l));
       if (docClassIdx >= 0) {
@@ -278,12 +281,12 @@ export function useFileOperations({
       } else {
         lines.unshift(fix.replacement);
       }
-    } else if (fix.title.toLowerCase().includes('ampersand') && lines[startIdx] !== undefined) {
+    } else if (isEscapingAmpersand && lines[startIdx] !== undefined) {
       lines[startIdx] = lines[startIdx].replace(/(^|[^\\])(?:\\\\)*(&)/g, (match) => match.slice(0, -1) + '\\&');
-    } else if (fix.title.toLowerCase().includes('captionof') && lines[startIdx] !== undefined) {
-      const targetType = /table/i.test(fix.title) || /\\captionof\{table\}/i.test(fix.replacement) ? 'table' : 'figure';
+    } else if (captionofMatch && lines[startIdx] !== undefined) {
+      const floatType = captionofMatch[1];
       lines[startIdx] = lines[startIdx].replace(/(?:^|[^\w\\])\\caption(?![a-zA-Z*])\b/, (match) => {
-        return match.replace('\\caption', `\\captionof{${targetType}}`);
+        return match.replace('\\caption', `\\captionof{${floatType}}`);
       });
     } else if (fix.replacement === '') {
       lines.splice(startIdx, deleteCount);

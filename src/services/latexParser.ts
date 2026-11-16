@@ -528,24 +528,6 @@ export function diagnoseLatex(code: string): Diagnostic[] {
       continue;
     }
 
-    if (rawLine.includes('% [Content persisted in IndexedDB storage]')) {
-      diagnostics.push({
-        id: `corrupted-idb-marker-${lineNum}`,
-        line: lineNum,
-        column: rawLine.indexOf('% [Content persisted in IndexedDB storage]') + 1,
-        severity: 'warning',
-        message: `Found leftover storage cache marker '% [Content persisted in IndexedDB storage]'. Remove it to clean up the preamble.`,
-        rule: 'syntax/corrupted-idb-marker',
-        suggestedFix: {
-          title: `Remove storage cache marker`,
-          description: `Removes leftover '% [Content persisted in IndexedDB storage]' line.`,
-          replacement: '',
-          startLine: lineNum,
-          endLine: lineNum,
-        },
-      });
-    }
-
     if (effectiveLine.includes('tablular')) {
       diagnostics.push({
         id: `typo-tablular-${lineNum}`,

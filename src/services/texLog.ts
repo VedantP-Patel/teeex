@@ -409,7 +409,7 @@ function classifyError(
   }
 
   if (/\\caption outside float/i.test(message)) {
-    const isTable = /table|tabular|list of (?:drone )?components|tab:/i.test(context || '');
+    const isTable = /\b(?:table|tabular|list\s+of|summary\s+of|comparison\s+of|breakdown\s+of|parameters?|tab[:.-])/i.test(context || '');
     const floatType = isTable ? 'table' : 'figure';
     return {
       code: 'syntax',
@@ -427,9 +427,20 @@ function classifyError(
   if (/Not in outer par mode/i.test(message)) {
     const floatMatch = context.match(/\\begin\{(figure\*?|table\*?)\}/);
     const floatName = floatMatch ? `\\begin{${floatMatch[1]}}` : 'Floating environments';
+    const envType = floatMatch ? floatMatch[1] : 'table*';
+    const isTable = envType.startsWith('table');
+    const nonFloatType = isTable ? 'table' : 'figure';
+
     return {
       code: 'syntax',
-      hint: `${floatName} cannot be nested inside another float, minipage, center, strip, list, or multicols. Check lines directly preceding line ${sourceLine || ''} for an unclosed \\begin{figure}, \\begin{figure*}, \\begin{strip}, or \\begin{center}. If using cuted, replace \\begin{${floatMatch ? floatMatch[1] : 'table*'}} with \\begin{strip} and \\captionof.`,
+      hint: `${floatName} cannot be nested inside another float, minipage, center, strip, list, or multicols. Check lines directly preceding line ${sourceLine || ''} for an unclosed \\begin{figure}, \\begin{figure*}, \\begin{strip}, or \\begin{center}. If inside multicols or cuted strip, replace \\begin{${envType}} with \\begin{center} and \\captionof{${nonFloatType}}{...}.`,
+      suggestedFix: sourceLine ? {
+        title: `Convert \\begin{${envType}} to non-floating environment`,
+        description: `Replaces \\begin{${envType}} with \\begin{center} to allow rendering inside two-column strips or minipages.`,
+        replacement: context ? context.replace(/\\begin\{(?:figure\*?|table\*?)\}(?:\[[^\]]*\])?/, '\\begin{center}') : '\\begin{center}',
+        startLine: sourceLine,
+        endLine: sourceLine,
+      } : undefined,
     };
   }
 

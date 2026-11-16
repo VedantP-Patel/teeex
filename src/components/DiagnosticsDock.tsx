@@ -156,20 +156,33 @@ export const DiagnosticsDock: React.FC<Props> = ({
 
                       <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                          <button
-                            onClick={() => onJumpToLine(d.line)}
-                            style={{
-                              fontFamily: 'var(--font-mono)',
-                              fontSize: 11,
-                              fontWeight: 700,
-                              color: d.severity === 'error' ? '#f43f5e' : d.severity === 'info' ? '#38bdf8' : '#f59e0b',
-                              textDecoration: 'underline',
-                              cursor: 'pointer',
-                            }}
-                            title={`Jump to line ${d.line}`}
-                          >
-                            Line {d.line}:{d.column}
-                          </button>
+                          {d.line > 0 ? (
+                            <button
+                              onClick={() => onJumpToLine(d.line)}
+                              style={{
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: d.severity === 'error' ? '#f43f5e' : d.severity === 'info' ? '#38bdf8' : '#f59e0b',
+                                textDecoration: 'underline',
+                                cursor: 'pointer',
+                              }}
+                              title={`Jump to line ${d.line}`}
+                            >
+                              Line {d.line}:{d.column}
+                            </button>
+                          ) : (
+                            <span
+                              style={{
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: d.severity === 'error' ? '#f43f5e' : d.severity === 'info' ? '#38bdf8' : '#f59e0b',
+                              }}
+                            >
+                              General
+                            </span>
+                          )}
                           <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                             [{d.rule}]
                           </span>
